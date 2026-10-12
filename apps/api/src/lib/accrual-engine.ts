@@ -11,6 +11,7 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { fetchAllRows } from './supabase-paginate.js'
+import { round2 } from './payroll-engine.js'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -417,6 +418,77 @@ export async function processCarryForward(
 
 // ── Process encashment approval ───────────────────────────────────────────────
 
+function currentFinancialYear(d: Date): string {
+  const y = d.getFullYear()
+  const fyStart = d.getMonth() >= 3 ? y : y - 1 // getMonth() is 0-based — April (3) starts the Indian FY
+  return `${fyStart}-${String((fyStart + 1) % 100).padStart(2, '0')}`
+}
+
+/**
+ * G12: the payout and withholding figures the audit found entirely missing
+ * ("mark-paid only changes status, no proven disbursement path"). Computed
+ * once at approval time and stored on the request row.
+ *
+ * rate_per_day mirrors lib/fnf-settlement-engine.ts's own leave-encashment
+ * formula (last payroll gross / 26) so an employee sees the same per-day
+ * rate whether they encash standalone or at separation.
+ *
+ * tds_amount is a FLAT withholding at the employee's current marginal tax
+ * slab (looked up from their latest tds_monthly_projections row this FY +
+ * it_tax_slabs) — a real, working computation, but deliberately NOT a
+ * Section 10(10AA) exemption computation (government vs non-government
+ * treatment, the ₹25L lifetime cap). That needs tax/compliance sign-off
+ * before go-live; this conservatively withholds 0 rather than guessing
+ * when no projection exists yet this FY (e.g. payroll hasn't run for this
+ * employee this year), instead of assuming a rate.
+ */
+async function computeEncashmentPayout(
+  supabase:   SupabaseClient,
+  tenantId:   string,
+  employeeId: string,
+  days:       number,
+): Promise<{ ratePerDay: number; grossAmount: number; tdsAmount: number; netAmount: number }> {
+  const { data: lastSlip } = await supabase
+    .from('payroll_slips')
+    .select('gross_pay, month')
+    .eq('tenant_id', tenantId)
+    .eq('employee_id', employeeId)
+    .order('month', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  const ratePerDay  = round2(Number((lastSlip as any)?.gross_pay ?? 0) / 26)
+  const grossAmount = round2(days * ratePerDay)
+
+  const fy = currentFinancialYear(new Date())
+  const { data: projection } = await supabase
+    .from('tds_monthly_projections')
+    .select('taxable_income_projected, regime')
+    .eq('tenant_id', tenantId)
+    .eq('employee_id', employeeId)
+    .eq('financial_year', fy)
+    .order('projection_month', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  let tdsAmount = 0
+  if (projection) {
+    const taxableIncome = Number((projection as any).taxable_income_projected ?? 0)
+    const { data: slab } = await supabase
+      .from('it_tax_slabs')
+      .select('tax_rate')
+      .eq('financial_year', fy)
+      .eq('regime', (projection as any).regime)
+      .lte('income_from', taxableIncome)
+      .or(`income_to.is.null,income_to.gt.${taxableIncome}`)
+      .order('slab_order', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    if (slab) tdsAmount = round2(grossAmount * Number((slab as any).tax_rate))
+  }
+
+  return { ratePerDay, grossAmount, tdsAmount, netAmount: round2(grossAmount - tdsAmount) }
+}
+
 export async function processEncashment(
   supabase:       SupabaseClient,
   tenantId:       string,
@@ -464,6 +536,11 @@ export async function processEncashment(
   if (deductErr) return { ok: false, message: `Failed to deduct balance: ${deductErr.message}` }
   if (!deducted) return { ok: false, message: `Insufficient balance for ${req.days} day(s) encashment` }
 
+  // G12: compute what this approval is actually worth, and what will be
+  // withheld, so approval carries a real payout figure HR can review —
+  // the audit's "no proven disbursement path" gap starts here.
+  const payout = await computeEncashmentPayout(supabase, tenantId, req.employee_id, req.days)
+
   // Status update — conditioned on still 'pending' and checked for affected
   // rows. Previously this had no status guard, no tenant_id filter, and its
   // error was never checked, so it could silently no-op while the balance
@@ -471,9 +548,13 @@ export async function processEncashment(
   const { data: updatedRows, error: statusErr } = await supabase
     .from('leave_encashment_requests')
     .update({
-      status:      'approved',
-      approved_by: approverId,
-      approved_at: new Date().toISOString(),
+      status:       'approved',
+      approved_by:  approverId,
+      approved_at:  new Date().toISOString(),
+      rate_per_day: payout.ratePerDay,
+      gross_amount: payout.grossAmount,
+      tds_amount:   payout.tdsAmount,
+      net_amount:   payout.netAmount,
     })
     .eq('id', encashmentId)
     .eq('tenant_id', tenantId)
@@ -538,5 +619,5 @@ export async function processEncashment(
       source_request_id: encashmentId,
     }, { onConflict: 'tenant_id,accrual_type,source_request_id,year', ignoreDuplicates: true })
 
-  return { ok: true, message: `Encashment approved — ${req.days} days deducted` }
+  return { ok: true, message: `Encashment approved — ${req.days} days deducted, net payout ₹${payout.netAmount}` }
 }

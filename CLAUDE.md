@@ -257,8 +257,25 @@ exists, it should default to "only what actually needs a human," not
 Admin approval-queue scope gap in `citykart-vs-cognixhr-comparison.md`
 §2.7/§3.1.
 
-Deferred, needs an explicit product scope decision before building (same
-kind of call as G12/standalone-encashment): PMS (performance management) and
-Travel Desk have zero implementation — not started pending a decision on
-whether they're in scope for initial launch.
+Deferred, needs an explicit product scope decision before building: PMS
+(performance management) and Travel Desk have zero implementation — not
+started pending a decision on whether they're in scope for initial launch.
+
+**G12 (standalone leave encashment) — decided and built (2026-10-12).**
+Was in the same "deferred pending decision" bucket as PMS/Travel Desk above;
+the user authorized completion. Employee-initiated request UI
+(`apps/web/src/pages/ess/EssLeaveBalance.tsx`'s Encashment tab), a real
+payout + TDS computation at approval time (`computeEncashmentPayout` in
+`apps/api/src/lib/accrual-engine.ts` — a flat marginal-slab-rate
+withholding, explicitly NOT a Section 10(10AA) exemption computation; that
+needs tax/compliance sign-off before go-live), an atomic
+`mark_leave_encashment_paid_atomic` that posts the payout into a named
+draft payroll run's payslip and marks paid in one transaction, and an
+atomic `reverse_leave_encashment_atomic` (migration 446). Duplicate-payment
+prevention: payroll via that function's own status precondition, F&F via
+`lib/fnf-settlement-engine.ts`'s leave-encashment calculation reading the
+same `employee_leave_balance` table standalone encashment already
+decrements — no second write path exists to create a double-pay gap. See
+`docs/production-readiness/STATUS.md`'s 2026-10-12 addendum for the full
+writeup and what's still open (real-Supabase-RLS/E2E staging evidence).
 

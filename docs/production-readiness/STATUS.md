@@ -664,3 +664,65 @@ implementation and its real-stack proof.
     G10 (infrastructure evidence) and G12 (product-scope decision) remain
     explicitly blocked, per the standing instruction that neither should
     stop the independent work above.
+
+---
+
+## Addendum (2026-10-12) — staging target superseded; G12 engineering closed
+
+**This section updates the staging-qualification target and G12's status.
+It does not retroactively edit anything above** — the "Source of truth"
+section and G01–G13 narrative above describe `fix/g13-numeric-coercion-sweep`
+(PR #29) as it stood when written, and stay as the historical record of that
+branch's own engagement.
+
+**Staging target superseded.** This engagement continued on a new
+integration branch, `integration/g13-plus-market-priorities` (PR #30, draft,
+unmerged), which merges PR #29's G01–G13 remediation with 9 independent
+market-readiness commits (F&F asset/loan/advance recovery, raise-leave-on-
+behalf, Probation Confirmation workflow, public recruitment intake,
+Attendance Anomalies simplification) plus two further rounds of fixes
+raised against the F&F recovery work itself (freeze-on-write enforcement,
+atomic + source-validated mark-paid, migrations 445) and this G12 build
+(migration 446). **Any future staging-qualification request should target
+PR #30's current head SHA and the full migration history through 446 — not
+PR #29's head alone**, which this branch supersedes as the combined
+candidate. `main` remains untouched throughout; this branch is not merged.
+
+**G12 — engineering closed, product-scope question resolved, staging/UAT
+still open.** The original finding ("no employee request UI; mark-paid only
+changes status, no proven disbursement path") is addressed:
+
+- Employee request UI: `apps/web/src/pages/ess/EssLeaveBalance.tsx`'s new
+  Encashment tab (request dialog + status/payout list).
+- Approval balance accounting: unchanged from the already-sound
+  `processEncashment` (migration 269's `checked_deduct_leave_balance`) — now
+  also computes and stores the actual payout (`rate_per_day`/`gross_amount`)
+  and a real TDS withholding (`tds_amount`/`net_amount`) at approval time.
+- Payroll/tax integration: `mark_leave_encashment_paid_atomic` (migration
+  446) posts the computed payout into a named, still-draft payroll run's
+  payslip for that employee (a real earning + TDS line, then protected by
+  migration 438's finalized-value lockdown once that run is finalized) and
+  flips the request to 'paid' in one transaction.
+- Reversal: `reverse_leave_encashment_atomic` (migration 446) credits the
+  leave balance back and, if already posted into a still-draft payslip,
+  removes that posting too — refusing once the payslip has been finalized
+  (roll the run back to draft first, same break-glass model as 438).
+- Duplicate-payment prevention: payroll — the status='approved' precondition
+  on the pay-atomic function's own UPDATE makes a second mark-paid attempt
+  409 ALREADY_DECIDED, and the payslip posting is tied to exactly the one
+  run it was paid through. F&F — `lib/fnf-settlement-engine.ts`'s own leave-
+  encashment calculation reads `employee_leave_balance` directly, the same
+  table standalone encashment's atomic deduction already decrements, so a
+  day already cashed out standalone is structurally absent from a later F&F
+  calculation; no second write path was introduced to create a gap here.
+
+**Explicitly NOT claimed:** the TDS withholding is a flat marginal-slab-rate
+computation (`lib/accrual-engine.ts`'s `computeEncashmentPayout`), not a
+Section 10(10AA) exemption computation (government vs. non-government
+treatment, the ₹25L lifetime cap) — that needs tax/compliance sign-off
+before go-live. Verification is real-Postgres-transactional and route-level
+(`scripts/db/verify-g12-encashment-atomic.mjs`; `apps/api/src/routes/
+attendance/__tests__/leave-encashment-g12.test.ts`), not real-Supabase-RLS
+or browser E2E — those remain open per item 11 above, now unblocked for G12
+specifically (the product-scope question is resolved; what's left is the
+same staging/UAT gate every other item in this document is waiting on).

@@ -57,3 +57,19 @@ PGDATABASE=fnf_verify psql -f scripts/db/bootstrap.sql
 for f in supabase/migrations/*.sql; do PGDATABASE=fnf_verify psql -v ON_ERROR_STOP=1 -f "$f"; done
 PGDATABASE=fnf_verify node scripts/db/verify-fnf-mark-paid-atomic.mjs
 ```
+
+## `verify-g12-encashment-atomic.mjs`
+
+Same approach, for `mark_leave_encashment_paid_atomic` and
+`reverse_leave_encashment_atomic` (migration 446, G12 standalone leave
+encashment): posting a payout into a draft payslip's gross/TDS/component
+breakdown and the owning run's aggregate totals, refusing a finalized run,
+retry-safety, and reversal (including refusing to reverse once the linked
+payslip has been finalized).
+
+```bash
+createdb g12_verify
+PGDATABASE=g12_verify psql -f scripts/db/bootstrap.sql
+for f in supabase/migrations/*.sql; do PGDATABASE=g12_verify psql -v ON_ERROR_STOP=1 -f "$f"; done
+PGDATABASE=g12_verify node scripts/db/verify-g12-encashment-atomic.mjs
+```

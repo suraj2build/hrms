@@ -29,6 +29,8 @@ import { SectionCard }    from '@/components/layout/SectionCard'
 import { Badge }          from '@/components/ui/badge'
 import { Button }         from '@/components/ui/button'
 import { Input }          from '@/components/ui/input'
+import { Label }          from '@/components/ui/label'
+import { Textarea }       from '@/components/ui/textarea'
 import { DateInput }      from '@/components/ui/date-input'
 import { ConfirmDialog }  from '@/components/ui/ConfirmDialog'
 import {
@@ -37,6 +39,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
+  DialogFooter,
 } from '@/components/ui/dialog'
 import {
   Tabs,
@@ -81,17 +84,29 @@ interface AccrualRun {
 }
 
 interface EncashmentRequest {
-  id:            string
-  employee_id:   string
-  leave_type_id: string
-  year:          number
-  days:          number
-  status:        'pending' | 'approved' | 'rejected' | 'paid'
-  notes:         string | null
-  created_at:    string
-  employee_name: string | null
-  employee_code: string | null
-  leave_types:   { id: string; name: string } | null
+  id:              string
+  employee_id:     string
+  leave_type_id:   string
+  year:            number
+  days:            number
+  status:          'pending' | 'approved' | 'rejected' | 'paid' | 'reversed'
+  notes:           string | null
+  created_at:      string
+  employee_name:   string | null
+  employee_code:   string | null
+  leave_types:     { id: string; name: string } | null
+  rate_per_day:    number | null
+  gross_amount:    number | null
+  tds_amount:      number
+  net_amount:      number | null
+  payroll_run_id:  string | null
+  reversal_reason: string | null
+}
+
+interface PayrollRunOption {
+  id:     string
+  month:  string
+  status: string
 }
 
 interface RuleFormState {
@@ -137,7 +152,7 @@ function fmtDatetime(iso: string | null) {
 type BadgeVariant = 'default' | 'secondary' | 'warning' | 'destructive' | 'outline' | 'success'
 
 const RUN_VARIANT: Record<string, BadgeVariant> = { success: 'success', partial: 'warning', failed: 'destructive' }
-const ENC_VARIANT: Record<string, BadgeVariant> = { pending: 'warning', approved: 'success', rejected: 'destructive', paid: 'outline' }
+const ENC_VARIANT: Record<string, BadgeVariant> = { pending: 'warning', approved: 'success', rejected: 'destructive', paid: 'outline', reversed: 'secondary' }
 const FREQ_LABELS: Record<string, string> = { monthly: 'Monthly', quarterly: 'Quarterly', annually: 'Annual', on_joining: 'On Joining' }
 
 // ── Main Component ─────────────────────────────────────────────────────────────
@@ -181,13 +196,25 @@ export function LeaveAccrualAdmin() {
   })
   const runs = runsResp?.data ?? []
 
+  const [encStatusTab, setEncStatusTab] = useState<'pending' | 'approved' | 'paid' | 'reversed'>('pending')
   const { data: encResp, isLoading: encLoading, refetch: refetchEnc } = useQuery<{ data: EncashmentRequest[] }>({
-    queryKey: ['encashment-pending'],
-    queryFn:  () => api.get('/leave/encashment/pending'),
+    queryKey: ['encashment', encStatusTab],
+    queryFn:  () => encStatusTab === 'pending'
+      ? api.get('/leave/encashment/pending')
+      : api.get(`/leave/encashment/all?status=${encStatusTab}`),
     enabled:  isAdmin,
     staleTime: 30_000,
   })
   const encashments = encResp?.data ?? []
+
+  // Draft payroll runs — the only kind mark-paid can post an encashment into.
+  const { data: payrollRunsResp } = useQuery<{ data: PayrollRunOption[] }>({
+    queryKey: ['payroll-runs-for-encashment'],
+    queryFn:  () => api.get('/payroll/runs?limit=50'),
+    enabled:  isAdmin,
+    staleTime: 30_000,
+  })
+  const draftPayrollRuns = (payrollRunsResp?.data ?? []).filter(r => r.status === 'draft')
 
   // ── Mutations ──────────────────────────────────────────────────────────────
 
@@ -222,10 +249,30 @@ export function LeaveAccrualAdmin() {
     onError: (e) => toast.error('Rejection failed', { description: (e as Error).message }),
   })
 
+  const [markPaidTarget, setMarkPaidTarget] = useState<EncashmentRequest | null>(null)
+  const [markPaidRunId, setMarkPaidRunId]   = useState('')
   const markPaidMutation = useMutation({
-    mutationFn: (id: string) => api.post(`/leave/encashment/${id}/mark-paid`, {}),
-    onSuccess: () => { refetchEnc(); toast.success('Marked as paid') },
+    mutationFn: () => api.post(`/leave/encashment/${markPaidTarget!.id}/mark-paid`, { payroll_run_id: markPaidRunId }),
+    onSuccess: () => {
+      refetchEnc()
+      qc.invalidateQueries({ queryKey: ['payroll-runs-for-encashment'] })
+      toast.success('Posted to payroll run and marked as paid')
+      setMarkPaidTarget(null); setMarkPaidRunId('')
+    },
     onError: (e) => toast.error('Failed', { description: (e as Error).message }),
+  })
+
+  const [reverseTarget, setReverseTarget] = useState<EncashmentRequest | null>(null)
+  const [reverseReason, setReverseReason] = useState('')
+  const reverseEncMutation = useMutation({
+    mutationFn: () => api.post(`/leave/encashment/${reverseTarget!.id}/reverse`, { reason: reverseReason.trim() || undefined }),
+    onSuccess: () => {
+      refetchEnc()
+      qc.invalidateQueries({ queryKey: ['leave-balance'] })
+      toast.success('Encashment reversed — balance credited back')
+      setReverseTarget(null); setReverseReason('')
+    },
+    onError: (e) => toast.error('Reversal failed', { description: (e as Error).message }),
   })
 
   // Manual accrual run (other than the scheduler) — credits the given month now.
@@ -526,7 +573,7 @@ export function LeaveAccrualAdmin() {
         {/* ── Encashment Tab ─────────────────────────────────────────────── */}
         <TabsContent value="encashment">
           <SectionCard
-            title={`Pending Encashment Requests (${encashments.length})`}
+            title={`Encashment Requests (${encashments.length})`}
             icon={<Coins className="h-4 w-4 text-muted-foreground" />}
             action={
               <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => refetchEnc()}>
@@ -534,16 +581,31 @@ export function LeaveAccrualAdmin() {
               </Button>
             }
           >
+            <div className="flex items-center gap-1 p-1 bg-muted/40 rounded-lg mb-3 w-fit">
+              {(['pending', 'approved', 'paid', 'reversed'] as const).map(s => (
+                <button
+                  key={s}
+                  onClick={() => setEncStatusTab(s)}
+                  className={cn(
+                    'px-3 py-1.5 rounded-md text-xs font-medium capitalize transition-colors',
+                    encStatusTab === s ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+
             {encashments.length === 0 && !encLoading && (
               <div className="py-8 text-center text-xs text-muted-foreground">
-                No pending encashment requests.
+                No {encStatusTab} encashment requests.
               </div>
             )}
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>
                   <tr className="border-b border-border">
-                    {['Employee', 'Leave Type', 'Year', 'Days', 'Status', 'Submitted', 'Actions'].map(h => (
+                    {['Employee', 'Leave Type', 'Year', 'Days', 'Gross / TDS / Net', 'Status', 'Submitted', 'Actions'].map(h => (
                       <th key={h} className="text-left font-semibold text-muted-foreground px-3 py-2 whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
@@ -558,10 +620,18 @@ export function LeaveAccrualAdmin() {
                       <td className="px-3 py-2">{enc.leave_types?.name ?? '—'}</td>
                       <td className="px-3 py-2 tabular-nums">{enc.year}</td>
                       <td className="px-3 py-2 tabular-nums font-semibold text-foreground">{enc.days}</td>
+                      <td className="px-3 py-2 tabular-nums whitespace-nowrap">
+                        {enc.gross_amount != null
+                          ? <>₹{enc.gross_amount} / ₹{enc.tds_amount} / <strong className="text-success">₹{enc.net_amount}</strong></>
+                          : <span className="text-muted-foreground">—</span>}
+                      </td>
                       <td className="px-3 py-2">
                         <Badge variant={ENC_VARIANT[enc.status]} className="rounded-full text-[10px] capitalize">
                           {enc.status}
                         </Badge>
+                        {enc.status === 'reversed' && enc.reversal_reason && (
+                          <p className="text-[10px] text-muted-foreground mt-0.5">{enc.reversal_reason}</p>
+                        )}
                       </td>
                       <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">{fmtDatetime(enc.created_at)}</td>
                       <td className="px-3 py-2">
@@ -586,17 +656,34 @@ export function LeaveAccrualAdmin() {
                           </div>
                         )}
                         {enc.status === 'approved' && (
+                          <div className="flex items-center gap-1">
+                            <Button
+                              size="sm" variant="outline"
+                              className="h-6 text-[10px] px-2 gap-0.5"
+                              onClick={() => { setMarkPaidTarget(enc); setMarkPaidRunId('') }}
+                            >
+                              <BadgeCheck className="h-3 w-3" /> Mark Paid
+                            </Button>
+                            <Button
+                              size="sm" variant="ghost"
+                              className="h-6 text-[10px] px-2 text-muted-foreground"
+                              onClick={() => { setReverseTarget(enc); setReverseReason('') }}
+                            >
+                              Reverse
+                            </Button>
+                          </div>
+                        )}
+                        {enc.status === 'paid' && (
                           <Button
-                            size="sm" variant="outline"
-                            className="h-6 text-[10px] px-2 gap-0.5"
-                            disabled={markPaidMutation.isPending}
-                            onClick={() => markPaidMutation.mutate(enc.id)}
+                            size="sm" variant="ghost"
+                            className="h-6 text-[10px] px-2 text-muted-foreground"
+                            onClick={() => { setReverseTarget(enc); setReverseReason('') }}
                           >
-                            <BadgeCheck className="h-3 w-3" /> Mark Paid
+                            Reverse
                           </Button>
                         )}
-                        {(enc.status === 'rejected' || enc.status === 'paid') && (
-                          <span className="text-muted-foreground capitalize">{enc.status}</span>
+                        {(enc.status === 'rejected' || enc.status === 'reversed') && (
+                          <span className="text-muted-foreground">—</span>
                         )}
                       </td>
                     </tr>
@@ -607,6 +694,80 @@ export function LeaveAccrualAdmin() {
           </SectionCard>
         </TabsContent>
       </Tabs>
+
+      {/* Mark Paid dialog — pick a draft payroll run to post this payout into */}
+      <Dialog open={!!markPaidTarget} onOpenChange={(v) => { if (!v) setMarkPaidTarget(null) }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader><DialogTitle>Mark as Paid — {markPaidTarget?.employee_name}</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground">
+              Net payout <strong className="text-success">₹{markPaidTarget?.net_amount}</strong> will be posted into
+              the selected draft payroll run's payslip for this employee, then this request is marked paid.
+            </p>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Draft payroll run</Label>
+              {draftPayrollRuns.length === 0 ? (
+                <p className="text-xs text-warning">No draft payroll runs available — create or reopen one first.</p>
+              ) : (
+                <select
+                  value={markPaidRunId}
+                  onChange={e => setMarkPaidRunId(e.target.value)}
+                  className="w-full h-9 text-xs rounded-md border border-input bg-background px-2 text-foreground outline-none focus:ring-1 ring-primary/50"
+                >
+                  <option value="">Select a run…</option>
+                  {draftPayrollRuns.map(r => (
+                    <option key={r.id} value={r.id}>{r.month} (draft)</option>
+                  ))}
+                </select>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" size="sm" onClick={() => setMarkPaidTarget(null)}>Cancel</Button>
+            <Button
+              size="sm"
+              disabled={markPaidMutation.isPending || !markPaidRunId}
+              onClick={() => markPaidMutation.mutate()}
+            >
+              {markPaidMutation.isPending && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
+              Post &amp; Mark Paid
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Reverse dialog */}
+      <Dialog open={!!reverseTarget} onOpenChange={(v) => { if (!v) setReverseTarget(null) }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader><DialogTitle>Reverse Encashment — {reverseTarget?.employee_name}</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground">
+              Credits {reverseTarget?.days} day(s) back to the employee's leave balance
+              {reverseTarget?.status === 'paid' ? ', and removes the payout from its payslip if that payroll run is still draft.' : '.'}
+              {reverseTarget?.status === 'paid' && (
+                <span className="block mt-1 text-warning">
+                  If that run has already been finalized, this will fail — roll it back to draft first.
+                </span>
+              )}
+            </p>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Reason (optional)</Label>
+              <Textarea value={reverseReason} onChange={e => setReverseReason(e.target.value)} rows={2} className="text-xs" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" size="sm" onClick={() => setReverseTarget(null)}>Cancel</Button>
+            <Button
+              size="sm" variant="destructive"
+              disabled={reverseEncMutation.isPending}
+              onClick={() => reverseEncMutation.mutate()}
+            >
+              {reverseEncMutation.isPending && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
+              Reverse
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ── Rule Create/Edit Dialog ─────────────────────────────────────── */}
       <Dialog open={ruleDialog} onOpenChange={(open: boolean) => { if (!open) { setRuleDialog(false); setEditingRule(null) } }}>

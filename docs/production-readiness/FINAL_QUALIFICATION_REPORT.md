@@ -404,6 +404,24 @@ on.** The two concrete paths:
   I can do on explicit instruction; the "complete it" path needs product
   requirements first.
 
+  **Addendum (2026-10-12): Gate 4 decided and the "complete it" path
+  executed.** The user explicitly authorized completion (not exclusion).
+  Built on `integration/g13-plus-market-priorities` (migration 446): the
+  employee request UI, real payout/TDS computation at approval, an atomic
+  `mark_leave_encashment_paid_atomic` that posts the payout into a named
+  draft payroll run's payslip, an atomic `reverse_leave_encashment_atomic`,
+  and duplicate-payroll/F&F-payment prevention (detailed in `STATUS.md`'s
+  own 2026-10-12 addendum and `FINDINGS.csv` row `G12-FOLLOWUP`). Gate 4
+  as originally scoped here — "a decision only the product owner can
+  make" — is now made and executed. What that gate does NOT retroactively
+  satisfy: the TDS figure is a flat marginal-rate withholding, not a
+  Section 10(10AA) exemption computation (needs tax/compliance sign-off),
+  and nothing here substitutes for Gates 1–3's still-open real-staging
+  evidence (E2E, real Supabase RLS, production-scale concurrent-user load,
+  managed backup/restore). The NO-GO verdict in §5 below is otherwise
+  unchanged by this addendum — it closes one of four gates' *decision*,
+  not the other three gates' *evidence*.
+
 None of the four gates are closed by this round's local work, and none of
 them can be closed by more local work of the same kind — each needs either
 external access (Gates 1–3) or an explicit decision (Gate 4).

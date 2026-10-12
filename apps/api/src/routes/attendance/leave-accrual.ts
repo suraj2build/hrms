@@ -10,13 +10,24 @@
  * GET    /leave/accrual/runs                — list accrual run history (admin)
  * GET    /leave/accrual/ledger/:employeeId  — ledger for one employee
  *
- * Encashment:
+ * Encashment (G12 — standalone leave encashment, completed end to end;
+ * see migration 446 and lib/accrual-engine.ts's computeEncashmentPayout):
  * POST   /leave/encashment/request           — employee submits encashment request
  * GET    /leave/encashment/my                — employee views own encashment requests
  * GET    /leave/encashment/pending           — admin views pending encashment requests
- * POST   /leave/encashment/:id/approve       — admin approves
+ * GET    /leave/encashment/all?status=        — admin views requests by any status (for mark-paid/reverse)
+ * POST   /leave/encashment/:id/approve       — admin approves (computes rate/gross/TDS/net)
  * POST   /leave/encashment/:id/reject        — admin rejects
- * POST   /leave/encashment/:id/mark-paid     — admin marks as paid (payroll)
+ * POST   /leave/encashment/:id/mark-paid     — admin posts the payout into a named
+ *                                               draft payroll run's payslip for this
+ *                                               employee, then marks paid (one
+ *                                               transaction — mark_leave_encashment_
+ *                                               paid_atomic)
+ * POST   /leave/encashment/:id/reverse       — admin reverses an approved/paid request:
+ *                                               credits the leave balance back and, if
+ *                                               already posted into a still-draft
+ *                                               payslip, removes that posting too
+ *                                               (reverse_leave_encashment_atomic)
  */
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
@@ -48,6 +59,24 @@ const ruleSchema = z.object({
 export default async function leaveAccrualRoutes(fastify: FastifyInstance) {
   const auth        = { preHandler: [fastify.authenticate] }
   const hrAdminAuth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
+
+  // ── GET /leave/encashment/encashable-types ────────────────────────────────
+  // G12: an employee submitting a request needs to know which of their leave
+  // types allow encashment, and the per-year cap — GET /leave/accrual/rules
+  // is HR-admin only and returns every rule field, so this is a minimal,
+  // employee-safe projection of just the two fields the request form needs.
+  // Registered before the hrAdminAuth rules route so both coexist cleanly.
+  fastify.get('/leave/encashment/encashable-types', auth, async (req: any, reply) => {
+    const { data, error } = await fastify.supabase
+      .from('leave_accrual_rules')
+      .select('leave_type_id, max_encashable_per_year, leave_types(id, name)')
+      .eq('tenant_id', req.tenantId)
+      .eq('is_active', true)
+      .eq('encashable', true)
+
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch encashable leave types')
+    return reply.send({ data: data ?? [] })
+  })
 
   // ── GET /leave/accrual/rules ──────────────────────────────────────────────
   fastify.get('/leave/accrual/rules', hrAdminAuth, async (req: any, reply) => {
@@ -352,6 +381,36 @@ export default async function leaveAccrualRoutes(fastify: FastifyInstance) {
     return reply.send({ data: rows })
   })
 
+  // ── GET /leave/encashment/all ──────────────────────────────────────────────
+  // Admin visibility beyond 'pending' (the only status /pending shows) — needed
+  // so HR can find an approved/paid request to mark-paid or reverse.
+  fastify.get('/leave/encashment/all', hrAdminAuth, async (req: any, reply) => {
+    const schema = z.object({ status: z.enum(['pending', 'approved', 'rejected', 'paid', 'reversed']).optional() })
+    const parsed = schema.safeParse(req.query)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    let q = fastify.supabase
+      .from('leave_encashment_requests')
+      .select(`
+        *, leave_types(id, name),
+        employees!inner(id, first_name, last_name, employee_code)
+      `)
+      .eq('tenant_id', req.tenantId)
+      .order('created_at', { ascending: false })
+    if (parsed.data.status) q = q.eq('status', parsed.data.status)
+
+    const { data, error } = await q
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch encashment requests')
+
+    const rows = (data ?? []).map((r: any) => ({
+      ...r,
+      employee_name: r.employees ? `${r.employees.first_name} ${r.employees.last_name}` : null,
+      employee_code: r.employees?.employee_code ?? null,
+      employees:     undefined,
+    }))
+    return reply.send({ data: rows })
+  })
+
   // ── POST /leave/encashment/:id/approve ────────────────────────────────────
   fastify.post('/leave/encashment/:id/approve', hrAdminAuth, async (req: any, reply) => {
     try {
@@ -384,18 +443,69 @@ export default async function leaveAccrualRoutes(fastify: FastifyInstance) {
   })
 
   // ── POST /leave/encashment/:id/mark-paid ──────────────────────────────────
+  // G12: this used to just flip status — no amount, no payslip, no proven
+  // disbursement path (the audit's exact G12 finding). It now posts the
+  // approved payout into a named, still-draft payroll run's payslip for
+  // this employee (a real earning + TDS line that then goes through the
+  // normal finalize flow) and flips status in the SAME transaction —
+  // mark_leave_encashment_paid_atomic, migration 446.
   fastify.post('/leave/encashment/:id/mark-paid', hrAdminAuth, async (req: any, reply) => {
-    const { data, error } = await fastify.supabase
-      .from('leave_encashment_requests')
-      .update({ status: 'paid', paid_at: new Date().toISOString() })
-      .eq('id', req.params.id)
-      .eq('tenant_id', req.tenantId)
-      .eq('status', 'approved')
-      .select('id')
-      .maybeSingle()
+    const schema = z.object({ payroll_run_id: z.string().uuid() })
+    const parsed = schema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
 
-    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to mark as paid')
-    if (!data) return notFound(reply, 'NOT_FOUND', 'Approved encashment request not found')
-    return reply.send({ message: 'Marked as paid' })
+    const { data, error } = await fastify.supabase.rpc('mark_leave_encashment_paid_atomic', {
+      p_tenant_id:      req.tenantId,
+      p_request_id:     req.params.id,
+      p_payroll_run_id: parsed.data.payroll_run_id,
+      p_user_id:        req.userId,
+    })
+
+    if (error) {
+      const msg = error.message ?? ''
+      // RUN_NOT_FOUND: contains the substring "NOT_FOUND:" — check it (and
+      // every other multi-word prefix) BEFORE the plain NOT_FOUND: check,
+      // or RUN_NOT_FOUND/NO_PAYSLIP-style messages would be misclassified.
+      if (msg.includes('RUN_NOT_FOUND:'))    return notFound(reply, 'RUN_NOT_FOUND', msg.replace(/^.*RUN_NOT_FOUND:\s*/, ''))
+      if (msg.includes('NO_PAYSLIP:'))       return reply.code(409).send({ error: 'NO_PAYSLIP', message: msg.replace(/^.*NO_PAYSLIP:\s*/, '') })
+      if (msg.includes('RUN_NOT_DRAFT:'))    return reply.code(409).send({ error: 'RUN_NOT_DRAFT', message: msg.replace(/^.*RUN_NOT_DRAFT:\s*/, '') })
+      if (msg.includes('ALREADY_DECIDED:'))  return reply.code(409).send({ error: 'ALREADY_DECIDED', message: msg.replace(/^.*ALREADY_DECIDED:\s*/, '') })
+      if (msg.includes('NOT_COMPUTED:'))     return reply.code(409).send({ error: 'NOT_COMPUTED', message: msg.replace(/^.*NOT_COMPUTED:\s*/, '') })
+      if (msg.includes('NOT_FOUND:'))        return notFound(reply, 'NOT_FOUND', msg.replace(/^.*NOT_FOUND:\s*/, ''))
+      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to mark as paid')
+    }
+
+    return reply.send({ message: 'Posted to payroll run and marked as paid', data })
+  })
+
+  // ── POST /leave/encashment/:id/reverse ────────────────────────────────────
+  // G12: the audit raised no reversal path at all — an approved-in-error or
+  // paid-in-error request had no way back, and the employee's balance
+  // stayed deducted forever. reverse_leave_encashment_atomic (migration
+  // 446) credits the balance back and, if already posted into a still-
+  // draft payslip, removes that posting too — refusing if the payslip has
+  // since been finalized (roll the run back to draft first, same break-
+  // glass model as migration 438).
+  fastify.post('/leave/encashment/:id/reverse', hrAdminAuth, async (req: any, reply) => {
+    const schema = z.object({ reason: z.string().max(500).optional() })
+    const parsed = schema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    const { data, error } = await fastify.supabase.rpc('reverse_leave_encashment_atomic', {
+      p_tenant_id:  req.tenantId,
+      p_request_id: req.params.id,
+      p_actor_id:   req.userId,
+      p_reason:     parsed.data.reason ?? null,
+    })
+
+    if (error) {
+      const msg = error.message ?? ''
+      if (msg.includes('NOT_FOUND:'))          return notFound(reply, 'NOT_FOUND', msg.replace(/^.*NOT_FOUND:\s*/, ''))
+      if (msg.includes('CONFLICT:'))           return reply.code(409).send({ error: 'CONFLICT', message: msg.replace(/^.*CONFLICT:\s*/, '') })
+      if (msg.includes('PAYROLL_FINALIZED:'))  return reply.code(409).send({ error: 'PAYROLL_FINALIZED', message: msg.replace(/^.*PAYROLL_FINALIZED:\s*/, '') })
+      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to reverse encashment')
+    }
+
+    return reply.send({ message: 'Encashment reversed and balance credited back', data })
   })
 }
