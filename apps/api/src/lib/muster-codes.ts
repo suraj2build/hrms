@@ -30,8 +30,10 @@ export type MusterCode =
   // Off-day category
   | 'WO'       // Weekly Off — clean (no punch)
   | 'HL'       // Holiday — clean (no punch)
-  | 'PWO'      // Present on Weekly Off — employee worked on their off day
-  | 'PHL'      // Present on Holiday — employee worked on a declared holiday
+  | 'PWO'      // Present on Weekly Off — employee worked a FULL day on their off day
+  | 'PWO_H'    // Present on Weekly Off — employee worked only HALF a day (DEFECT-04)
+  | 'PHL'      // Present on Holiday — employee worked a FULL day on a declared holiday
+  | 'PHL_H'    // Present on Holiday — employee worked only HALF a day (DEFECT-04)
   // Leave category (approved, paid)
   | 'CL'       // Casual Leave
   | 'EL'       // Earned Leave
@@ -73,8 +75,10 @@ export const MUSTER_CODE_DEFS: Record<MusterCode, MusterCodeDef> = {
   // ── Off-day category ──────────────────────────────────────────────────────
   WO:      { code: 'WO',     label: 'Weekly Off',               day_fraction: 1.0, is_payable: true,  is_lop: false, category: 'off'     },
   HL:      { code: 'HL',     label: 'Holiday',                  day_fraction: 1.0, is_payable: true,  is_lop: false, category: 'off'     },
-  PWO:     { code: 'PWO',    label: 'Present on Weekly Off',    day_fraction: 1.0, is_payable: true,  is_lop: false, category: 'present' },
-  PHL:     { code: 'PHL',    label: 'Present on Holiday',       day_fraction: 1.0, is_payable: true,  is_lop: false, category: 'present' },
+  PWO:     { code: 'PWO',    label: 'Present on Weekly Off (full day)',  day_fraction: 1.0, is_payable: true,  is_lop: false, category: 'present' },
+  PWO_H:   { code: 'PWO_H',  label: 'Present on Weekly Off (half day)',  day_fraction: 1.0, is_payable: true,  is_lop: false, category: 'present' },
+  PHL:     { code: 'PHL',    label: 'Present on Holiday (full day)',     day_fraction: 1.0, is_payable: true,  is_lop: false, category: 'present' },
+  PHL_H:   { code: 'PHL_H',  label: 'Present on Holiday (half day)',     day_fraction: 1.0, is_payable: true,  is_lop: false, category: 'present' },
   // ── Leave category ────────────────────────────────────────────────────────
   CL:      { code: 'CL',     label: 'Casual Leave',             day_fraction: 1.0, is_payable: true,  is_lop: false, category: 'leave'   },
   EL:      { code: 'EL',     label: 'Earned Leave',             day_fraction: 1.0, is_payable: true,  is_lop: false, category: 'leave'   },
@@ -126,9 +130,16 @@ export function deriveMusterCode(
   status:             string,
   workedOnHoliday:    boolean,
   workedOnWeeklyOff:  boolean,
+  /**
+   * The fraction of the day actually worked, BEFORE the WO/holiday
+   * day_fraction override to 1.0 (DEFECT-04, PR #30 UAT 2026-10-12). Lets the
+   * muster roll distinguish a half-day worked on a WO/holiday from a full
+   * day, without touching the payroll-authoritative day_fraction itself.
+   */
+  workedFraction?:    number,
 ): MusterCode {
-  if (workedOnHoliday)   return 'PHL'
-  if (workedOnWeeklyOff) return 'PWO'
+  if (workedOnHoliday)   return workedFraction === 0.5 ? 'PHL_H' : 'PHL'
+  if (workedOnWeeklyOff) return workedFraction === 0.5 ? 'PWO_H' : 'PWO'
   return STATUS_TO_MUSTER_CODE[status] ?? 'A'
 }
 

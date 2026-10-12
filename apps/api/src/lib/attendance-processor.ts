@@ -728,6 +728,11 @@ export async function processAttendanceForDate(
     } satisfies EmployeeOrgContext
     const dayOfWeek = getLocalDayOfWeek(date, empCtx.site_timezone)
     const daily     = computeDaily(sessions, empId, tenantId, date, shiftMeta, empCtx.site_timezone)
+    // Comp-off/muster half-vs-full basis, captured BEFORE the holiday/WO
+    // override below replaces `status` (DEFECT-04, PR #30 UAT 2026-10-12) —
+    // same pre-override snapshot pattern as attendance-engine.ts's
+    // `workedFraction`.
+    const workedFraction = daily.status === 'half_day' ? 0.5 : 1.0
 
     // ── Rule priority: Holiday (1) > Weekly Off (2) > Attendance (3) ────────
     // attendance_logs / raw_logs are never modified here — only the daily summary.
@@ -768,6 +773,7 @@ export async function processAttendanceForDate(
       daily.status,
       daily.worked_on_holiday,
       daily.worked_on_weekly_off,
+      workedFraction,
     )
 
     incompleteSessions += sessions.filter((s) => !s.is_complete).length

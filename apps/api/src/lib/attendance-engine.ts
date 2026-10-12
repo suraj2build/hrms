@@ -59,6 +59,7 @@ import { isShiftAttributionEnabled } from './attendance-flags.js'
 import { generateCompOffRequests }                     from './comp-off-service.js'
 import { fetchAllRows }                                 from './supabase-paginate.js'
 import { resolveLeaveDayFraction, type LeaveSession }    from './leave-engine.js'
+import { deriveMusterCode }                             from './muster-codes.js'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -106,6 +107,14 @@ export interface AttendanceDailyRecord {
   worked_on_holiday:    boolean
   /** Ownership: identifies the subsystem that last wrote this row. Default 'engine'. */
   computed_source:      AttendanceComputedSource
+  /**
+   * Display-only muster roll code (column exists per migration 376). Purely
+   * for reporting — day_fraction/status above remain the payroll-authoritative
+   * values. Only set by this engine for the WO/holiday-worked branches below,
+   * to carry the half-vs-full distinction the muster roll needs (DEFECT-04,
+   * PR #30 UAT 2026-10-12) without touching the payroll-neutral day_fraction.
+   */
+  muster_code?:         string | null
 
   // ── Shift attribution snapshot (migration 260) ─────────────────────────────
   // Persisted at compute time so the exact shift used is always traceable.
@@ -1118,6 +1127,7 @@ export async function computeDay(
       worked_on_weekly_off: true,
       worked_on_holiday:    false,
       computed_source:      'engine' as const,
+      muster_code:          deriveMusterCode(status, false, true, workedFraction),
       ...shiftAttribution,
       reason:               `Worked on weekly off — ${workHours}h`,
       meta:                 { ...punchMeta, workedFraction },
@@ -1137,6 +1147,7 @@ export async function computeDay(
       worked_on_weekly_off: false,
       worked_on_holiday:    true,
       computed_source:      'engine' as const,
+      muster_code:          deriveMusterCode(status, true, false, workedFraction),
       ...shiftAttribution,
       reason:               `Worked on holiday (${holiday!.name}) — ${workHours}h`,
       meta:                 { ...punchMeta, workedFraction },
