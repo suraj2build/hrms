@@ -66,7 +66,7 @@ export default async function ownerErrorReportRoutes(fastify: FastifyInstance) {
     const { data: signed, error: signErr } = await fastify.supabase.storage
       .from('employee-files')
       .createSignedUrl(report.screenshot_path, 300)
-    if (signErr || !signed) return serverError(req, reply, signErr, ErrorCode.QUERY_FAILED, 'Failed to sign screenshot URL')
+    if (signErr || !signed?.signedUrl) return serverError(req, reply, signErr, ErrorCode.QUERY_FAILED, 'Failed to sign screenshot URL')
     return reply.send({ data: { url: signed.signedUrl } })
   })
 
