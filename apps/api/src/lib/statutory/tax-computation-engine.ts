@@ -206,6 +206,7 @@ async function loadSlabs(
     .select('income_from, income_to, tax_rate, base_tax, slab_order')
     .eq('financial_year', financialYear)
     .eq('regime', regime)
+    .is('superseded_at', null)
     .order('slab_order', { ascending: true })
 
   if (error || !data || (data as any[]).length === 0) {

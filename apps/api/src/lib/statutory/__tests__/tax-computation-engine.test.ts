@@ -21,7 +21,7 @@ function mockSupabase(opts: {
   return {
     from(table: string) {
       if (table === 'it_tax_slabs') {
-        const chain: any = { select: () => chain, eq: () => chain, order: () => Promise.resolve({ data: opts.slabs, error: null }) }
+        const chain: any = { select: () => chain, eq: () => chain, is: () => chain, order: () => Promise.resolve({ data: opts.slabs, error: null }) }
         return chain
       }
       // it_standard_config
@@ -101,6 +101,71 @@ describe('computeTaxWithDB — end-to-end with DB-string config (G13 sweep)', ()
     const result = await computeTaxWithDB(supabase, { ...baseInput, grossAnnualIncome: 350_000 })
 
     expect(Number.isFinite(result.annualTaxLiability)).toBe(true)
+    expect(result.annualTaxLiability).toBe(0)
+  })
+})
+
+// Migration 455 (round 10): FY2025-26/26-27 new-regime slabs were stale
+// (pre-Budget-2025 breakpoints) while it_standard_config's rebate was already
+// correct. loadSlabs() now filters `.is('superseded_at', null)` so a
+// superseded row left in the table (for audit history, not deleted) is never
+// read back into a live computation.
+const CORRECTED_FY2026_27_NEW_SLABS = [
+  { income_from: '0.00', income_to: '400000.00', tax_rate: '0.0000', base_tax: '0.00', slab_order: 1 },
+  { income_from: '400001.00', income_to: '800000.00', tax_rate: '0.0500', base_tax: '0.00', slab_order: 2 },
+  { income_from: '800001.00', income_to: '1200000.00', tax_rate: '0.1000', base_tax: '20000.00', slab_order: 3 },
+  { income_from: '1200001.00', income_to: '1600000.00', tax_rate: '0.1500', base_tax: '60000.00', slab_order: 4 },
+  { income_from: '1600001.00', income_to: '2000000.00', tax_rate: '0.2000', base_tax: '120000.00', slab_order: 5 },
+  { income_from: '2000001.00', income_to: '2400000.00', tax_rate: '0.2500', base_tax: '200000.00', slab_order: 6 },
+  { income_from: '2400001.00', income_to: null, tax_rate: '0.3000', base_tax: '300000.00', slab_order: 7 },
+]
+const STD_CONFIG_FY2026_27_NEW = { standard_deduction: '75000.00', rebate_87a_limit: '1200000.00', rebate_87a_amount: '60000.00', cess_rate: '0.0400' }
+
+describe('loadSlabs — superseded-row exclusion (migration 455, round 10)', () => {
+  it('calls .is("superseded_at", null) on the it_tax_slabs query, so a superseded row never reaches a live computation', async () => {
+    const isCalls: Array<[string, unknown]> = []
+    const supabase = {
+      from(table: string) {
+        if (table === 'it_tax_slabs') {
+          const chain: any = {
+            select: () => chain,
+            eq: () => chain,
+            is: (col: string, val: unknown) => { isCalls.push([col, val]); return chain },
+            order: () => Promise.resolve({ data: CORRECTED_FY2026_27_NEW_SLABS, error: null }),
+          }
+          return chain
+        }
+        const chain: any = { select: () => chain, eq: () => chain, maybeSingle: () => Promise.resolve({ data: STD_CONFIG_FY2026_27_NEW, error: null }) }
+        return chain
+      },
+    } as any
+
+    await computeTaxWithDB(supabase, { ...baseInput, grossAnnualIncome: 1_600_000 })
+
+    expect(isCalls).toContainEqual(['superseded_at', null])
+  })
+
+  it('a corrected Budget-2025-structure slab set produces a different (lower) annual liability at Rs.16L gross than the stale pre-Budget-2025 structure did — proving the breakpoints, not just the rebate, now drive the result', async () => {
+    const supabase = mockSupabase({ slabs: CORRECTED_FY2026_27_NEW_SLABS, stdConfig: STD_CONFIG_FY2026_27_NEW })
+
+    const result = await computeTaxWithDB(supabase, { ...baseInput, grossAnnualIncome: 1_600_000 })
+
+    // Independently hand-verified against the corrected (Budget 2025) slab structure:
+    // taxable 1,525,000 -> 4-8L@5%=20,000 + 8-12L@10%=40,000 + 12-16L@15% of 325,000=48,750
+    // = 108,750 pre-cess, *1.04 = 113,100. (See migration 455's own commentary and
+    // DEFECTS.md's TDS verification section for the full derivation and the
+    // pre-fix value this replaces: Rs.1,63,799.69.)
+    expect(result.taxableIncome).toBe(1_525_000)
+    expect(result.annualTaxLiability).toBeCloseTo(113_099.84, 1)
+    expect(result.annualTaxLiability).not.toBeCloseTo(163_799.69, 1)
+  })
+
+  it('below the Rs.12L rebate ceiling, the stale and corrected slab structures agree (both fully rebated) — the fix has zero effect there', async () => {
+    const supabase = mockSupabase({ slabs: CORRECTED_FY2026_27_NEW_SLABS, stdConfig: STD_CONFIG_FY2026_27_NEW })
+
+    const result = await computeTaxWithDB(supabase, { ...baseInput, grossAnnualIncome: 1_000_000 })
+
+    expect(result.taxableIncome).toBe(925_000)
     expect(result.annualTaxLiability).toBe(0)
   })
 })

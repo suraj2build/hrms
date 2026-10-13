@@ -590,6 +590,7 @@ async function computeEncashmentPayout(
       .select('tax_rate')
       .eq('financial_year', fy)
       .eq('regime', (projection as any).regime)
+      .is('superseded_at', null)
       .lte('income_from', taxableIncome)
       .or(`income_to.is.null,income_to.gt.${taxableIncome}`)
       .order('slab_order', { ascending: false })

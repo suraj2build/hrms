@@ -275,6 +275,7 @@ async function buildITStatement(
     .select('income_from, income_to, tax_rate, base_tax, slab_order')
     .eq('financial_year', financialYear)
     .eq('regime', regime)
+    .is('superseded_at', null)
     .order('slab_order', { ascending: true })
 
   const slabDetails = ((slabRows as any[]) ?? []).map((row: any) => {
