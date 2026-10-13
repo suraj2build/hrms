@@ -5,6 +5,7 @@ import { Topbar } from './Topbar'
 import { useAuthStore } from '@/stores/authStore'
 import { CommandPaletteProvider } from '@/components/operational/CommandPalette'
 import { OperationalBanner }     from '@/components/operational/OperationalBanner'
+import { PilotEnvironmentBanner } from './PilotEnvironmentBanner'
 
 function ShellPageLoader() {
   return (
@@ -38,6 +39,7 @@ export function AppShell() {
         <Sidebar />
         <div className="flex flex-col flex-1 overflow-hidden">
           <Topbar />
+          <PilotEnvironmentBanner />
           <OperationalBanner />
           {/* Inner Suspense — catches lazy-route chunk loading before it can
               bubble to the global Suspense in App.tsx and unmount the shell. */}

@@ -20,6 +20,7 @@ interface ErrorReport {
   stack?: string | null
   user_agent?: string | null
   sentry_event_id?: string | null
+  screenshot_path?: string | null
   created_at: string
   resolved_at: string | null
   tenants?: { name: string; slug: string } | null
@@ -167,6 +168,21 @@ export function OwnerErrorReports() {
                 </div>
               )}
               {d.sentry_event_id && <p className="text-xs text-muted-foreground">Sentry event: <code>{d.sentry_event_id}</code></p>}
+              {d.screenshot_path && (
+                <Button
+                  variant="outline" size="sm"
+                  onClick={async () => {
+                    try {
+                      const res = await ownerApi.get<{ data: { url: string } }>(`/owner/error-reports/${d.id}/screenshot`)
+                      window.open(res.data.url, '_blank', 'noopener,noreferrer')
+                    } catch {
+                      toast.error('Could not load screenshot')
+                    }
+                  }}
+                >
+                  View attached screenshot
+                </Button>
+              )}
             </div>
           )}
           <DialogFooter className="flex-wrap gap-2">

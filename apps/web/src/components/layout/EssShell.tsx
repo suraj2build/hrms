@@ -19,6 +19,7 @@ import { api }           from '@/lib/api/client'
 import { useIsMobile }   from '@/hooks/useIsMobile'
 import { MobileEssShell } from '@/components/mobile/MobileEssShell'
 import { CommandPaletteProvider } from '@/components/operational/CommandPalette'
+import { PilotEnvironmentBanner } from './PilotEnvironmentBanner'
 
 interface Anomaly {
   date: string
@@ -165,6 +166,7 @@ export function EssShell() {
         {!atThreshold && <EmployeeSidebar />}
         <div className="flex flex-col flex-1 overflow-hidden">
           {!atThreshold && <Topbar />}
+          {!atThreshold && <PilotEnvironmentBanner />}
           {/* Inner Suspense — catches lazy-route chunk loading so the ESS shell
               chrome (Topbar, EmployeeSidebar) stays mounted while pages load. */}
           {!atThreshold && <AnomalyLoginAlert />}

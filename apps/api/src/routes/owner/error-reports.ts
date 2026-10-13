@@ -52,6 +52,24 @@ export default async function ownerErrorReportRoutes(fastify: FastifyInstance) {
     return reply.send({ data })
   })
 
+  // GET /owner/error-reports/:id/screenshot — short-lived signed URL for the
+  // attached screenshot (service-role client bypasses the tenant-scoped
+  // storage RLS that a platform-admin session wouldn't otherwise satisfy).
+  fastify.get('/owner/error-reports/:id/screenshot', ownerAuth, async (req, reply) => {
+    const { id } = req.params as { id: string }
+    const { data: report, error: reportErr } = await fastify.supabase
+      .from('error_reports').select('screenshot_path').eq('id', id).maybeSingle()
+    if (reportErr) return serverError(req, reply, reportErr, ErrorCode.QUERY_FAILED, 'Failed to fetch error report')
+    if (!report) return notFound(reply, 'ERROR_REPORT_NOT_FOUND', 'Error report not found')
+    if (!report.screenshot_path) return notFound(reply, 'NO_SCREENSHOT', 'This report has no attached screenshot')
+
+    const { data: signed, error: signErr } = await fastify.supabase.storage
+      .from('employee-files')
+      .createSignedUrl(report.screenshot_path, 300)
+    if (signErr || !signed) return serverError(req, reply, signErr, ErrorCode.QUERY_FAILED, 'Failed to sign screenshot URL')
+    return reply.send({ data: { url: signed.signedUrl } })
+  })
+
   // PATCH /owner/error-reports/:id
   fastify.patch('/owner/error-reports/:id', ownerAuth, async (req, reply) => {
     const { id } = req.params as { id: string }

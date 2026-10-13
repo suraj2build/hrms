@@ -10,6 +10,7 @@ export interface Tenant {
   country: string
   settings: Record<string, unknown>
   created_at: string
+  is_pilot?: boolean
 }
 
 // ─── User / Profile ─────────────────────────────────────────────────────────

@@ -10,12 +10,13 @@ import { z } from 'zod'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const reportSchema = z.object({
-  message:        z.string().min(1).max(2000),
-  stack:          z.string().max(8000).optional(),
-  url:            z.string().max(1000).optional(),
-  user_note:      z.string().max(2000).optional(),
+  message:         z.string().min(1).max(2000),
+  stack:           z.string().max(8000).optional(),
+  url:             z.string().max(1000).optional(),
+  user_note:       z.string().max(2000).optional(),
   sentry_event_id: z.string().max(100).optional(),
-  severity:       z.enum(['error', 'crash', 'feedback']).optional(),
+  severity:        z.enum(['error', 'crash', 'feedback']).optional(),
+  screenshot_path: z.string().max(500).optional(),
 })
 
 export default async function supportRoutes(fastify: FastifyInstance) {
@@ -41,6 +42,7 @@ export default async function supportRoutes(fastify: FastifyInstance) {
         user_note:       b.user_note ?? null,
         sentry_event_id: b.sentry_event_id ?? null,
         severity:        b.severity ?? 'error',
+        screenshot_path: b.screenshot_path ?? null,
       })
       .select('id')
       .single()

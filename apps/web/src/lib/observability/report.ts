@@ -11,6 +11,7 @@ export interface ErrorReport {
   stack?: string
   userNote?: string
   severity?: 'error' | 'crash' | 'feedback'
+  screenshotPath?: string
 }
 
 export async function reportError(r: ErrorReport): Promise<boolean> {
@@ -23,6 +24,7 @@ export async function reportError(r: ErrorReport): Promise<boolean> {
       user_note: r.userNote,
       sentry_event_id: sentryId ?? undefined,
       severity: r.severity ?? 'error',
+      screenshot_path: r.screenshotPath,
     })
     return true
   } catch {

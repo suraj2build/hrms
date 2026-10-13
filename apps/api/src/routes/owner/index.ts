@@ -13,6 +13,7 @@
  *   POST   /owner/tenants/:id/activate       — set status → active
  *   POST   /owner/tenants/:id/suspend        — set status → suspended
  *   POST   /owner/tenants/:id/cancel         — set status → cancelled
+ *   PATCH  /owner/tenants/:id/pilot-mode     — flag/unflag invite-only pilot (is_pilot)
  *
  * ── Tenant Admins ─────────────────────────────────────────────────
  *   GET    /owner/tenants/:id/admins                        — list non-employee users
@@ -1540,6 +1541,23 @@ export default async function ownerRoutes(fastify: FastifyInstance) {
     const { data, error } = await fastify.supabase
       .from('tenants').update({ ai_mode: mode }).eq('id', id).select('id, ai_mode').maybeSingle()
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update tenant AI mode')
+    if (!data) return notFound(reply, 'TENANT_NOT_FOUND', 'Tenant not found')
+    return reply.send({ data })
+  })
+
+  // ── PATCH /owner/tenants/:id/pilot-mode — flag/unflag an invite-only pilot ──
+  // tenant (tenants.is_pilot, migration 456). A pilot tenant keeps attendance/
+  // leave/payroll-preview writes but the API blocks real-money/statutory
+  // actions for it (see lib/pilot-guard.ts).
+  fastify.patch('/owner/tenants/:id/pilot-mode', ownerAuth, async (req: any, reply) => {
+    const { id } = req.params
+    const isPilot = (req.body as any)?.is_pilot
+    if (typeof isPilot !== 'boolean') {
+      return reply.code(400).send({ error: 'VALIDATION', message: 'is_pilot must be a boolean' })
+    }
+    const { data, error } = await fastify.supabase
+      .from('tenants').update({ is_pilot: isPilot }).eq('id', id).select('id, is_pilot').maybeSingle()
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update tenant pilot mode')
     if (!data) return notFound(reply, 'TENANT_NOT_FOUND', 'Tenant not found')
     return reply.send({ data })
   })
