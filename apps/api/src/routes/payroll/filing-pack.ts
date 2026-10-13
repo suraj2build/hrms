@@ -22,6 +22,7 @@ import { serverError, ErrorCode } from '../../lib/api-errors.js'
 import { fetchTenantTz } from '../../lib/attendance-engine.js'
 import { getLocalDate } from '../../lib/org-context.js'
 import { toCSV } from '../../lib/csv-utils.js'
+import { blockIfPilotTenant } from '../../lib/pilot-guard.js'
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -451,6 +452,8 @@ export default async function filingPackRoutes(fastify: FastifyInstance) {
   // ── GET /payroll/filing-pack/ecr ────────────────────────────────────────────
   // ECR 2.0 text file — EPFO monthly upload format
   fastify.get('/ecr', adminAuth, async (req: any, reply) => {
+    if (await blockIfPilotTenant(fastify.supabase, req.tenantId, reply, 'Generating the PF ECR file')) return
+
     const parsed = monthSchema.safeParse(req.query)
     if (!parsed.success) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
@@ -592,6 +595,8 @@ export default async function filingPackRoutes(fastify: FastifyInstance) {
   // ── GET /payroll/filing-pack/24q ────────────────────────────────────────────
   // Form 24Q data CSV — Annexure I (challan) + Annexure II (deductees)
   fastify.get('/24q', adminAuth, async (req: any, reply) => {
+    if (await blockIfPilotTenant(fastify.supabase, req.tenantId, reply, 'Generating the 24Q file')) return
+
     const schema = z.object({
       quarter:        z.enum(['Q1','Q2','Q3','Q4']),
       financial_year: z.string().regex(/^\d{4}-\d{2}$/, 'financial_year must be YYYY-YY (e.g. 2024-25)'),
@@ -787,6 +792,8 @@ export default async function filingPackRoutes(fastify: FastifyInstance) {
   // ── GET /payroll/filing-pack/challan ─────────────────────────────────────────
   // Consolidated statutory challan data sheet for the month
   fastify.get('/challan', adminAuth, async (req: any, reply) => {
+    if (await blockIfPilotTenant(fastify.supabase, req.tenantId, reply, 'Generating a statutory challan')) return
+
     const schema = z.object({
       month:  z.string().regex(/^\d{4}-\d{2}$/, 'month must be YYYY-MM'),
       format: z.enum(['csv','json']).optional().default('json'),
@@ -995,6 +1002,8 @@ export default async function filingPackRoutes(fastify: FastifyInstance) {
 
   // ── POST /payroll/filing-pack/artifacts ─────────────────────────────────────
   fastify.post('/artifacts', adminAuth, async (req: any, reply) => {
+    if (await blockIfPilotTenant(fastify.supabase, req.tenantId, reply, 'Recording a filing artifact')) return
+
     const schema = z.object({
       artifact_type:  z.enum(['ecr_2_0','24q','challan_epf','challan_esi','challan_ptax','challan_tds','challan_all']),
       period_month:   z.string().regex(/^\d{4}-\d{2}$/).optional(),
@@ -1035,6 +1044,8 @@ export default async function filingPackRoutes(fastify: FastifyInstance) {
 
   // ── PATCH /payroll/filing-pack/artifacts/:id ─────────────────────────────────
   fastify.patch('/artifacts/:id', adminAuth, async (req: any, reply) => {
+    if (await blockIfPilotTenant(fastify.supabase, req.tenantId, reply, 'Marking a filing artifact submitted/acknowledged')) return
+
     const schema = z.object({
       status: z.enum(['submitted','acknowledged']),
       notes:  z.string().optional(),

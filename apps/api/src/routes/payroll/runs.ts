@@ -72,6 +72,7 @@ import { buildPayrollRunSnapshot } from '../../lib/payroll-snapshot-engine.js'
 import { buildDeptSnapshots } from '../../lib/payroll-dept-snapshot.js'
 import { durableQueue } from '../../lib/durable-queue.js'
 import { serverError, notFound, forbidden, validationError, conflictError, ErrorCode } from '../../lib/api-errors.js'
+import { blockIfPilotTenant } from '../../lib/pilot-guard.js'
 import {
   monthRe,
   checkFreezeGuard,
@@ -2101,6 +2102,8 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
   fastify.post('/payroll/runs/:id/finalize', hrAdminAuth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
     const tenantId = req.tenantId as string
+
+    if (await blockIfPilotTenant(fastify.supabase, tenantId, reply, 'Finalizing a payroll run')) return
 
     // Parse finalize-specific body options.
     // force_finalize=true: override the missing-attendance gate (requires override_reason).

@@ -15,6 +15,7 @@ import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import { serverError, notFound, validationError, conflictError, ErrorCode } from '../../lib/api-errors.js'
 import { buildPayoutObligations } from '../../lib/payroll-accounting-engine.js'
+import { blockIfPilotTenant } from '../../lib/pilot-guard.js'
 
 export default async function payrollPayoutBatchesRoutes(fastify: FastifyInstance) {
   const hrAdminAuth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
@@ -133,6 +134,8 @@ export default async function payrollPayoutBatchesRoutes(fastify: FastifyInstanc
   // ── POST /payroll/payout-reconciliation/:id/update ───────────────────────────
   // Update payout status (UTR, completion, failure).
   fastify.post('/payroll/payout-reconciliation/:id/update', hrAdminAuth, async (req: any, reply) => {
+    if (await blockIfPilotTenant(fastify.supabase, req.tenantId, reply, 'Updating payout reconciliation status')) return
+
     const { id }   = req.params as { id: string }
     const tenantId = req.tenantId as string
 
@@ -200,6 +203,8 @@ export default async function payrollPayoutBatchesRoutes(fastify: FastifyInstanc
   // ── POST /payroll/runs/:id/payout-obligations ────────────────────────────────
   // Generate payout obligation rows for a finalized run.
   fastify.post('/payroll/runs/:id/payout-obligations', hrAdminAuth, async (req: any, reply) => {
+    if (await blockIfPilotTenant(fastify.supabase, req.tenantId, reply, 'Generating payout obligations')) return
+
     const { id }   = req.params as { id: string }
     const tenantId = req.tenantId as string
 

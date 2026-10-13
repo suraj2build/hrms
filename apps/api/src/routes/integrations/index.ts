@@ -9,6 +9,7 @@ import type { AccountingFormat, PayrollExportInput } from '../../platform/integr
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
 import { checkIdempotency, storeIdempotency, claimIdempotency, releaseIdempotencyClaim } from '../../lib/idempotency.js'
+import { blockIfPilotTenant } from '../../lib/pilot-guard.js'
 
 export default async function integrationRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
@@ -84,6 +85,7 @@ export default async function integrationRoutes(fastify: FastifyInstance) {
   // POST /integrations/accounting/export
   // -------------------------------------------------------------------------
   fastify.post('/integrations/accounting/export', hrAdminAuth, async (req, reply) => {
+    if (await blockIfPilotTenant(fastify.supabase, (req as any).tenantId, reply, 'Exporting to the accounting system')) return
     const body = req.body as {
       format?:   string
       period?:   string
