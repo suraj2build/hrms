@@ -487,9 +487,9 @@ export async function approveLeaveRequest(
  */
 export async function reverseApprovedLeaveRequest(
   supabase: SupabaseClient,
-  opts:     LeaveApprovalOpts,
+  opts:     LeaveApprovalOpts & { reversalReason?: string },
 ): Promise<ApprovalResult<{ id: string; status: string }>> {
-  const { tenantId, requestId, ctx } = opts
+  const { tenantId, requestId, ctx, reversalReason } = opts
 
   // ── 1. Fetch ────────────────────────────────────────────────────────────────
   const fetchResult = await getLeaveRequest(supabase, tenantId, requestId)
@@ -624,7 +624,7 @@ export async function reverseApprovedLeaveRequest(
     action:      'UPDATE',
     performedBy: ctx.approverId,
     oldData:     { status: 'APPROVED' },
-    newData:     { status: 'CANCELLED' },
+    newData:     { status: 'CANCELLED', reversal_reason: reversalReason ?? null },
   })
 
   // ── 7. Event emission (fire-and-forget) ──────────────────────────────────────

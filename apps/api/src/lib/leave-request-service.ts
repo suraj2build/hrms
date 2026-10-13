@@ -600,12 +600,13 @@ export async function listLeaveRequests(
   supabase:   SupabaseClient,
   tenantId:   string,
   filters: {
-    employeeId?: string
-    status?:     string
-    fromDate?:   string
-    toDate?:     string
-    limit?:      number
-    offset?:     number
+    employeeId?:  string
+    employeeIds?: string[]   // scope to a manager's reporting line when no single employeeId is given
+    status?:      string
+    fromDate?:    string
+    toDate?:      string
+    limit?:       number
+    offset?:      number
   } = {},
 ): Promise<LeaveRequestResult<LeaveRequestRow[]>> {
   let q = supabase
@@ -614,7 +615,8 @@ export async function listLeaveRequests(
     .eq('tenant_id', tenantId)
     .order('created_at', { ascending: false })
 
-  if (filters.employeeId) q = q.eq('employee_id', filters.employeeId)
+  if (filters.employeeId)            q = q.eq('employee_id', filters.employeeId)
+  else if (filters.employeeIds)      q = q.in('employee_id', filters.employeeIds)
   if (filters.status)     q = q.eq('status', filters.status)
   if (filters.fromDate)   q = q.gte('from_date', filters.fromDate)
   if (filters.toDate)     q = q.lte('to_date',   filters.toDate)

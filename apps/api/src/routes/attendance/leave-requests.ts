@@ -228,6 +228,7 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
     const isHrAdmin = (HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)
     const isManager = req.userRole === 'manager'
     let employeeId  = parsed.data.employee_id
+    let reportScope: string[] | undefined
 
     if (!isHrAdmin) {
       // Resolve caller's own employee_id (always needed for manager + employee paths)
@@ -258,8 +259,14 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
           })
         }
         // employeeId stays as the validated direct-report id
+      } else if (isManager && !employeeId && parsed.data.status === 'APPROVED') {
+        // Approved-leave tab: a manager with no specific employee_id wants their
+        // whole reporting line's approved leave (the cancel-approval action this
+        // tab exists for is itself scoped to direct reports elsewhere), not just
+        // their own — mirrors GET /approvals/pending's team-wide scope for PENDING.
+        reportScope = await getDirectReportIds(fastify.supabase, req.tenantId, myEmployeeId)
       } else {
-        // Plain employee (or manager not supplying a param) → scope to self
+        // Plain employee (or manager not supplying a param, any other status) → scope to self
         employeeId = myEmployeeId
       }
     }
@@ -286,6 +293,7 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
       .select('id', { count: 'exact', head: true })
       .eq('tenant_id', req.tenantId)
     if (employeeId)                        countQ = countQ.eq('employee_id', employeeId) as any
+    else if (reportScope)                   countQ = countQ.in('employee_id', reportScope) as any
     if (parsed.data.status)                countQ = countQ.eq('status', parsed.data.status) as any
     if ((parsed.data as any).from_date)    countQ = countQ.gte('from_date', (parsed.data as any).from_date) as any
     if ((parsed.data as any).to_date)      countQ = countQ.lte('to_date', (parsed.data as any).to_date) as any
@@ -293,6 +301,7 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
     const [result, { count }] = await Promise.all([
       listLeaveRequests(fastify.supabase, req.tenantId, {
         employeeId,
+        employeeIds: reportScope,
         status:    parsed.data.status,
         fromDate:  (parsed.data as any).from_date,
         toDate:    (parsed.data as any).to_date,
@@ -466,6 +475,20 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
   fastify.post('/leave-requests/:id/cancel-approved', auth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
 
+    const schema = z.object({
+      reason: z.string().max(500).optional(),
+    })
+    // req.body is undefined when the caller sends no body at all (e.g. a plain
+    // POST with no payload) — z.object({}).safeParse(undefined) fails validation
+    // even though every field here is optional, so default to {} first.
+    const parsed = schema.safeParse(req.body ?? {})
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error:   'VALIDATION_ERROR',
+        message: parsed.error.issues[0]?.message,
+      })
+    }
+
     try {
       const result = await reverseApprovedLeaveRequest(fastify.supabase, {
         tenantId:  req.tenantId,
@@ -475,6 +498,7 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
           approverRole: req.userRole,
           tenantId:     req.tenantId,
         },
+        reversalReason: parsed.data.reason,
       })
 
       if (!result.ok) {

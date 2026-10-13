@@ -19,7 +19,7 @@ import {
   Inbox, CheckCircle2, XCircle, Loader2,
   CalendarDays, Clock, Filter, ChevronDown, ChevronUp,
   ChevronLeft, ChevronRight, TrendingUp, ArrowUpDown, ArrowUp, ArrowDown,
-  UserPlus,
+  UserPlus, Ban,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -85,7 +85,7 @@ interface PendingResponse {
   pagination:      PendingPagination
 }
 
-type FilterTab = 'all' | 'leave' | 'regularisation' | 'overtime' | 'comp-off' | 'loans'
+type FilterTab = 'all' | 'leave' | 'regularisation' | 'overtime' | 'comp-off' | 'loans' | 'approved-leave'
 
 const PAGE_LIMIT = 20
 
@@ -157,6 +157,7 @@ function EmptyState({ filter }: { filter: FilterTab }) {
     regularisation: 'No pending regularisation requests',
     overtime:       'No pending overtime requests',
     'comp-off':     'No pending comp-off requests',
+    'approved-leave': 'No approved leave to cancel',
     loans:          'No pending loan or advance requests',
   }
   return (
@@ -475,6 +476,243 @@ function LeaveRequestsTable({
         </tbody>
       </table>
     </div>
+  )
+}
+
+// Cancel-approval reason inline form — expanded per-row, mirrors RejectionForm
+function CancelApprovalForm({
+  onConfirm,
+  onCancel,
+  isPending,
+}: {
+  onConfirm: (reason: string) => void
+  onCancel: () => void
+  isPending: boolean
+}) {
+  const [reason, setReason] = useState('')
+  return (
+    <div className="mt-2 space-y-2 p-3 rounded-md bg-muted/40 border border-border">
+      <p className="text-xs font-medium text-muted-foreground">
+        Cancellation reason (optional) — the employee's balance is restored and attendance is
+        recomputed for the affected dates.
+      </p>
+      <textarea
+        value={reason}
+        onChange={e => setReason(e.target.value)}
+        rows={2}
+        placeholder="Briefly explain why this approval is being cancelled…"
+        className="w-full rounded-md border border-input bg-background px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 ring-primary/50 resize-none"
+      />
+      <div className="flex gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 text-xs gap-1 border-destructive/40 text-destructive hover:bg-destructive/10"
+          onClick={() => onConfirm(reason)}
+          disabled={isPending}
+        >
+          {isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Ban className="h-3.5 w-3.5" />}
+          Confirm Cancel Approval
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-7 text-xs"
+          onClick={onCancel}
+          disabled={isPending}
+        >
+          Back
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+// ── Approved Leave Table (cancel an approval) ─────────────────────────────────
+//
+// Surfaces POST /leave-requests/:id/cancel-approved, which previously had no UI
+// entry point anywhere in apps/web. Only an HR admin or the employee's direct
+// manager may act (enforced server-side by reverseApprovedLeaveRequest — the
+// employee themselves is blocked even if they hold an admin role, and the list
+// query itself is already scoped to "my direct reports" for a manager, "all
+// tenant" for HR admin). A leave whose from_date has already started cannot be
+// reversed (the server 409s — "contact support for a manual correction", since
+// crediting back partially-consumed days needs a manual decision) so the action
+// is hidden once elapsed rather than offering a button that always fails.
+function ApprovedLeaveTable() {
+  const queryClient = useQueryClient()
+  const [actionRowId, setActionRowId] = useState<string | null>(null)
+  const [cancelRowId, setCancelRowId] = useState<string | null>(null)
+
+  const { data, isLoading, isError, refetch } = useQuery<{ data: LeaveRequestItem[]; total: number }>({
+    queryKey: ['approved-leave-list'],
+    queryFn:  () => api.get('/leave-requests?status=APPROVED&limit=100'),
+  })
+  const items = data?.data ?? []
+
+  const cancelMutation = useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason: string }) =>
+      api.post(`/leave-requests/${id}/cancel-approved`, { reason: reason || undefined }),
+    onSuccess: (_, { id }) => {
+      const item = items.find(i => i.id === id)
+      toast.success('Leave approval cancelled', {
+        description: item
+          ? `${employeeName(item.employees)} · ${fmtDate(item.from_date)} — balance restored, attendance recomputed`
+          : 'Balance restored, attendance recomputed',
+      })
+      setActionRowId(null)
+      setCancelRowId(null)
+      queryClient.invalidateQueries({ queryKey: ['approved-leave-list'] })
+      queryClient.invalidateQueries({ queryKey: ['leave-balance'] })
+      queryClient.invalidateQueries({ queryKey: ['notifications', 'inbox'] })
+      queryClient.invalidateQueries({ queryKey: ['ess-approvals-leave'] })
+    },
+    onError: (err: unknown) => {
+      toast.error('Could not cancel this approval', { description: (err as Error).message })
+      setActionRowId(null)
+    },
+  })
+
+  const body = (() => {
+    if (isLoading) return <LoadingState />
+    if (isError) {
+      return (
+        <div className="flex flex-col items-center gap-2 py-16">
+          <p className="text-sm text-destructive">Failed to load approved leave</p>
+          <Button size="sm" variant="outline" onClick={() => refetch()}>Retry</Button>
+        </div>
+      )
+    }
+    if (items.length === 0) {
+      return (
+        <IntelligenceEmptyState
+          title="No approved leave to cancel"
+          description="Approved leave requests you (as HR admin) or your direct reports' approvals (as manager) appear here."
+        />
+      )
+    }
+    return <ApprovedLeaveRows items={items} actionRowId={actionRowId} cancelRowId={cancelRowId} setCancelRowId={setCancelRowId} cancelMutation={cancelMutation} setActionRowId={setActionRowId} />
+  })()
+
+  return (
+    <SectionCard
+      title={`Approved Leave (${items.length})`}
+      icon={<CalendarDays className="h-4 w-4 text-muted-foreground" />}
+      action={
+        <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => refetch()}>
+          Refresh
+        </Button>
+      }
+    >
+      {body}
+    </SectionCard>
+  )
+}
+
+function ApprovedLeaveRows({
+  items, actionRowId, cancelRowId, setCancelRowId, setActionRowId, cancelMutation,
+}: {
+  items:          LeaveRequestItem[]
+  actionRowId:    string | null
+  cancelRowId:    string | null
+  setCancelRowId: (id: string | null) => void
+  setActionRowId: (id: string | null) => void
+  cancelMutation: ReturnType<typeof useMutation<unknown, unknown, { id: string; reason: string }>>
+}) {
+  const todayLocal = new Date().toISOString().slice(0, 10)
+
+  return (
+      <div className="overflow-x-auto -mx-1">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-border">
+              {['Employee', 'Leave Type', 'Period', 'Days', 'Actions'].map(h => (
+                <th key={h} className="text-left text-xs font-semibold text-muted-foreground py-2 px-3 whitespace-nowrap">
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {items.map(row => {
+              const isActioning = actionRowId === row.id
+              const isCancelling = cancelRowId === row.id
+              const elapsed = row.from_date < todayLocal
+
+              return (
+                <Fragment key={row.id}>
+                  <tr className={cn('border-b border-border/50', isActioning ? 'opacity-60 pointer-events-none' : undefined)}>
+                    <td className="py-2 px-3">
+                      <p className="font-medium text-foreground leading-tight">{employeeName(row.employees)}</p>
+                      {row.employees?.employee_code && (
+                        <p className="text-[10px] text-muted-foreground">{row.employees.employee_code}</p>
+                      )}
+                    </td>
+                    <td className="py-2 px-3">
+                      <span className="text-xs font-medium text-foreground">{row.leave_types?.name ?? '—'}</span>
+                      {row.leave_types && (
+                        <div>
+                          <Badge variant={row.leave_types.is_paid ? 'success' : 'secondary'} className="rounded-full text-[9px] px-1.5 py-0">
+                            {row.leave_types.is_paid ? 'Paid' : 'Unpaid'}
+                          </Badge>
+                        </div>
+                      )}
+                    </td>
+                    <td className="py-2 px-3 whitespace-nowrap text-xs text-foreground">
+                      <div className="flex items-center gap-1">
+                        <CalendarDays className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                        <span>
+                          {fmtDate(row.from_date)}
+                          {row.from_date !== row.to_date && <> → {fmtDate(row.to_date)}</>}
+                        </span>
+                      </div>
+                      {row.half_day && <span className="text-[10px] text-muted-foreground">Half day</span>}
+                    </td>
+                    <td className="py-2 px-3 text-center text-foreground font-medium text-sm">{row.computed_days}</td>
+                    <td className="py-2 px-3">
+                      {isActioning ? (
+                        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                      ) : elapsed ? (
+                        <span
+                          className="text-[11px] text-muted-foreground"
+                          title="This leave has already started — reversing a partially- or fully-elapsed leave needs a manual correction, not a self-service cancellation."
+                        >
+                          Already started — contact support
+                        </span>
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 text-xs gap-1 border-destructive/40 text-destructive hover:bg-destructive/10"
+                          onClick={() => setCancelRowId(isCancelling ? null : row.id)}
+                        >
+                          <Ban className="h-3.5 w-3.5" />
+                          Cancel Approval
+                        </Button>
+                      )}
+                    </td>
+                  </tr>
+
+                  {isCancelling && !isActioning && (
+                    <tr className="border-b border-border/50 bg-muted/10">
+                      <td colSpan={5} className="px-3 pb-3">
+                        <CancelApprovalForm
+                          isPending={cancelMutation.isPending}
+                          onConfirm={(reason) => {
+                            setActionRowId(row.id)
+                            cancelMutation.mutate({ id: row.id, reason })
+                          }}
+                          onCancel={() => setCancelRowId(null)}
+                        />
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
   )
 }
 
@@ -955,12 +1193,15 @@ export function ApprovalInbox() {
     { key: 'overtime',       label: 'Overtime',       count: overtimeCount },
     { key: 'comp-off',       label: 'Comp-Off',       count: compOffCount },
     { key: 'loans',          label: 'Loans',          count: loansCount },
+    { key: 'approved-leave', label: 'Approved Leave', count: 0 },
   ]
 
-  // The three new tabs embed the dedicated manager approval pages; the
+  // The three manager-approval tabs embed dedicated pages; "Approved Leave" is
+  // its own self-fetching list (cancel-approval entry point); the
   // leave/regularisation lists, SLA sort and pagination apply only to the
-  // built-in approval types below.
+  // built-in PENDING approval types below.
   const isEmbeddedTab = activeTab === 'overtime' || activeTab === 'comp-off' || activeTab === 'loans'
+    || activeTab === 'approved-leave'
 
   return (
     <PageContainer>
@@ -1045,6 +1286,7 @@ export function ApprovalInbox() {
       {activeTab === 'overtime' && <ManagerTeamOvertimeRequests embedded />}
       {activeTab === 'comp-off' && <ManagerTeamCompOff embedded />}
       {activeTab === 'loans'    && <ManagerLoanApprovals embedded />}
+      {activeTab === 'approved-leave' && <ApprovedLeaveTable />}
 
       {/* Loading */}
       {!isEmbeddedTab && isLoading && (

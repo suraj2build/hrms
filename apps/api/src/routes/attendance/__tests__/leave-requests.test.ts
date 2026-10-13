@@ -473,6 +473,36 @@ describe('POST /leave-requests/:id/cancel-approved', () => {
     expect(publishMock).toHaveBeenCalledOnce()
   })
 
+  it('accepts an optional reason in the request body and still succeeds, 200', async () => {
+    const row = leaveRequestRow({ status: 'APPROVED', approved_by: 'approver-001', approved_at: '2099-05-02T00:00:00.000Z' })
+    getLeaveRequestMock.mockResolvedValue(okResult(row))
+    const { app, rpcMock } = await buildApp()
+    rpcMock.mockResolvedValue({ data: { id: REQUEST_ID, status: 'CANCELLED' }, error: null })
+
+    const res = await app.inject({
+      method: 'POST', url: `/leave-requests/${REQUEST_ID}/cancel-approved`, headers: HEADERS,
+      payload: { reason: 'Employee requested a date change' },
+    })
+
+    expect(res.statusCode).toBe(200)
+    expect(JSON.parse(res.body).data.status).toBe('CANCELLED')
+  })
+
+  it('rejects a reason over 500 characters with 400 VALIDATION_ERROR, RPC never called', async () => {
+    const row = leaveRequestRow({ status: 'APPROVED' })
+    getLeaveRequestMock.mockResolvedValue(okResult(row))
+    const { app, rpcMock } = await buildApp()
+
+    const res = await app.inject({
+      method: 'POST', url: `/leave-requests/${REQUEST_ID}/cancel-approved`, headers: HEADERS,
+      payload: { reason: 'x'.repeat(501) },
+    })
+
+    expect(res.statusCode).toBe(400)
+    expect(JSON.parse(res.body).error).toBe('VALIDATION_ERROR')
+    expect(rpcMock).not.toHaveBeenCalled()
+  })
+
   it('idempotency — reversing twice: the second call is rejected by the status pre-check before the RPC runs again', async () => {
     const approvedRow = leaveRequestRow({ status: 'APPROVED' })
     const cancelledRow = leaveRequestRow({ status: 'CANCELLED' })
