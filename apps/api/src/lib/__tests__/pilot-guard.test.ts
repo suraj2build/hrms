@@ -12,7 +12,7 @@ function supabaseReturning(data: { is_pilot: boolean } | null, error: unknown = 
 }
 
 describe('blockIfPilotTenant', () => {
-  it('blocks (403) and returns true for a pilot tenant', async () => {
+  it('blocks (403) and returns true for a verified pilot tenant', async () => {
     const supabase = supabaseReturning({ is_pilot: true })
     const reply = fakeReply()
 
@@ -26,7 +26,7 @@ describe('blockIfPilotTenant', () => {
     }))
   })
 
-  it('allows (no response sent) for a real, non-pilot tenant', async () => {
+  it('allows (no response sent) for a verified, non-pilot tenant', async () => {
     const supabase = supabaseReturning({ is_pilot: false })
     const reply = fakeReply()
 
@@ -37,32 +37,62 @@ describe('blockIfPilotTenant', () => {
     expect(reply.send).not.toHaveBeenCalled()
   })
 
-  it('fails open (allows) on a query error — never blocks a real action on a transient DB failure', async () => {
+  // ── Fail-CLOSED cases (round 12 correction) ───────────────────────────────
+  // A financial-action gate must never treat "couldn't verify the tenant's
+  // pilot status" as equivalent to "verified not a pilot" — that would let a
+  // pilot tenant's restricted action through on exactly the kind of
+  // transient failure these cases simulate. The correct response is a
+  // temporary 503 and NO write performed, never a silent 200 and never a
+  // permanent 403 (which would wrongly block a real tenant's real action on
+  // a one-off glitch, not just a true pilot tenant).
+
+  it('blocks (503, no write) on a query error — never silently allows a financial write when the tenant cannot be verified', async () => {
     const supabase = supabaseReturning(null, { message: 'connection reset' })
     const reply = fakeReply()
 
     const blocked = await blockIfPilotTenant(supabase, 'tenant-1', reply, 'Finalizing a payroll run')
 
-    expect(blocked).toBe(false)
-    expect(reply.code).not.toHaveBeenCalled()
+    expect(blocked).toBe(true)
+    expect(reply.code).toHaveBeenCalledWith(503)
+    expect(reply.send).toHaveBeenCalledWith(expect.objectContaining({
+      error: 'PILOT_STATUS_CHECK_UNAVAILABLE',
+    }))
   })
 
-  it('fails open (allows) when the client throws synchronously — e.g. a test double with no "tenants" table stubbed', async () => {
+  it('blocks (503, no write) when the client throws synchronously — e.g. a network timeout', async () => {
     const supabase = { from(table: string) { throw new Error(`unexpected table: ${table}`) } }
     const reply = fakeReply()
 
     const blocked = await blockIfPilotTenant(supabase, 'tenant-1', reply, 'Finalizing a payroll run')
 
-    expect(blocked).toBe(false)
-    expect(reply.code).not.toHaveBeenCalled()
+    expect(blocked).toBe(true)
+    expect(reply.code).toHaveBeenCalledWith(503)
+    expect(reply.send).toHaveBeenCalledWith(expect.objectContaining({
+      error: 'PILOT_STATUS_CHECK_UNAVAILABLE',
+    }))
   })
 
-  it('allows when no tenant row is found (maybeSingle returns null data, no error)', async () => {
+  it('blocks (503, no write) when no tenant row is found (maybeSingle returns null data, no error)', async () => {
     const supabase = supabaseReturning(null, null)
     const reply = fakeReply()
 
     const blocked = await blockIfPilotTenant(supabase, 'tenant-1', reply, 'Finalizing a payroll run')
 
-    expect(blocked).toBe(false)
+    expect(blocked).toBe(true)
+    expect(reply.code).toHaveBeenCalledWith(503)
+  })
+
+  it('an async rejection from the lookup also fails closed (503), not an uncaught rejection', async () => {
+    const chain: any = { select: () => chain, eq: () => chain, maybeSingle: () => Promise.reject(new Error('timeout')) }
+    const supabase = { from: () => chain }
+    const reply = fakeReply()
+
+    const blocked = await blockIfPilotTenant(supabase, 'tenant-1', reply, 'Finalizing a payroll run')
+
+    expect(blocked).toBe(true)
+    expect(reply.code).toHaveBeenCalledWith(503)
+    expect(reply.send).toHaveBeenCalledWith(expect.objectContaining({
+      error: 'PILOT_STATUS_CHECK_UNAVAILABLE',
+    }))
   })
 })

@@ -78,6 +78,16 @@ async function buildApp(opts: { slips: any[]; bankStatutory: any[] }) {
     from(table: string) {
       if (table === 'payroll_slips')           return makeTable(opts.slips, { pageCap: ROW_PAGE_CAP })
       if (table === 'employee_bank_statutory') return makeTable(opts.bankStatutory, { inLimit: IN_CHUNK_LIMIT })
+      // pilot-guard's tenant lookup — a verified, non-pilot tenant so the
+      // real route logic under test still runs (pilot-guard now fails
+      // CLOSED on an unstubbed/erroring lookup, not open).
+      if (table === 'tenants') {
+        return {
+          select() { return this },
+          eq() { return this },
+          maybeSingle: () => Promise.resolve({ data: { is_pilot: false }, error: null }),
+        }
+      }
       throw new Error(`unexpected table in test: ${table}`)
     },
   } as any)
