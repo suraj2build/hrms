@@ -24,3 +24,6 @@ apps/apps.zip
 
 # Claude Code internal worktrees
 .claude/worktrees/
+
+# Pilot seed script output — contains a real shared password, never commit it.
+pilot-seed-result.json
