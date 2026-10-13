@@ -8,6 +8,7 @@ import { isHrAdmin, resolveCallerEmployeeId, isDirectReport } from '../../lib/ma
 import { revokeEmployeeAuth } from '../../lib/user-account-service.js'
 import { serverError, conflictError, ErrorCode } from '../../lib/api-errors.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { blockIfPilotTenant } from '../../lib/pilot-guard.js'
 
 // ─── Schemas ─────────────────────────────────────────────────────────────────
 
@@ -762,6 +763,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
   // ── PATCH /employees/:id/separation-ff/mark-paid ─────────────────────────
 
   fastify.patch('/employees/:id/separation-ff/mark-paid', hrAdminAuth, async (req: any, reply) => {
+    if (await blockIfPilotTenant(fastify.supabase, req.tenantId, reply, 'Marking a full & final settlement as paid')) return
     if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
 
@@ -907,6 +909,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
   // durably logged to fnf_payment_correction_log (migration 452) with its
   // full original values, inside the same transaction as the correction.
   fastify.patch('/employees/:id/separation-ff/correct-payment', hrAdminAuth, async (req: any, reply) => {
+    if (await blockIfPilotTenant(fastify.supabase, req.tenantId, reply, 'Correcting a paid full & final settlement')) return
     if (req.userRole !== 'super_admin')
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'Only super_admin may correct a paid F&F settlement' })
 

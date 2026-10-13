@@ -18,6 +18,7 @@ import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import { serverError, notFound, validationError, conflictError, ErrorCode } from '../../lib/api-errors.js'
 import { buildPayrollFinancialLedger, reversePayrollLedger, exportGeneralLedger } from '../../lib/payroll-accounting-engine.js'
 import { logRunEvent } from '../../lib/payroll-run-events.js'
+import { blockIfPilotTenant } from '../../lib/pilot-guard.js'
 
 export default async function payrollRunLedgersRoutes(fastify: FastifyInstance) {
   const hrAdminAuth = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
@@ -31,6 +32,7 @@ export default async function payrollRunLedgersRoutes(fastify: FastifyInstance) 
   fastify.post('/payroll/runs/:id/ledger', hrAdminAuth, async (req: any, reply) => {
     const { id }   = req.params as { id: string }
     const tenantId = req.tenantId as string
+    if (await blockIfPilotTenant(fastify.supabase, tenantId, reply, 'Generating a payroll financial ledger')) return
 
     const bodySchema = z.object({
       ledger_type:      z.enum(['payroll','accrual','payout','adjustment']).default('payroll'),
@@ -136,6 +138,7 @@ export default async function payrollRunLedgersRoutes(fastify: FastifyInstance) 
   fastify.post('/payroll/ledgers/:ledgerId/post', hrAdminAuth, async (req: any, reply) => {
     const { ledgerId } = req.params as { ledgerId: string }
     const tenantId     = req.tenantId as string
+    if (await blockIfPilotTenant(fastify.supabase, tenantId, reply, 'Posting a ledger to the general ledger')) return
 
     // mark_ledger_posted_atomic (migration 452) locks the ledger's own
     // payroll_runs row FOR UPDATE as its first action — the SAME row,
@@ -174,6 +177,7 @@ export default async function payrollRunLedgersRoutes(fastify: FastifyInstance) 
   fastify.post('/payroll/ledgers/:ledgerId/reverse', hrAdminAuth, async (req: any, reply) => {
     const { ledgerId } = req.params as { ledgerId: string }
     const tenantId     = req.tenantId as string
+    if (await blockIfPilotTenant(fastify.supabase, tenantId, reply, 'Reversing a posted ledger')) return
 
     const bodySchema = z.object({ reason: z.string().min(5).max(500) })
     const parsed = bodySchema.safeParse(req.body ?? {})
@@ -204,6 +208,7 @@ export default async function payrollRunLedgersRoutes(fastify: FastifyInstance) 
   fastify.get('/payroll/ledgers/:ledgerId/export', hrAdminAuth, async (req: any, reply) => {
     const { ledgerId } = req.params as { ledgerId: string }
     const tenantId     = req.tenantId as string
+    if (await blockIfPilotTenant(fastify.supabase, tenantId, reply, 'Exporting the general ledger')) return
     const qSchema = z.object({
       format: z.enum(['csv','tally','sap','zoho','quickbooks','xlsx']).default('csv'),
     })

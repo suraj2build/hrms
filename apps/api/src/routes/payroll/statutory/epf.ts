@@ -11,6 +11,7 @@ import { logAction } from '../../../lib/audit-service.js'
 import { HR_ADMIN_ROLES } from '../../../lib/rbac.js'
 import { fetchAllRows, fetchAllRowsByKeyset } from '../../../lib/supabase-paginate.js'
 import { serverError, ErrorCode } from '../../../lib/api-errors.js'
+import { blockIfPilotTenant } from '../../../lib/pilot-guard.js'
 
 export default async function epfRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
@@ -766,6 +767,7 @@ export default async function epfRoutes(fastify: FastifyInstance) {
 
   // ── GET /payroll/statutory/epf/export/:month ──────────────────────────────────
   fastify.get('/export/:month', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
+    if (await blockIfPilotTenant(fastify.supabase, req.tenantId, reply, 'Exporting the EPF ECR file')) return
     const { month } = req.params as { month: string }
 
     // fetchAllRows(): the EPFO ECR export must include every employee's row —

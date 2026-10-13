@@ -35,6 +35,7 @@ export default async function integrationRoutes(fastify: FastifyInstance) {
   // POST /integrations/pan/verify
   // -------------------------------------------------------------------------
   fastify.post('/integrations/pan/verify', hrAdminAuth, async (req, reply) => {
+    if (await blockIfPilotTenant(fastify.supabase, (req as any).tenantId, reply, 'Verifying a PAN (paid external lookup)')) return
     const body = req.body as { pan?: string }
     if (!body.pan || typeof body.pan !== 'string') {
       return reply.status(400).send({ error: 'pan is required' })

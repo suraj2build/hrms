@@ -13,6 +13,7 @@ import { serverError, notFound, conflictError, ErrorCode } from '../../lib/api-e
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import { fetchTenantTz } from '../../lib/attendance-engine.js'
 import { getLocalDate } from '../../lib/org-context.js'
+import { blockIfPilotTenant } from '../../lib/pilot-guard.js'
 
 const RECOVERY_TYPES = ['payroll_deduction', 'manual_payment', 'adjustment'] as const
 
@@ -329,6 +330,7 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
   // ── POST /payroll/advances/:id/disburse ──────────────────────────────────────
   fastify.post('/:id/disburse', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const { id } = req.params as { id: string }
+    if (await blockIfPilotTenant(fastify.supabase, req.tenantId, reply, 'Disbursing a salary advance')) return
 
     const schema = z.object({
       disbursed_date: z.string(),
@@ -529,6 +531,7 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
 
   // ── POST /payroll/advances/recover ───────────────────────────────────────────
   fastify.post('/recover', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
+    if (await blockIfPilotTenant(fastify.supabase, req.tenantId, reply, 'Recording an advance recovery')) return
     const schema = z.object({
       advance_id: z.string().uuid(),
       schedule_id: z.string().uuid().optional(),

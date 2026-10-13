@@ -3857,6 +3857,7 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
   fastify.post('/payroll/runs/:id/rollback', hrAdminAuth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
     const tenantId = req.tenantId as string
+    if (await blockIfPilotTenant(fastify.supabase, tenantId, reply, 'Rolling back a payroll run')) return
     const { reason } = (req.body ?? {}) as { reason?: string }
 
     // rollback_payroll_run_atomic (migration 452) locks the payroll_runs

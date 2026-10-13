@@ -177,7 +177,12 @@ function ffRow(overrides: Row = {}) {
 }
 
 async function buildApp(seed: Record<string, Row[]>, opts: BuildAppOpts = {}) {
-  const fake = makeFakeSupabase(seed, opts.raceHooks)
+  // pilot-guard's tenant lookup — default to a verified, non-pilot tenant so
+  // routes gated by blockIfPilotTenant (mark-paid, correct-payment) still
+  // reach their real logic under test; a test can override by seeding its
+  // own 'tenants' row.
+  const fullSeed = { tenants: [{ id: TENANT_ID, is_pilot: false }], ...seed }
+  const fake = makeFakeSupabase(fullSeed, opts.raceHooks)
   const app = Fastify({ logger: false })
   app.decorateRequest('tenantId', '')
   app.decorateRequest('userId', '')
@@ -415,6 +420,24 @@ describe('PATCH /separation-ff/mark-paid — delegates to mark_fnf_paid_atomic (
     expect(fake.rpc).toHaveBeenCalledWith('mark_fnf_paid_atomic', expect.objectContaining({
       p_tenant_id: TENANT_ID, p_employee_id: EMPLOYEE_ID, p_user_id: 'hr-admin-001',
     }))
+    await app.close()
+  })
+
+  it('a pilot tenant is blocked (403) before the RPC is ever called — no real money marked paid', async () => {
+    const { app, fake } = await buildApp({
+      tenants: [{ id: TENANT_ID, is_pilot: true }],
+      employees: [employeeRow()],
+      separation_ff_summary: [ffRow({ status: 'approved' })],
+    })
+
+    const res = await app.inject({
+      method: 'PATCH', url: `/employees/${EMPLOYEE_ID}/separation-ff/mark-paid`, headers: HEADERS, payload: {},
+    })
+
+    expect(res.statusCode).toBe(403)
+    expect(JSON.parse(res.body).error).toBe('PILOT_TENANT_RESTRICTED')
+    expect(fake.rpc).not.toHaveBeenCalled()
+    expect(fake._db.separation_ff_summary[0].status).toBe('approved')
     await app.close()
   })
 

@@ -10,6 +10,7 @@ import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { blockIfPilotTenant } from '../../lib/pilot-guard.js'
 
 const LOAN_TYPES = ['personal', 'housing', 'vehicle', 'education', 'emergency', 'other'] as const
 const PAYMENT_TYPES = ['emi', 'prepayment', 'foreclosure', 'adjustment'] as const
@@ -263,6 +264,7 @@ export default async function loansRoutes(fastify: FastifyInstance) {
   // ── POST /payroll/loans/:id/disburse ─────────────────────────────────────────
   fastify.post('/:id/disburse', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const { id } = req.params as { id: string }
+    if (await blockIfPilotTenant(fastify.supabase, req.tenantId, reply, 'Disbursing an employee loan')) return
 
     const schema = z.object({
       disbursed_date: z.string(),
@@ -459,6 +461,7 @@ export default async function loansRoutes(fastify: FastifyInstance) {
   // ── POST /payroll/loans/:id/foreclose ────────────────────────────────────────
   fastify.post('/:id/foreclose', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const { id } = req.params as { id: string }
+    if (await blockIfPilotTenant(fastify.supabase, req.tenantId, reply, 'Foreclosing an employee loan')) return
 
     const schema = z.object({
       foreclosure_amount: z.number().positive(),
@@ -564,6 +567,7 @@ export default async function loansRoutes(fastify: FastifyInstance) {
 
   // ── POST /payroll/loans/record-payment ───────────────────────────────────────
   fastify.post('/record-payment', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
+    if (await blockIfPilotTenant(fastify.supabase, req.tenantId, reply, 'Recording a loan payment')) return
     const schema = z.object({
       loan_id: z.string().uuid(),
       schedule_id: z.string().uuid().optional(),
