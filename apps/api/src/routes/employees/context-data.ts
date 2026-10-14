@@ -41,6 +41,10 @@ export default async function employeeContextDataRoutes(fastify: FastifyInstance
   // (manager-scope.ts) already used by overtime/comp-off/separation
   // clearance/Team Lifecycle for the exact same "is this caller allowed to
   // see this employee" question. HR admins bypass, same as everywhere else.
+  // This is the right scope for attendance/overtime (operational visibility,
+  // consistent with team-assets.ts/team-helpdesk.ts/team-regularisation-
+  // context.ts, which all use the full subordinate tree via
+  // getDirectReportIds) — but NOT for payroll-summary, see below.
   async function canAccessEmployee(req: any, employeeId: string): Promise<boolean> {
     if (isHrAdmin(req.userRole)) return true
     const callerEmpId = await resolveCallerEmployeeId(fastify.supabase, req.userId, req.tenantId)
@@ -48,6 +52,30 @@ export default async function employeeContextDataRoutes(fastify: FastifyInstance
     if (callerEmpId === employeeId) return true
     const reportIds = await getDirectReportIds(fastify.supabase, req.tenantId, callerEmpId)
     return reportIds.includes(employeeId)
+  }
+
+  // Compensation visibility is a narrower, product-defined policy than
+  // general team-ops visibility — manager-compensation.ts (Program 5 · P5.3,
+  // the ONE other place in this codebase that gives a manager compensation
+  // data) deliberately scopes to immediate direct reports only
+  // (employees.manager_id === callerEmpId), never the deep subordinate tree
+  // getDirectReportIds returns. Reusing the broader ops-visibility check
+  // above for payroll-summary would let a manager-of-managers see a
+  // grandchild report's CTC/net pay — wider than the policy this product
+  // already enforces for every other compensation view. Mirrored exactly.
+  async function canAccessCompensation(req: any, employeeId: string): Promise<boolean> {
+    if (isHrAdmin(req.userRole)) return true
+    const callerEmpId = await resolveCallerEmployeeId(fastify.supabase, req.userId, req.tenantId)
+    if (!callerEmpId) return false
+    if (callerEmpId === employeeId) return true
+    const { data } = await fastify.supabase
+      .from('employees')
+      .select('id')
+      .eq('id', employeeId)
+      .eq('tenant_id', req.tenantId)
+      .eq('manager_id', callerEmpId)
+      .maybeSingle()
+    return !!data
   }
 
   // ==========================================================================
@@ -155,8 +183,8 @@ export default async function employeeContextDataRoutes(fastify: FastifyInstance
     }
 
     const { id } = req.params as { id: string }
-    if (!await canAccessEmployee(req, id)) {
-      return reply.code(403).send({ error: 'FORBIDDEN', message: 'You can only view your own team’s data' })
+    if (!await canAccessCompensation(req, id)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'You can only view your own direct reports’ compensation' })
     }
 
     const emp = await getEmployee(id, req.tenantId)
