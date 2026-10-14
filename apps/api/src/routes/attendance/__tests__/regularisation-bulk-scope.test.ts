@@ -9,6 +9,11 @@
  * check (immediate-manager-only) would always refuse it per-item. Fixed to
  * use getImmediateReportIds, matching the guard's own stated intent and the
  * real downstream authorization.
+ *
+ * Full matrix per the user's explicit ask: grandchild exclusion, a mixed
+ * batch proving NO item is processed when any one is unauthorized (not
+ * just the unauthorized one skipped), reassignment, cross-tenant, an
+ * unlinked manager, and HR-admin access preserved.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify'
@@ -25,36 +30,64 @@ const approveMock = approveRegularisation as ReturnType<typeof vi.fn>
 const rejectMock  = rejectRegularisation  as ReturnType<typeof vi.fn>
 
 const TENANT_ID        = 'tenant-001'
-const MANAGER_ID       = 'emp-manager'
-const DIRECT_REPORT_ID = 'emp-direct-report'
-const GRANDCHILD_ID    = 'emp-grandchild'   // manager_id = DIRECT_REPORT_ID — NOT an immediate report of MANAGER_ID
+const OTHER_TENANT_ID  = 'tenant-002'
+const MANAGER_ID        = 'emp-manager'
+const DIRECT_REPORT_ID  = 'emp-direct-report'
+const DIRECT_REPORT_2_ID = 'emp-direct-report-2'
+const GRANDCHILD_ID     = 'emp-grandchild'
+const CROSS_TENANT_EMP_ID = 'emp-other-tenant'
 
-const REG_DIRECT      = 'ec98fe8b-8623-494b-ab04-2e154a38d3b1'
-const REG_GRANDCHILD  = 'd6d1f12d-cc77-44b3-af0c-bccc24f4a098'
+const REG_DIRECT       = 'ec98fe8b-8623-494b-ab04-2e154a38d3b1'
+const REG_DIRECT_2     = 'a1a1a1a1-1111-1111-1111-111111111111'
+const REG_GRANDCHILD   = 'd6d1f12d-cc77-44b3-af0c-bccc24f4a098'
+const REG_CROSS_TENANT = 'b2b2b2b2-2222-2222-2222-222222222222'
 
-function buildSupabase() {
+interface EmployeeRow { managerId: string | null; tenantId: string }
+interface Fixture {
+  employees: Record<string, EmployeeRow>
+  callerEmployeeId: string | null
+  regs: Record<string, { employeeId: string; tenantId: string }>
+}
+
+function baseFixture(): Fixture {
+  return {
+    employees: {
+      [DIRECT_REPORT_ID]:   { managerId: MANAGER_ID,       tenantId: TENANT_ID },
+      [DIRECT_REPORT_2_ID]: { managerId: MANAGER_ID,       tenantId: TENANT_ID },
+      [GRANDCHILD_ID]:      { managerId: DIRECT_REPORT_ID, tenantId: TENANT_ID },
+      [CROSS_TENANT_EMP_ID]: { managerId: MANAGER_ID,      tenantId: OTHER_TENANT_ID },
+    },
+    callerEmployeeId: MANAGER_ID,
+    regs: {
+      [REG_DIRECT]:       { employeeId: DIRECT_REPORT_ID,   tenantId: TENANT_ID },
+      [REG_DIRECT_2]:     { employeeId: DIRECT_REPORT_2_ID, tenantId: TENANT_ID },
+      [REG_GRANDCHILD]:   { employeeId: GRANDCHILD_ID,      tenantId: TENANT_ID },
+      [REG_CROSS_TENANT]: { employeeId: CROSS_TENANT_EMP_ID, tenantId: OTHER_TENANT_ID },
+    },
+  }
+}
+
+function buildSupabase(fx: Fixture) {
   return {
     from(table: string) {
       if (table === 'profiles') {
         const chain: any = {
           select: () => chain,
           eq:     () => chain,
-          maybeSingle: () => Promise.resolve({ data: { employee_id: MANAGER_ID }, error: null }),
-          single:      () => Promise.resolve({ data: { employee_id: MANAGER_ID }, error: null }),
+          maybeSingle: () => Promise.resolve({ data: { employee_id: fx.callerEmployeeId }, error: null }),
+          single:      () => Promise.resolve({ data: { employee_id: fx.callerEmployeeId }, error: null }),
         }
         return chain
       }
       if (table === 'employees') {
-        // getImmediateReportIds: .select('id').eq('manager_id', X).eq('tenant_id', Y)
         const chain: any = {
-          _managerId: null as string | null,
+          _filters: {} as Record<string, unknown>,
           select: () => chain,
-          eq(field: string, value: unknown) {
-            if (field === 'manager_id') chain._managerId = value
-            return chain
-          },
+          eq(field: string, value: unknown) { chain._filters[field] = value; return chain },
           then(resolve: (v: unknown) => void) {
-            const ids = chain._managerId === MANAGER_ID ? [DIRECT_REPORT_ID] : []
+            const ids = Object.entries(fx.employees)
+              .filter(([, e]) => e.managerId === chain._filters.manager_id && e.tenantId === chain._filters.tenant_id)
+              .map(([id]) => id)
             resolve({ data: ids.map(id => ({ id })), error: null })
             return Promise.resolve()
           },
@@ -63,19 +96,16 @@ function buildSupabase() {
       }
       if (table === 'attendance_regularisation') {
         const chain: any = {
+          _filters: {} as Record<string, unknown>,
           select: () => chain,
-          eq:     () => chain,
-          in(field: string, ids: string[]) {
-            if (field === 'id') chain._ids = ids
-            return chain
-          },
+          eq(field: string, value: unknown) { chain._filters[field] = value; return chain },
+          in(field: string, ids: string[]) { if (field === 'id') chain._ids = ids; return chain },
           then(resolve: (v: unknown) => void) {
-            const all = [
-              { id: REG_DIRECT,     employee_id: DIRECT_REPORT_ID },
-              { id: REG_GRANDCHILD, employee_id: GRANDCHILD_ID },
-            ]
-            const scoped = all.filter(r => chain._ids?.includes(r.id))
-            resolve({ data: scoped, error: null })
+            const tenantId = chain._filters.tenant_id
+            const rows = Object.entries(fx.regs)
+              .filter(([id, r]) => r.tenantId === tenantId && (!chain._ids || chain._ids.includes(id)))
+              .map(([id, r]) => ({ id, employee_id: r.employeeId }))
+            resolve({ data: rows, error: null })
             return Promise.resolve()
           },
         }
@@ -86,7 +116,7 @@ function buildSupabase() {
   }
 }
 
-async function buildApp(): Promise<FastifyInstance> {
+async function buildApp(fx: Fixture, role: string = 'manager'): Promise<FastifyInstance> {
   const app = Fastify({ logger: false })
   app.decorateRequest('tenantId', '')
   app.decorateRequest('userId', '')
@@ -94,9 +124,9 @@ async function buildApp(): Promise<FastifyInstance> {
   app.decorate('authenticate', async (req: FastifyRequest) => {
     ;(req as any).tenantId = TENANT_ID
     ;(req as any).userId   = 'manager-profile-001'
-    ;(req as any).userRole = 'manager'
+    ;(req as any).userRole = role
   })
-  app.decorate('supabase', buildSupabase() as any)
+  app.decorate('supabase', buildSupabase(fx) as any)
   await app.register(regularisationRoutes)
   await app.ready()
   return app
@@ -105,28 +135,110 @@ async function buildApp(): Promise<FastifyInstance> {
 const HEADERS = { 'content-type': 'application/json', authorization: 'Bearer test-token' }
 
 beforeEach(() => {
-  vi.clearAllMocks()
+  vi.resetAllMocks()
 })
 
 describe('POST /attendance/regularisation/bulk-approve — ownership guard scope', () => {
   it('403s a batch containing a grandchild\'s request instead of letting it through to approveRegularisation', async () => {
-    const app = await buildApp()
+    const app = await buildApp(baseFixture())
     const res = await app.inject({
       method: 'POST', url: '/attendance/regularisation/bulk-approve', headers: HEADERS,
       payload: { ids: [REG_DIRECT, REG_GRANDCHILD] },
     })
     expect(res.statusCode).toBe(403)
-    const body = JSON.parse(res.body)
-    expect(body.unauthorized_ids).toEqual([REG_GRANDCHILD])
+    expect(JSON.parse(res.body).unauthorized_ids).toEqual([REG_GRANDCHILD])
     expect(approveMock).not.toHaveBeenCalled()
   })
 
-  it('allows a batch containing only the immediate direct report\'s request through the gate', async () => {
+  it('BULK ATOMICITY: a mixed batch (one authorized + one unauthorized) processes ZERO items, not just skips the bad one', async () => {
+    const app = await buildApp(baseFixture())
+    const res = await app.inject({
+      method: 'POST', url: '/attendance/regularisation/bulk-approve', headers: HEADERS,
+      payload: { ids: [REG_DIRECT, REG_DIRECT_2, REG_GRANDCHILD] },
+    })
+    expect(res.statusCode).toBe(403)
+    // approveMock must not have been called for REG_DIRECT or REG_DIRECT_2 either —
+    // the whole batch is validated before any item is touched.
+    expect(approveMock).not.toHaveBeenCalled()
+  })
+
+  it('allows a batch containing only immediate direct reports\' requests through the gate', async () => {
     approveMock.mockResolvedValue({ ok: true, value: { id: REG_DIRECT, status: 'approved', employee_id: DIRECT_REPORT_ID, date: '2026-01-05', requested_check_in: null, requested_check_out: null } })
-    const app = await buildApp()
+    const app = await buildApp(baseFixture())
+    const res = await app.inject({
+      method: 'POST', url: '/attendance/regularisation/bulk-approve', headers: HEADERS,
+      payload: { ids: [REG_DIRECT, REG_DIRECT_2] },
+    })
+    expect(res.statusCode).toBe(200)
+    expect(approveMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('REASSIGNMENT: once the grandchild\'s request\'s owner is promoted to a direct report, the batch gate allows it', async () => {
+    approveMock.mockResolvedValue({ ok: true, value: { id: REG_GRANDCHILD, status: 'approved', employee_id: GRANDCHILD_ID, date: '2026-01-05', requested_check_in: null, requested_check_out: null } })
+    const fx = baseFixture()
+    fx.employees[GRANDCHILD_ID].managerId = MANAGER_ID
+    const app = await buildApp(fx)
+    const res = await app.inject({
+      method: 'POST', url: '/attendance/regularisation/bulk-approve', headers: HEADERS,
+      payload: { ids: [REG_GRANDCHILD] },
+    })
+    expect(res.statusCode).toBe(200)
+  })
+
+  it('REASSIGNMENT: once a direct report is moved off this manager, the batch gate refuses it', async () => {
+    const fx = baseFixture()
+    fx.employees[DIRECT_REPORT_ID].managerId = 'some-other-manager'
+    const app = await buildApp(fx)
     const res = await app.inject({
       method: 'POST', url: '/attendance/regularisation/bulk-approve', headers: HEADERS,
       payload: { ids: [REG_DIRECT] },
+    })
+    expect(res.statusCode).toBe(403)
+    expect(approveMock).not.toHaveBeenCalled()
+  })
+
+  it('CROSS-TENANT: an id belonging to another tenant is never flagged by the ownership guard (nothing in THIS tenant to match against) and instead falls through to the per-item call\'s own tenant-scoped NOT_FOUND — confirmed never approved', async () => {
+    // This is a genuine, narrower nuance worth recording rather than papering
+    // over: the bulk ownership guard's `unauthorized` list is computed only
+    // from rows that DID resolve inside this tenant (`.eq('tenant_id', ...)`)
+    // but belong to someone who isn't a direct report. An id that resolves to
+    // NOTHING in this tenant (wrong tenant, or simply doesn't exist) produces
+    // an empty match either way, so the guard has nothing to flag -- it isn't
+    // distinguishing "not yours" from "not found here" at the gate. The
+    // request still reaches approveRegularisation per-item, but THAT call is
+    // independently tenant-scoped and returns NOT_FOUND for a cross-tenant id
+    // -- so nothing cross-tenant is ever read or mutated either way. Different
+    // code path than the grandchild case (which 403s at the gate), same safe
+    // outcome (never approved).
+    const app = await buildApp(baseFixture())
+    const res = await app.inject({
+      method: 'POST', url: '/attendance/regularisation/bulk-approve', headers: HEADERS,
+      payload: { ids: [REG_CROSS_TENANT] },
+    })
+    expect(res.statusCode).toBe(200)   // the bulk route always 200s; per-item outcome is in `results`
+    const body = JSON.parse(res.body)
+    expect(body.summary.approved).toBe(0)
+    expect(body.results[0].ok).toBe(false)
+  })
+
+  it('UNLINKED MANAGER: a manager with no linked employee_id is refused outright, before any lookup', async () => {
+    const fx = baseFixture()
+    fx.callerEmployeeId = null
+    const app = await buildApp(fx)
+    const res = await app.inject({
+      method: 'POST', url: '/attendance/regularisation/bulk-approve', headers: HEADERS,
+      payload: { ids: [REG_DIRECT] },
+    })
+    expect(res.statusCode).toBe(403)
+    expect(approveMock).not.toHaveBeenCalled()
+  })
+
+  it('HR ADMIN: bypasses the ownership guard entirely, including for the grandchild\'s request', async () => {
+    approveMock.mockResolvedValue({ ok: true, value: { id: REG_GRANDCHILD, status: 'approved', employee_id: GRANDCHILD_ID, date: '2026-01-05', requested_check_in: null, requested_check_out: null } })
+    const app = await buildApp(baseFixture(), 'hr_admin')
+    const res = await app.inject({
+      method: 'POST', url: '/attendance/regularisation/bulk-approve', headers: HEADERS,
+      payload: { ids: [REG_GRANDCHILD] },
     })
     expect(res.statusCode).toBe(200)
     expect(approveMock).toHaveBeenCalledTimes(1)
@@ -135,14 +247,34 @@ describe('POST /attendance/regularisation/bulk-approve — ownership guard scope
 
 describe('POST /attendance/regularisation/bulk-reject — ownership guard scope', () => {
   it('403s a batch containing a grandchild\'s request instead of letting it through to rejectRegularisation', async () => {
-    const app = await buildApp()
+    const app = await buildApp(baseFixture())
     const res = await app.inject({
       method: 'POST', url: '/attendance/regularisation/bulk-reject', headers: HEADERS,
       payload: { ids: [REG_GRANDCHILD] },
     })
     expect(res.statusCode).toBe(403)
-    const body = JSON.parse(res.body)
-    expect(body.unauthorized_ids).toEqual([REG_GRANDCHILD])
+    expect(JSON.parse(res.body).unauthorized_ids).toEqual([REG_GRANDCHILD])
     expect(rejectMock).not.toHaveBeenCalled()
+  })
+
+  it('BULK ATOMICITY: a mixed batch processes ZERO items when any one is unauthorized', async () => {
+    const app = await buildApp(baseFixture())
+    const res = await app.inject({
+      method: 'POST', url: '/attendance/regularisation/bulk-reject', headers: HEADERS,
+      payload: { ids: [REG_DIRECT, REG_GRANDCHILD] },
+    })
+    expect(res.statusCode).toBe(403)
+    expect(rejectMock).not.toHaveBeenCalled()
+  })
+
+  it('HR ADMIN: bypasses the ownership guard entirely', async () => {
+    rejectMock.mockResolvedValue({ ok: true, value: { id: REG_GRANDCHILD, status: 'rejected' } })
+    const app = await buildApp(baseFixture(), 'hr_admin')
+    const res = await app.inject({
+      method: 'POST', url: '/attendance/regularisation/bulk-reject', headers: HEADERS,
+      payload: { ids: [REG_GRANDCHILD] },
+    })
+    expect(res.statusCode).toBe(200)
+    expect(rejectMock).toHaveBeenCalledTimes(1)
   })
 })

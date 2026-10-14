@@ -16,43 +16,54 @@
  *      "Approved" tab backing the cancel-approval action — must list only
  *      immediate reports' approved leave.
  *
- * Both are verified against a three-level hierarchy (manager -> direct report
- * -> grandchild) so "immediate only" and "full tree" produce different,
- * observable results.
+ * Full matrix per the user's explicit ask after checkpoint 6: grandchild
+ * exclusion, reassignment (old manager loses / new manager gains, read live
+ * off employees.manager_id), cross-tenant exclusion, an unlinked manager
+ * (no employee_id), and HR-admin access preserved (tenant-wide, unaffected
+ * by the manager-scope fix).
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify'
 
 import leaveRequestsRoutes from '../leave-requests.js'
 
-const TENANT_ID       = 'tenant-test-001'
-const MANAGER_ID      = 'emp-manager'      // the caller — manages DIRECT_REPORT_ID only
-const DIRECT_REPORT_ID = 'emp-direct-report'  // manager_id = MANAGER_ID
-const GRANDCHILD_ID    = 'emp-grandchild'     // manager_id = DIRECT_REPORT_ID (deep tree only)
+const TENANT_ID        = 'tenant-test-001'
+const OTHER_TENANT_ID  = 'tenant-test-002'
+const MANAGER_ID        = 'emp-manager'
+const DIRECT_REPORT_ID  = 'emp-direct-report'
+const GRANDCHILD_ID     = 'emp-grandchild'
+const CROSS_TENANT_ID   = 'emp-other-tenant'   // exists only in OTHER_TENANT_ID
 
-// employee_id -> manager_id, used by getImmediateReportIds' employees query.
-const MANAGER_OF: Record<string, string | null> = {
-  [DIRECT_REPORT_ID]: MANAGER_ID,
-  [GRANDCHILD_ID]:    DIRECT_REPORT_ID,
-}
-
-function buildMockSupabase(rows: {
+interface EmployeeRow { managerId: string | null; tenantId: string }
+interface Fixture {
+  employees: Record<string, EmployeeRow>
+  callerEmployeeId: string | null
   leaveApproved?: Array<{ id: string; employee_id: string }>
   pendingCounts?: { leave?: string[]; reg?: string[]; ot?: string[]; co?: string[] }
-}) {
-  const leaveApproved = rows.leaveApproved ?? []
-  const pending = rows.pendingCounts ?? {}
+}
+
+function baseEmployees(): Record<string, EmployeeRow> {
+  return {
+    [DIRECT_REPORT_ID]: { managerId: MANAGER_ID,       tenantId: TENANT_ID },
+    [GRANDCHILD_ID]:    { managerId: DIRECT_REPORT_ID, tenantId: TENANT_ID },
+    [CROSS_TENANT_ID]:  { managerId: MANAGER_ID,       tenantId: OTHER_TENANT_ID },   // same manager_id value, different tenant — must still be excluded
+  }
+}
+
+function buildMockSupabase(fx: Fixture) {
+  const leaveApproved = fx.leaveApproved ?? []
+  const pending = fx.pendingCounts ?? {}
 
   function employeesChain() {
     const chain: any = {
+      _filters: {} as Record<string, unknown>,
       select: () => chain,
-      eq(field: string, value: unknown) {
-        if (field === 'manager_id') chain._managerId = value
-        return chain
-      },
+      eq(field: string, value: unknown) { chain._filters[field] = value; return chain },
       then(resolve: (v: unknown) => void) {
-        const reportIds = Object.entries(MANAGER_OF)
-          .filter(([, mgr]) => mgr === chain._managerId)
+        const tenantId = chain._filters.tenant_id
+        const managerId = chain._filters.manager_id
+        const reportIds = Object.entries(fx.employees)
+          .filter(([, e]) => e.managerId === managerId && e.tenantId === tenantId)
           .map(([id]) => id)
         resolve({ data: reportIds.map(id => ({ id })), error: null })
         return Promise.resolve()
@@ -94,7 +105,7 @@ function buildMockSupabase(rows: {
         const chain: any = {
           select: () => chain,
           eq:     () => chain,
-          maybeSingle: () => Promise.resolve({ data: { employee_id: MANAGER_ID }, error: null }),
+          maybeSingle: () => Promise.resolve({ data: { employee_id: fx.callerEmployeeId }, error: null }),
         }
         return chain
       }
@@ -137,8 +148,8 @@ function buildMockSupabase(rows: {
   return supabase
 }
 
-async function buildApp(opts: Parameters<typeof buildMockSupabase>[0]): Promise<FastifyInstance> {
-  const supabase = buildMockSupabase(opts)
+async function buildApp(fx: Fixture, role: string = 'manager'): Promise<FastifyInstance> {
+  const supabase = buildMockSupabase(fx)
   const app = Fastify({ logger: false })
 
   app.decorateRequest('tenantId', '')
@@ -148,7 +159,7 @@ async function buildApp(opts: Parameters<typeof buildMockSupabase>[0]): Promise<
   app.decorate('authenticate', async (req: FastifyRequest) => {
     ;(req as any).tenantId = TENANT_ID
     ;(req as any).userId   = 'manager-profile-001'
-    ;(req as any).userRole = 'manager'
+    ;(req as any).userRole = role
   })
 
   app.decorate('supabase', supabase as any)
@@ -161,52 +172,145 @@ async function buildApp(opts: Parameters<typeof buildMockSupabase>[0]): Promise<
 
 const HEADERS = { authorization: 'Bearer test-token' }
 
+function baseFixture(): Fixture {
+  return { employees: baseEmployees(), callerEmployeeId: MANAGER_ID }
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
 })
 
 describe('GET /approvals/pending-count — manager scope', () => {
   it('counts only the immediate direct report, not a grandchild down the subordinate tree', async () => {
-    const app = await buildApp({
-      pendingCounts: {
-        leave: [DIRECT_REPORT_ID, GRANDCHILD_ID],
-        reg:   [GRANDCHILD_ID],
-        ot:    [DIRECT_REPORT_ID, GRANDCHILD_ID],
-        co:    [GRANDCHILD_ID],
-      },
-    })
-
+    const fx = baseFixture()
+    fx.pendingCounts = {
+      leave: [DIRECT_REPORT_ID, GRANDCHILD_ID],
+      reg:   [GRANDCHILD_ID],
+      ot:    [DIRECT_REPORT_ID, GRANDCHILD_ID],
+      co:    [GRANDCHILD_ID],
+    }
+    const app = await buildApp(fx)
     const res = await app.inject({ method: 'GET', url: '/approvals/pending-count', headers: HEADERS })
     expect(res.statusCode).toBe(200)
     const body = JSON.parse(res.body).data
-
-    // Only DIRECT_REPORT_ID's leave+overtime rows count; every GRANDCHILD_ID
-    // row (reg, ot, co) must be excluded — those items would always 403 if
-    // this manager tried to act on them.
     expect(body.leave).toBe(1)
     expect(body.regularisation).toBe(0)
     expect(body.overtime).toBe(1)
     expect(body.comp_off).toBe(0)
     expect(body.total).toBe(2)
   })
+
+  it('REASSIGNMENT: once promoted to a direct report, the grandchild\'s pending items start counting', async () => {
+    const fx = baseFixture()
+    fx.employees[GRANDCHILD_ID].managerId = MANAGER_ID
+    fx.pendingCounts = { leave: [GRANDCHILD_ID] }
+    const app = await buildApp(fx)
+    const res = await app.inject({ method: 'GET', url: '/approvals/pending-count', headers: HEADERS })
+    expect(JSON.parse(res.body).data.leave).toBe(1)
+  })
+
+  it('REASSIGNMENT: once moved off this manager, the former direct report\'s pending items stop counting', async () => {
+    const fx = baseFixture()
+    fx.employees[DIRECT_REPORT_ID].managerId = 'some-other-manager'
+    fx.pendingCounts = { leave: [DIRECT_REPORT_ID] }
+    const app = await buildApp(fx)
+    const res = await app.inject({ method: 'GET', url: '/approvals/pending-count', headers: HEADERS })
+    expect(JSON.parse(res.body).data.leave).toBe(0)
+  })
+
+  it('CROSS-TENANT: an employee that shares the manager_id value but lives in another tenant is never counted', async () => {
+    const fx = baseFixture()
+    fx.pendingCounts = { leave: [CROSS_TENANT_ID] }
+    const app = await buildApp(fx)
+    const res = await app.inject({ method: 'GET', url: '/approvals/pending-count', headers: HEADERS })
+    expect(JSON.parse(res.body).data.leave).toBe(0)
+    expect(JSON.parse(res.body).data.total).toBe(0)
+  })
+
+  it('UNLINKED MANAGER: a manager profile with no employee_id gets all-zero counts, not an error', async () => {
+    const fx = baseFixture()
+    fx.callerEmployeeId = null
+    fx.pendingCounts = { leave: [DIRECT_REPORT_ID] }
+    const app = await buildApp(fx)
+    const res = await app.inject({ method: 'GET', url: '/approvals/pending-count', headers: HEADERS })
+    expect(res.statusCode).toBe(200)
+    expect(JSON.parse(res.body).data.total).toBe(0)
+  })
+
+  it('HR ADMIN: counts tenant-wide, including the grandchild, unaffected by the manager-scope fix', async () => {
+    const fx = baseFixture()
+    fx.pendingCounts = { leave: [DIRECT_REPORT_ID, GRANDCHILD_ID], ot: [GRANDCHILD_ID] }
+    const app = await buildApp(fx, 'hr_admin')
+    const res = await app.inject({ method: 'GET', url: '/approvals/pending-count', headers: HEADERS })
+    const body = JSON.parse(res.body).data
+    expect(body.leave).toBe(2)
+    expect(body.overtime).toBe(1)
+  })
 })
 
 describe('GET /leave-requests?status=APPROVED — manager Approved tab scope', () => {
   it('lists only the immediate direct report\'s approved leave, not a grandchild\'s', async () => {
-    const app = await buildApp({
-      leaveApproved: [
-        { id: 'leave-a', employee_id: DIRECT_REPORT_ID },
-        { id: 'leave-b', employee_id: GRANDCHILD_ID },
-      ],
-    })
-
+    const fx = baseFixture()
+    fx.leaveApproved = [
+      { id: 'leave-a', employee_id: DIRECT_REPORT_ID },
+      { id: 'leave-b', employee_id: GRANDCHILD_ID },
+    ]
+    const app = await buildApp(fx)
     const res = await app.inject({ method: 'GET', url: '/leave-requests?status=APPROVED', headers: HEADERS })
     expect(res.statusCode).toBe(200)
     const body = JSON.parse(res.body)
-
     const employeeIds = body.data.map((r: any) => r.employee_id)
     expect(employeeIds).toContain(DIRECT_REPORT_ID)
     expect(employeeIds).not.toContain(GRANDCHILD_ID)
     expect(body.total).toBe(1)
+  })
+
+  it('REASSIGNMENT: the former manager immediately loses Approved-tab visibility once reassigned away', async () => {
+    const fx = baseFixture()
+    fx.employees[DIRECT_REPORT_ID].managerId = 'some-other-manager'
+    fx.leaveApproved = [{ id: 'leave-a', employee_id: DIRECT_REPORT_ID }]
+    const app = await buildApp(fx)
+    const res = await app.inject({ method: 'GET', url: '/leave-requests?status=APPROVED', headers: HEADERS })
+    expect(JSON.parse(res.body).data).toEqual([])
+  })
+
+  it('REASSIGNMENT: the new manager gains Approved-tab visibility the moment manager_id points at them', async () => {
+    const fx = baseFixture()
+    fx.employees[GRANDCHILD_ID].managerId = MANAGER_ID
+    fx.leaveApproved = [{ id: 'leave-b', employee_id: GRANDCHILD_ID }]
+    const app = await buildApp(fx)
+    const res = await app.inject({ method: 'GET', url: '/leave-requests?status=APPROVED', headers: HEADERS })
+    expect(JSON.parse(res.body).data.map((r: any) => r.employee_id)).toContain(GRANDCHILD_ID)
+  })
+
+  it('CROSS-TENANT: an approved leave for a same-manager-id employee in another tenant is never listed', async () => {
+    const fx = baseFixture()
+    fx.leaveApproved = [{ id: 'leave-x', employee_id: CROSS_TENANT_ID }]
+    const app = await buildApp(fx)
+    const res = await app.inject({ method: 'GET', url: '/leave-requests?status=APPROVED', headers: HEADERS })
+    expect(JSON.parse(res.body).data).toEqual([])
+  })
+
+  it('UNLINKED MANAGER: a manager profile with no employee_id gets an empty Approved tab, not an error', async () => {
+    const fx = baseFixture()
+    fx.callerEmployeeId = null
+    fx.leaveApproved = [{ id: 'leave-a', employee_id: DIRECT_REPORT_ID }]
+    const app = await buildApp(fx)
+    const res = await app.inject({ method: 'GET', url: '/leave-requests?status=APPROVED', headers: HEADERS })
+    expect(res.statusCode).toBe(200)
+    expect(JSON.parse(res.body).data).toEqual([])
+  })
+
+  it('HR ADMIN: sees tenant-wide approved leave, including the grandchild\'s, unaffected by the manager-scope fix', async () => {
+    const fx = baseFixture()
+    fx.leaveApproved = [
+      { id: 'leave-a', employee_id: DIRECT_REPORT_ID },
+      { id: 'leave-b', employee_id: GRANDCHILD_ID },
+    ]
+    const app = await buildApp(fx, 'hr_admin')
+    const res = await app.inject({ method: 'GET', url: '/leave-requests?status=APPROVED', headers: HEADERS })
+    const employeeIds = JSON.parse(res.body).data.map((r: any) => r.employee_id)
+    expect(employeeIds).toContain(DIRECT_REPORT_ID)
+    expect(employeeIds).toContain(GRANDCHILD_ID)
   })
 })

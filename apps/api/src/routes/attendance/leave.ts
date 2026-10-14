@@ -22,6 +22,7 @@ import {
 import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
 import { isSelfApproval } from '../../lib/approval-guards.js'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { getLockedMonths, monthsInRange } from '../../lib/period-lock.js'
 import { logAction, logBulkAction } from '../../lib/audit-service.js'
 import { emitEvent } from '../../lib/event-emitter.js'
 import { eventBus }  from '../../lib/event-bus.js'
@@ -370,6 +371,25 @@ export default async function leaveRoute(fastify: FastifyInstance) {
     // Segregation of duties — a user may not approve their own leave (F3).
     if (await isSelfApproval(fastify.supabase, req.tenantId as string, (req as any).userId, app.employee_id as string)) {
       return forbidden(reply, 'SELF_APPROVAL_FORBIDDEN', 'You cannot approve your own leave application.')
+    }
+
+    // SYSTEM_AUDIT_2026-10-14: the canonical leave flow (approveLeaveRequest in
+    // approval-service.ts) hard-blocks approval once the affected period is
+    // locked — this legacy table-level flow had only a "payroll freeze guard"
+    // further below that still lets the approval through and queues a
+    // best-effort reconciliation adjustment afterward. That's a materially
+    // weaker guarantee for a route that is live and HTTP-reachable (confirmed
+    // registered in index.ts, `/attendance/leave/*`) regardless of whether the
+    // current frontend calls it — an HR admin hitting this endpoint directly
+    // could still rewrite attendance_daily and deduct leave balance for a
+    // period payroll already finalized. Mirror the canonical flow's hard
+    // block exactly, checked before any balance/attendance mutation.
+    const lockedMonths = await getLockedMonths(
+      fastify.supabase, req.tenantId as string, monthsInRange(app.from_date as string, app.to_date as string),
+    )
+    if (lockedMonths.size) {
+      return conflictError(reply, 'PERIOD_LOCKED',
+        `Cannot approve — the pay period ${[...lockedMonths].sort()[0]} is locked. Reopen the period before approving this request.`)
     }
 
     // Fetch leave type for paid flag + sandwich flag. Tenant-scoped — the FK
