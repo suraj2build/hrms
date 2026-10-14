@@ -130,11 +130,19 @@ function looksLikeAlreadyRegistered(message) {
   return m.includes('already registered') || m.includes('already exists') || m.includes('user_already_exists')
 }
 
-async function supabaseSignup(email, password) {
+async function supabaseSignup(email, password, fullName) {
   const res = await fetch(`${SUPABASE_URL}/auth/v1/signup`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON_KEY },
-    body: JSON.stringify({ email, password }),
+    // data.full_name mirrors exactly what Signup.tsx sends at signUp() time —
+    // POST /setup's ownership guard (apps/api/src/routes/setup.ts) treats a
+    // matching user_metadata.full_name as proof this call is the genuine
+    // account owner, usable to resume setup long after the 15-minute
+    // freshness window. Omitting it here (as this script previously did)
+    // meant /setup could only ever treat this script's OWN retries as
+    // "fresh enough", which stops being true once more than 15 minutes pass
+    // between an interruption and a resume.
+    body: JSON.stringify({ email, password, data: { full_name: fullName } }),
   })
   const json = await res.json()
   if (!res.ok || !json?.user?.id) {
@@ -176,8 +184,8 @@ async function supabaseLogin(email, password) {
 }
 
 /** Signs up if new, or logs in to recover the existing user id — the core idempotency primitive every account uses. */
-async function signupOrRecover(email, password) {
-  const result = await supabaseSignup(email, password)
+async function signupOrRecover(email, password, fullName) {
+  const result = await supabaseSignup(email, password, fullName)
   if (!result.alreadyRegistered) {
     console.log(`  created: ${email} (user ${result.user.id})`)
     return result.user.id
@@ -243,7 +251,7 @@ async function main() {
   console.log(`--- seeding pilot tenant "${COMPANY_NAME}" (run id: ${RUN_ID}) against ${API_BASE_URL} ---`)
 
   console.log('--- 1. super_admin: sign up or recover ---')
-  const adminUserId = await signupOrRecover(emails.admin, PASSWORD)
+  const adminUserId = await signupOrRecover(emails.admin, PASSWORD, 'Pilot Super Admin')
 
   console.log('--- 2. POST /setup — idempotent per user_id (tenant + super_admin profile) ---')
   const setupResult = await api('POST', '/setup', null, {
@@ -260,7 +268,7 @@ async function main() {
   const { token: adminToken } = await supabaseLogin(emails.admin, PASSWORD)
 
   console.log('--- 4. hr_admin: sign up or recover (profile link happens in step 7, requires DATABASE_URL) ---')
-  const hrUserId = await signupOrRecover(emails.hr, PASSWORD)
+  const hrUserId = await signupOrRecover(emails.hr, PASSWORD, 'Pilot HR Admin')
 
   console.log('--- 5. manager: ensure employee + login account exist ---')
   const mgr = await ensureEmployeeWithAccount(adminToken, {

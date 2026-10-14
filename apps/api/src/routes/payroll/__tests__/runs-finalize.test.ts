@@ -171,6 +171,7 @@ function buildBaseSupabase(opts: MockOpts) {
       update: () => genericChain({ data: [{ id: RUN_ID }], error: null }),
     }),
     payroll_freeze_log: () => ({ select: () => genericChain({ data: null, error: null }) }),
+    tenants:            () => ({ select: () => genericChain({ data: { is_pilot: false }, error: null }) }),
     payroll_slips: () => ({
       select: () => {
         let statusFilter: string | undefined

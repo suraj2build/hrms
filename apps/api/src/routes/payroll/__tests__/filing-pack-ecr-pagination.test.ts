@@ -73,7 +73,7 @@ async function buildApp(opts: { epfContributions: any[]; epfOverrides: any[] }) 
       if (table === 'epf_contributions')        return makeTable(opts.epfContributions)
       if (table === 'epf_eligibility_overrides') return makeTable(opts.epfOverrides, { inLimit: IN_CHUNK_LIMIT })
       if (table === 'statutory_registrations')   return makeTable([{ registration_number: 'EPF-REG-1' }])
-      if (table === 'tenants')                   return makeTable([{ id: TENANT_ID, name: 'Test Co', timezone: 'Asia/Kolkata' }])
+      if (table === 'tenants')                   return makeTable([{ id: TENANT_ID, name: 'Test Co', timezone: 'Asia/Kolkata', is_pilot: false }])
       throw new Error(`unexpected table in test: ${table}`)
     },
   } as any)

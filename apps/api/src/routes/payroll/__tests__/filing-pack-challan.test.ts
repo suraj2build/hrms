@@ -51,6 +51,7 @@ async function buildApp(opts: {
       if (table === 'esi_contributions')  return genericChain({ data: opts.esiRows, error: null })
       if (table === 'ptax_contributions') return genericChain({ data: opts.ptaxRows, error: null })
       if (table === 'payroll_slips')      return genericChain({ data: opts.tdsRows, error: null })
+      if (table === 'tenants')            return genericChain({ data: { is_pilot: false }, error: null })
       // statutory_registrations — not under test here, return a benign row.
       return genericChain({ data: { registration_number: 'REG-1', state_code: 'KA' }, error: null })
     },

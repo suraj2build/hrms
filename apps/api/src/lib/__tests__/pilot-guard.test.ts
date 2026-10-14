@@ -95,4 +95,57 @@ describe('blockIfPilotTenant', () => {
       error: 'PILOT_STATUS_CHECK_UNAVAILABLE',
     }))
   })
+
+  // ── Malformed is_pilot values fail closed too (follow-up finding) ─────────
+  // `!!value` used to coerce ANY value into a boolean verdict: null/undefined
+  // (a row that exists but was never backfilled) read as falsy -> wrongly
+  // ALLOWED a restricted action on an unverified tenant; a non-empty string
+  // like "false" reads as truthy -> would have wrongly BLOCKED a real,
+  // confirmed-non-pilot tenant. Only the literal boolean true/false may ever
+  // decide the outcome; anything else must fail closed (503), the same as a
+  // missing row.
+
+  it('fails closed (503) when is_pilot is null on an existing row — never read as "verified not a pilot"', async () => {
+    const supabase = supabaseReturning({ is_pilot: null as any })
+    const reply = fakeReply()
+
+    const blocked = await blockIfPilotTenant(supabase, 'tenant-1', reply, 'Finalizing a payroll run')
+
+    expect(blocked).toBe(true)
+    expect(reply.code).toHaveBeenCalledWith(503)
+    expect(reply.send).toHaveBeenCalledWith(expect.objectContaining({
+      error: 'PILOT_STATUS_CHECK_UNAVAILABLE',
+    }))
+  })
+
+  it('fails closed (503) when is_pilot is undefined on an existing row', async () => {
+    const supabase = supabaseReturning({} as any)
+    const reply = fakeReply()
+
+    const blocked = await blockIfPilotTenant(supabase, 'tenant-1', reply, 'Finalizing a payroll run')
+
+    expect(blocked).toBe(true)
+    expect(reply.code).toHaveBeenCalledWith(503)
+  })
+
+  it('fails closed (503) when is_pilot is the string "false" — never coerced truthy and used to wrongly block a real tenant', async () => {
+    const supabase = supabaseReturning({ is_pilot: 'false' as any })
+    const reply = fakeReply()
+
+    const blocked = await blockIfPilotTenant(supabase, 'tenant-1', reply, 'Finalizing a payroll run')
+
+    expect(blocked).toBe(true)
+    expect(reply.code).toHaveBeenCalledWith(503)
+    expect(reply.send).not.toHaveBeenCalledWith(expect.objectContaining({ error: 'PILOT_TENANT_RESTRICTED' }))
+  })
+
+  it('fails closed (503) when is_pilot is the number 1 instead of a boolean', async () => {
+    const supabase = supabaseReturning({ is_pilot: 1 as any })
+    const reply = fakeReply()
+
+    const blocked = await blockIfPilotTenant(supabase, 'tenant-1', reply, 'Finalizing a payroll run')
+
+    expect(blocked).toBe(true)
+    expect(reply.code).toHaveBeenCalledWith(503)
+  })
 })

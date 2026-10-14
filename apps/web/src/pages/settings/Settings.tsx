@@ -111,7 +111,7 @@ function useLogo(logoPath: string | null | undefined) {
 // ── NavCard — used in all non-Company tabs ────────────────────────────────────
 
 function NavCard({
-  icon: Icon, title, description, href, badge, badgeTone = 'default', external,
+  icon: Icon, title, description, href, badge, badgeTone = 'default', external, disabled,
 }: {
   icon: React.ComponentType<{ className?: string }>
   title: string
@@ -120,12 +120,27 @@ function NavCard({
   badge?: string
   badgeTone?: 'default' | 'success' | 'warning' | 'info'
   external?: boolean
+  /** SYSTEM_AUDIT_2026-10-14 finding: a "Coming soon" badge was purely
+   * cosmetic — the card stayed a fully clickable button that navigated to
+   * a route with no matching page. Pass `disabled` for any card whose
+   * destination isn't actually built yet, so the badge and the click
+   * behavior agree with each other. */
+  disabled?: boolean
 }) {
   const navigate = useNavigate()
   return (
     <button
-      onClick={() => external ? window.open(href, '_blank') : navigate(href)}
-      className="group flex w-full items-start gap-4 rounded-xl border border-border/60 bg-card p-4 text-left transition-all hover:border-primary/30 hover:bg-primary/[0.02] hover:shadow-sm"
+      onClick={() => {
+        if (disabled) return
+        external ? window.open(href, '_blank') : navigate(href)
+      }}
+      disabled={disabled}
+      aria-disabled={disabled}
+      className={`group flex w-full items-start gap-4 rounded-xl border border-border/60 bg-card p-4 text-left transition-all ${
+        disabled
+          ? 'cursor-not-allowed opacity-60'
+          : 'hover:border-primary/30 hover:bg-primary/[0.02] hover:shadow-sm'
+      }`}
     >
       <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground group-hover:bg-primary/10 group-hover:text-primary transition-colors">
         <Icon className="h-4 w-4" />
@@ -144,10 +159,10 @@ function NavCard({
         </div>
         <p className="mt-0.5 text-[12px] text-muted-foreground leading-snug">{description}</p>
       </div>
-      {external
+      {!disabled && (external
         ? <ExternalLink className="h-3.5 w-3.5 shrink-0 self-center text-muted-foreground/40 group-hover:text-primary/60 transition-colors" />
         : <ChevronRight className="h-4 w-4 shrink-0 self-center text-muted-foreground/40 group-hover:text-primary/60 transition-colors" />
-      }
+      )}
     </button>
   )
 }
@@ -520,7 +535,7 @@ function UsersTab() {
         <h3 className="mb-1 text-sm font-semibold text-foreground">Security</h3>
         <p className="mb-4 text-[12px] text-muted-foreground">Authentication and access controls.</p>
         <div className="grid gap-3 sm:grid-cols-2">
-          <NavCard icon={Lock} title="Session & Auth Policy" description="Password policies, session timeout, and MFA requirements." href="/admin/settings/security" badge="Coming soon" />
+          <NavCard icon={Lock} title="Session & Auth Policy" description="Password policies, session timeout, and MFA requirements." href="/admin/settings/security" badge="Coming soon" disabled />
           <NavCard icon={BadgeCheck} title="Audit Trail" description="Full audit log of every change — who did what, when, from where." href="/admin/audit-trail" />
         </div>
       </div>
@@ -569,7 +584,7 @@ function WorkflowsTab() {
         <p className="mb-4 text-[12px] text-muted-foreground">Define multi-level approval flows for HR requests.</p>
         <div className="grid gap-3 sm:grid-cols-2">
           <NavCard icon={GitMerge} title="Approval Workflows" description="Configure approval chains for leave, regularisation, reimbursements and more." href="/admin/approvals/workflows" />
-          <NavCard icon={Activity} title="Governance Matrix" description="Review the full governance matrix — who approves what across all workflow types." href="/admin/approvals/governance" />
+          <NavCard icon={Activity} title="Governance Matrix" description="Review the full governance matrix — who approves what across all workflow types." href="/admin/approvals/governance-matrix" />
         </div>
       </div>
       <div>
@@ -577,7 +592,7 @@ function WorkflowsTab() {
         <p className="mb-4 text-[12px] text-muted-foreground">Rules that run automatically without human approval.</p>
         <div className="grid gap-3 sm:grid-cols-2">
           <NavCard icon={Zap} title="Automations Console" description="Scheduled jobs and trigger-based automations — leave accrual, probation auto-confirm, etc." href="/admin/system/automations" />
-          <NavCard icon={Settings2} title="Leave Accrual Jobs" description="Review and rerun leave accrual and balance computation jobs." href="/admin/leave/jobs" />
+          <NavCard icon={Settings2} title="Leave Accrual Jobs" description="Review and rerun leave accrual and balance computation jobs." href="/admin/leave-jobs" />
         </div>
       </div>
     </div>
@@ -624,14 +639,14 @@ function SystemTab() {
         <p className="mb-4 text-[12px] text-muted-foreground">Manage data imports, exports and workspace configuration.</p>
         <div className="grid gap-3 sm:grid-cols-2">
           <NavCard icon={Upload} title="Import Workspace" description="Bulk import employees, attendance, salary structures and master data via Excel." href="/admin/import" />
-          <NavCard icon={Database} title="Data Explorer" description="Run ad-hoc queries across HR data sets — headcount, attrition, salary bands." href="/admin/data-explorer" />
+          <NavCard icon={Database} title="Data Explorer" description="Run ad-hoc queries across HR data sets — headcount, attrition, salary bands." href="/admin/explorer" />
         </div>
       </div>
       <div>
         <h3 className="mb-1 text-sm font-semibold text-foreground">Billing & Plan</h3>
         <p className="mb-4 text-[12px] text-muted-foreground">Manage your subscription and usage.</p>
         <div className="grid gap-3 sm:grid-cols-2">
-          <NavCard icon={CreditCard} title="Billing & Subscription" description="View your current plan, manage invoices and update payment details." href="/billing" />
+          <NavCard icon={CreditCard} title="Billing & Subscription" description="View your current plan, manage invoices and update payment details." href="/admin/billing" />
         </div>
       </div>
     </div>

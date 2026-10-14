@@ -36,6 +36,14 @@ export async function blockIfPilotTenant(
   reply: FastifyReply,
   action: string,
 ): Promise<boolean> {
+  const failClosed = () => {
+    reply.code(503).send({
+      error:   ErrorCode_PILOT_CHECK_UNAVAILABLE,
+      message: `Could not verify this tenant's pilot status, so "${action}" was not performed. Please try again.`,
+    })
+    return true
+  }
+
   let isPilot: boolean
   try {
     const result = await supabase
@@ -43,22 +51,25 @@ export async function blockIfPilotTenant(
       .select('is_pilot')
       .eq('id', tenantId)
       .maybeSingle()
-    if (result.error || !result.data) {
-      reply.code(503).send({
-        error:   ErrorCode_PILOT_CHECK_UNAVAILABLE,
-        message: `Could not verify this tenant's pilot status, so "${action}" was not performed. Please try again.`,
-      })
-      return true
-    }
-    isPilot = !!(result.data as { is_pilot: boolean }).is_pilot
+    if (result.error || !result.data) return failClosed()
+
+    // SYSTEM_AUDIT_2026-10-14 follow-up: `!!value` silently coerced ANY
+    // non-boolean value into a verdict — `null`/`undefined` (a column that
+    // exists but was never backfilled) read as "verified not a pilot" and
+    // ALLOWED the restricted action; the non-empty string `"false"` would
+    // have read as truthy and WRONGLY BLOCKED a real tenant. Neither is a
+    // verification — only the literal boolean `false` may permit a
+    // restricted action, and only the literal boolean `true` may block
+    // one. Anything else (missing, null, or the wrong type entirely) is
+    // exactly the "can't verify" case this function exists to fail closed
+    // on, not a value to coerce into either outcome.
+    const rawIsPilot = (result.data as { is_pilot: unknown }).is_pilot
+    if (typeof rawIsPilot !== 'boolean') return failClosed()
+    isPilot = rawIsPilot
   } catch {
     // Same fail-closed response for a thrown exception (e.g. a network
     // timeout) as for a clean {error} result above.
-    reply.code(503).send({
-      error:   ErrorCode_PILOT_CHECK_UNAVAILABLE,
-      message: `Could not verify this tenant's pilot status, so "${action}" was not performed. Please try again.`,
-    })
-    return true
+    return failClosed()
   }
 
   if (isPilot) {

@@ -234,8 +234,10 @@ export const PayrollContextPanel = React.memo(function PayrollContextPanel() {
                 <span className="text-muted-foreground"> · {b.blocker_type}</span>
               </div>
             ))}
+            {/* Blockers here are month-aggregated, not tied to one run (no run_id
+                in the payload) — land on the runs list rather than guess a run id. */}
             <Link
-              to="/admin/payroll/blockers"
+              to="/admin/payroll"
               className="text-xs text-primary hover:underline block"
             >
               Fix Blockers

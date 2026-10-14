@@ -242,7 +242,7 @@ export function OperationalInbox() {
             <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => navigate('/admin/attendance/corrections')}>
               Corrections
             </Button>
-            <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => navigate('/approvals/inbox')}>
+            <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => navigate('/admin/approvals/inbox')}>
               Approval Inbox
             </Button>
           </div>

@@ -299,7 +299,7 @@ export function RightRail({ show = true }: RightRailProps) {
           <HelpfulLink
             icon={BookOpen}
             label="Leave Types & Balances"
-            href="/admin/leave/types"
+            href="/admin/leave-types"
           />
           <HelpfulLink
             icon={Shield}

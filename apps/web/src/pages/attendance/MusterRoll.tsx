@@ -1286,7 +1286,7 @@ export function MusterRoll() {
                   </div>
                 )}
                 <Link
-                  to="/admin/payroll/readiness"
+                  to="/admin/payroll-readiness"
                   className="mt-2 flex items-center gap-1 text-[11px] text-primary hover:underline"
                 >
                   Payroll readiness <ChevronRight className="h-3 w-3" />

@@ -305,7 +305,7 @@ async function fetchInboxItems(): Promise<InboxItem[]> {
         timestamp:   raw.created_at,
         priority:    raw.priority === 'high' ? 'high' : raw.priority === 'low' ? 'low' : 'medium',
         status:      'pending',
-        actionRoute: '/admin/payroll/blockers',
+        actionRoute: '/admin/payroll',
         actionLabel: 'Fix',
       })
     }

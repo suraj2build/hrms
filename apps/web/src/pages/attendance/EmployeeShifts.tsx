@@ -27,6 +27,7 @@
  */
 
 import { useState, useMemo }                             from 'react'
+import { Link }                                          from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient }         from '@tanstack/react-query'
 import { toast }                                         from 'sonner'
 import {
@@ -562,9 +563,9 @@ export function EmployeeShifts() {
                 {shifts.length === 0 && (
                   <p className="text-xs text-muted-foreground mt-1">
                     No active shifts found. Create shifts in{' '}
-                    <a href="/shift-master" className="text-primary underline underline-offset-2">
+                    <Link to="/admin/shift-master" className="text-primary underline underline-offset-2">
                       Shift Master
-                    </a>{' '}
+                    </Link>{' '}
                     first.
                   </p>
                 )}

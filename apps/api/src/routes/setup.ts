@@ -55,19 +55,69 @@ export default async function setupRoute(fastify: FastifyInstance) {
       })
     }
 
+    // ── 1b. Anti-hijack / ownership guards ──────────────────────────────────────
+    // This route is intentionally unauthenticated — Signup.tsx calls it
+    // immediately after supabase.auth.signUp(), and this app requires email
+    // confirmation before a session exists ("check your email to verify, then
+    // sign in" — see Signup.tsx step 3), so there is no JWT yet to check a
+    // Bearer token against. Without SOME signal tying the caller to the actual
+    // signup, anyone who learns another user's auth UID (leaked in a URL, log,
+    // screenshot, referral link, etc. — user_id is just a UUID accepted from
+    // the request body with no ownership check) could call /setup with it.
+    //
+    // CORRECTION (follow-up to SYSTEM_AUDIT_2026-10-14 item 3): an earlier
+    // version of this fix moved the idempotency check (below) AHEAD of these
+    // guards, reasoning that returning an EXISTING profile carries no hijack
+    // risk since "whatever protected its creation already ran". That
+    // reasoning was wrong: this route has no session, so there is nothing
+    // tying "the caller" to "the owner" on ANY call, including a read of an
+    // already-provisioned tenant/profile — skipping these guards for the
+    // idempotent-return path turned it into an unauthenticated IDOR: anyone
+    // who merely knows (or guesses, or finds leaked) another user's user_id
+    // could retrieve their tenant id, slug, and profile with nothing else.
+    // These guards are therefore now evaluated BEFORE any branch that reads
+    // or writes data for this user_id, uniformly for both the create path
+    // and the idempotent-return path — an existing setup is returned to its
+    // verified owner only, never to someone who merely supplies the id.
+    //
+    // Two checks, evaluated with OR semantics (passing EITHER is enough —
+    // this is what actually fixes the original resumability bug without
+    // reopening the disclosure hole):
+    //  (a) the auth account must have been created moments ago — narrows the
+    //      exploit window from "any UID ever leaked" to "an attacker actively
+    //      racing this specific signup in real time". This alone cannot
+    //      protect a RETRY more than 15 minutes after the original signup —
+    //      which is exactly the resumability case this item's prior round
+    //      was fixing — so it is backed up by (b):
+    //  (b) full_name must match what Supabase captured in user_metadata at
+    //      signUp() time (Signup.tsx passes options.data.full_name, and so
+    //      does scripts/pilot/seed-pilot-tenant.mjs as of this round — see
+    //      its signup call). An attacker who only has a leaked UUID has no
+    //      way to also know this, regardless of how much time has passed,
+    //      so a match is sufficient proof of ownership on its own — a
+    //      legitimate retry (the real caller, who DOES know the full_name
+    //      they signed up with) succeeds no matter how late it is, while a
+    //      stranger with just the id does not.
+    // If user_metadata has NO full_name at all (a caller that never set one),
+    // (b) cannot be evaluated and contributes nothing — only (a) can pass,
+    // which is the original, narrower protection and the safe default.
+    const createdAtMs = new Date(user.created_at).getTime()
+    const ageMinutes   = Number.isFinite(createdAtMs) ? (Date.now() - createdAtMs) / 60_000 : Infinity
+    const isFresh      = ageMinutes <= 15
+
+    const metadataFullName = (user.user_metadata as { full_name?: string } | null)?.full_name
+    const metadataMatches  = !!metadataFullName && metadataFullName.trim().toLowerCase() === full_name.trim().toLowerCase()
+
+    if (!isFresh && !metadataMatches) {
+      return forbidden(reply, 'SETUP_VERIFICATION_FAILED', 'Could not verify ownership of this account for setup. Please sign up again or contact support.')
+    }
+
     // ── 2. Idempotency: check if profile already exists ────────────────────────
-    // Moved ahead of the anti-hijack guards below (SYSTEM_AUDIT_2026-10-14
-    // item 3): returning a profile that already exists for THIS EXACT
-    // user_id carries no hijack risk — whatever protected its creation
-    // already ran at that earlier, successful call. Checking this first
-    // means a legitimate retry (the first /setup call succeeded but the
-    // client never saw the response — a dropped connection, a process
-    // restart, a pilot-seeding script resuming after an interruption) is
-    // never wrongly told SETUP_WINDOW_EXPIRED just because more than 15
-    // minutes have passed since the ORIGINAL signup. Before this reorder,
-    // every retry past that window failed even though the real work was
-    // already done, with no way to recover except creating a brand new
-    // auth account.
+    // Only reached once ownership is verified above — a legitimate retry (the
+    // first call succeeded but the client never saw the response) now
+    // succeeds via the metadata match even long after the 15-minute window,
+    // while a caller who merely knows the user_id and nothing else never
+    // reaches this read at all.
     const { data: existingProfile, error: existingProfileErr } = await fastify.supabase
       .from('profiles')
       .select('id, tenant_id, role')
@@ -84,38 +134,6 @@ export default async function setupRoute(fastify: FastifyInstance) {
       if (existingTenantErr) return serverError(req, reply, existingTenantErr, ErrorCode.QUERY_FAILED, 'Failed to fetch existing tenant')
 
       return reply.send({ profile: existingProfile, tenant: existingTenant })
-    }
-
-    // ── 1b. Anti-hijack guards (CREATE path only — see reorder note above) ──────
-    // This route is intentionally unauthenticated — Signup.tsx calls it
-    // immediately after supabase.auth.signUp(), and this app requires email
-    // confirmation before a session exists ("check your email to verify, then
-    // sign in" — see Signup.tsx step 3), so there is no JWT yet to check a
-    // Bearer token against. Without SOME signal tying the caller to the actual
-    // signup, anyone who learns another user's auth UID (leaked in a URL, log,
-    // screenshot, referral link, etc. — user_id is just a UUID accepted from
-    // the request body with no ownership check) could call /setup first with
-    // their own company_name, silently pre-provisioning that identity into an
-    // attacker-chosen tenant before the real signup's own /setup call runs —
-    // the idempotency check above would then hand the real user back the
-    // attacker's fabricated tenant instead of creating their own.
-    //
-    // Two checks that don't require a session:
-    //  (a) the auth account must have been created moments ago — narrows the
-    //      exploit window from "any UID ever leaked" to "an attacker actively
-    //      racing this specific signup in real time";
-    //  (b) full_name must match what Supabase captured in user_metadata at
-    //      signUp() time (Signup.tsx passes options.data.full_name) — an
-    //      attacker who only has a leaked UUID has no way to also know this.
-    const createdAtMs = new Date(user.created_at).getTime()
-    const ageMinutes   = Number.isFinite(createdAtMs) ? (Date.now() - createdAtMs) / 60_000 : Infinity
-    if (ageMinutes > 15) {
-      return forbidden(reply, 'SETUP_WINDOW_EXPIRED', 'This account was not created recently enough to complete setup. Please sign up again or contact support.')
-    }
-
-    const metadataFullName = (user.user_metadata as { full_name?: string } | null)?.full_name
-    if (metadataFullName && metadataFullName.trim().toLowerCase() !== full_name.trim().toLowerCase()) {
-      return forbidden(reply, 'SETUP_VERIFICATION_FAILED', 'Setup details do not match the account that was just created.')
     }
 
     // ── 3. Create tenant ────────────────────────────────────────────────────────
