@@ -67,57 +67,28 @@ export default async function periodLocksRoutes(fastify: FastifyInstance) {
     const parsed = reasonSchema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
 
-    // Atomically transition an existing row into LOCKED, but only if it isn't
-    // already past LOCKED — same compare-and-swap pattern as start-payroll/
-    // finalize below. A plain upsert has no WHERE clause to fold this
-    // precondition into, which left a race window where a concurrent
-    // unlock/start-payroll could land between a pre-check and the upsert.
-    const now = new Date().toISOString()
-    const { data: updated, error: updateError } = await fastify.supabase
-      .from('attendance_period_locks')
-      .update({
-        state:       'LOCKED',
-        locked_by:   req.userId,
-        locked_at:   now,
-        lock_reason: parsed.data.reason ?? null,
-        updated_at:  now,
-      })
-      .eq('tenant_id', req.tenantId)
-      .eq('period_month', month)
-      .not('state', 'in', '("PAYROLL_PROCESSING","PAYROLL_FINALIZED")')
-      .select('id, period_month, state, locked_at, lock_reason')
-      .maybeSingle()
+    // SYSTEM_AUDIT_2026-10-14 checkpoint 7: a plain CAS UPDATE/INSERT here,
+    // on its own, shares no mutual-exclusion mechanism with the approval
+    // RPCs' in-transaction lock-check (migration 461) — a genuinely
+    // concurrent approval could still read "not yet locked" and commit in
+    // the window before this write lands. lock_period_atomic (migration
+    // 462) takes the SAME per-(tenant, month) advisory lock those RPCs now
+    // take before their own check, giving both writer classes a real,
+    // shared serialization point instead of two independent CAS writers
+    // hoping not to race each other.
+    const { data, error: lockErr } = await fastify.supabase.rpc('lock_period_atomic', {
+      p_tenant_id: req.tenantId,
+      p_month:     month,
+      p_actor_id:  req.userId,
+      p_reason:    parsed.data.reason ?? null,
+    })
 
-    if (updateError) return serverError(req, reply, updateError, ErrorCode.UPDATE_FAILED, 'Failed to lock period')
-
-    let data = updated
-    if (!data) {
-      // No row matched — either no lock row exists yet for this period, or
-      // it exists but is in PAYROLL_PROCESSING/PAYROLL_FINALIZED. Try
-      // inserting a fresh row; the unique (tenant_id, period_month)
-      // constraint makes this safe under a concurrent first-lock race, and
-      // a 23505 here means the row exists in a disallowed state.
-      const { data: inserted, error: insertError } = await fastify.supabase
-        .from('attendance_period_locks')
-        .insert({
-          tenant_id:    req.tenantId,
-          period_month: month,
-          state:        'LOCKED',
-          locked_by:    req.userId,
-          locked_at:    now,
-          lock_reason:  parsed.data.reason ?? null,
-          updated_at:   now,
-        })
-        .select('id, period_month, state, locked_at, lock_reason')
-        .maybeSingle()
-
-      if (insertError && insertError.code !== '23505') {
-        return serverError(req, reply, insertError, ErrorCode.INSERT_FAILED, 'Failed to lock period')
-      }
-      if (insertError?.code === '23505') {
+    if (lockErr) {
+      const msg = lockErr.message ?? ''
+      if (msg.includes('INVALID_TRANSITION:')) {
         return conflictError(reply, 'INVALID_TRANSITION', 'Cannot lock a period that is already in payroll processing or finalized')
       }
-      data = inserted
+      return serverError(req, reply, lockErr, ErrorCode.UPDATE_FAILED, 'Failed to lock period')
     }
 
     // Fire-and-forget: auto-close pending regularisations as LOP
@@ -193,23 +164,22 @@ export default async function periodLocksRoutes(fastify: FastifyInstance) {
     const parsed = reasonSchema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
 
-    const now = new Date().toISOString()
-    const { data, error } = await fastify.supabase
-      .from('attendance_period_locks')
-      .update({
-        state:         'OPEN',
-        unlocked_by:   req.userId,
-        unlocked_at:   now,
-        unlock_reason: parsed.data.reason ?? null,
-        updated_at:    now,
-      })
-      .eq('tenant_id', req.tenantId)
-      .eq('period_month', month)
-      .select('id, period_month, state')
-      .single()
+    // Same shared-advisory-lock rationale as /lock above (migration 462's
+    // unlock_period_atomic) — this is also a writer of attendance_period_
+    // locks.state that an in-flight approval RPC must genuinely serialize
+    // against, not just race against a plain CAS UPDATE.
+    const { data, error: unlockErr } = await fastify.supabase.rpc('unlock_period_atomic', {
+      p_tenant_id: req.tenantId,
+      p_month:     month,
+      p_actor_id:  req.userId,
+      p_reason:    parsed.data.reason ?? null,
+    })
 
-    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to unlock period')
-    if (!data) return notFound(reply, 'NOT_FOUND', 'Period lock record not found')
+    if (unlockErr) {
+      const msg = unlockErr.message ?? ''
+      if (msg.includes('NOT_FOUND:')) return notFound(reply, 'NOT_FOUND', 'Period lock record not found')
+      return serverError(req, reply, unlockErr, ErrorCode.UPDATE_FAILED, 'Failed to unlock period')
+    }
     return reply.send({ data })
   })
 
@@ -219,23 +189,19 @@ export default async function periodLocksRoutes(fastify: FastifyInstance) {
     const { month } = req.params as { month: string }
     if (!monthRe.test(month)) return reply.code(400).send({ error: 'INVALID_MONTH', message: 'month must be YYYY-MM' })
 
-    // Fold the LOCKED precondition into the UPDATE's own WHERE clause — the
-    // read-only check above is advisory; without this, a concurrent unlock
-    // (or a retried start-payroll call) can land in the race window and this
-    // write would still unconditionally advance the period to
-    // PAYROLL_PROCESSING regardless of its actual current state.
-    const now = new Date().toISOString()
-    const { data, error } = await fastify.supabase
-      .from('attendance_period_locks')
-      .update({ state: 'PAYROLL_PROCESSING', payroll_started_by: req.userId, payroll_started_at: now, updated_at: now })
-      .eq('tenant_id', req.tenantId)
-      .eq('period_month', month)
-      .eq('state', 'LOCKED')
-      .select('id, period_month, state')
-      .maybeSingle()
+    // Same shared-advisory-lock rationale as /lock above (migration 462's
+    // start_payroll_processing_atomic).
+    const { data, error: startErr } = await fastify.supabase.rpc('start_payroll_processing_atomic', {
+      p_tenant_id: req.tenantId,
+      p_month:     month,
+      p_actor_id:  req.userId,
+    })
 
-    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to advance to payroll processing')
-    if (!data) return conflictError(reply, 'INVALID_TRANSITION', 'Period must be LOCKED before starting payroll processing')
+    if (startErr) {
+      const msg = startErr.message ?? ''
+      if (msg.includes('INVALID_TRANSITION:')) return conflictError(reply, 'INVALID_TRANSITION', 'Period must be LOCKED before starting payroll processing')
+      return serverError(req, reply, startErr, ErrorCode.UPDATE_FAILED, 'Failed to advance to payroll processing')
+    }
     return reply.send({ data })
   })
 
@@ -245,20 +211,21 @@ export default async function periodLocksRoutes(fastify: FastifyInstance) {
     const { month } = req.params as { month: string }
     if (!monthRe.test(month)) return reply.code(400).send({ error: 'INVALID_MONTH', message: 'month must be YYYY-MM' })
 
-    // Fold the PAYROLL_PROCESSING precondition into the UPDATE itself — same
-    // race as start-payroll (e.g. a concurrent unlock racing this finalize).
-    const now = new Date().toISOString()
-    const { data, error } = await fastify.supabase
-      .from('attendance_period_locks')
-      .update({ state: 'PAYROLL_FINALIZED', finalized_by: req.userId, finalized_at: now, updated_at: now })
-      .eq('tenant_id', req.tenantId)
-      .eq('period_month', month)
-      .eq('state', 'PAYROLL_PROCESSING')
-      .select('id, period_month, state, finalized_at')
-      .maybeSingle()
+    // Same shared-advisory-lock rationale as /lock above (migration 462's
+    // finalize_period_atomic) — this is the "payroll finalization writer"
+    // the continued audit specifically asked be checked for a shared
+    // serialization mechanism with the approval RPCs.
+    const { data, error: finalizeErr } = await fastify.supabase.rpc('finalize_period_atomic', {
+      p_tenant_id: req.tenantId,
+      p_month:     month,
+      p_actor_id:  req.userId,
+    })
 
-    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to finalize period')
-    if (!data) return conflictError(reply, 'INVALID_TRANSITION', 'Period must be in PAYROLL_PROCESSING before finalization')
+    if (finalizeErr) {
+      const msg = finalizeErr.message ?? ''
+      if (msg.includes('INVALID_TRANSITION:')) return conflictError(reply, 'INVALID_TRANSITION', 'Period must be in PAYROLL_PROCESSING before finalization')
+      return serverError(req, reply, finalizeErr, ErrorCode.UPDATE_FAILED, 'Failed to finalize period')
+    }
     return reply.send({ data })
   })
 }

@@ -52,9 +52,8 @@ interface RegItem {
 }
 
 interface BulkResult {
-  approved?: number
-  rejected?: number
-  summary?: { approved?: number; rejected?: number }
+  results?: Array<{ id: string; ok: boolean; error?: string }>
+  summary?: { approved?: number; rejected?: number; failed?: number; total?: number }
 }
 
 const TYPE_LABELS: Record<string, string> = {
@@ -135,8 +134,21 @@ export default function ManagerRegularisationQueue() {
     mutationFn: (ids: string[]) =>
       api.post<BulkResult>('/attendance/regularisation/bulk-approve', { ids }),
     onSuccess: (res) => {
-      const s = res?.summary ?? res
-      toast.success(`Approved ${s?.approved ?? selected.size} request${(s?.approved ?? 0) !== 1 ? 's' : ''}`)
+      // SYSTEM_AUDIT_2026-10-14 checkpoint 7: this endpoint is per-item
+      // partial success, not all-or-nothing — some ids in the batch can
+      // fail (already actioned, now-locked period, ownership drift) while
+      // others succeed. Previously this always showed a green "Approved N
+      // requests" toast with no mention of `failed`, which read as
+      // unconditional success even when it wasn't. Now mirrors the
+      // warning-styled "N approved, N failed" pattern already used by
+      // useOperationalQueue.ts's bulk actions.
+      const approved = res?.summary?.approved ?? 0
+      const failed = res?.summary?.failed ?? 0
+      if (failed > 0) {
+        toast.warning(`${approved} approved, ${failed} failed`)
+      } else {
+        toast.success(`Approved ${approved} request${approved !== 1 ? 's' : ''}`)
+      }
       setSelected(new Set())
       invalidate()
     },
@@ -147,8 +159,13 @@ export default function ManagerRegularisationQueue() {
     mutationFn: ({ ids, reason }: { ids: string[]; reason: string }) =>
       api.post<BulkResult>('/attendance/regularisation/bulk-reject', { ids, rejection_reason: reason || undefined }),
     onSuccess: (res) => {
-      const s = res?.summary ?? res
-      toast.success(`Rejected ${s?.rejected ?? selected.size} request${(s?.rejected ?? 0) !== 1 ? 's' : ''}`)
+      const rejected = res?.summary?.rejected ?? 0
+      const failed = res?.summary?.failed ?? 0
+      if (failed > 0) {
+        toast.warning(`${rejected} rejected, ${failed} failed`)
+      } else {
+        toast.success(`Rejected ${rejected} request${rejected !== 1 ? 's' : ''}`)
+      }
       setSelected(new Set())
       setRejectOpen(false)
       setRejectReason('')

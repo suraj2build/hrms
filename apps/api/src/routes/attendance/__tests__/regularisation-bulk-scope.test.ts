@@ -152,7 +152,7 @@ describe('POST /attendance/regularisation/bulk-approve — ownership guard scope
     expect(approveMock).not.toHaveBeenCalled()
   })
 
-  it('BULK ATOMICITY: a mixed batch (one authorized + one unauthorized) processes ZERO items, not just skips the bad one', async () => {
+  it('PREVALIDATION: a mixed batch (one authorized + one unauthorized) processes ZERO items, not just skips the bad one', async () => {
     const app = await buildApp(baseFixture())
     const res = await app.inject({
       method: 'POST', url: '/attendance/regularisation/bulk-approve', headers: HEADERS,
@@ -175,20 +175,27 @@ describe('POST /attendance/regularisation/bulk-approve — ownership guard scope
     expect(approveMock).toHaveBeenCalledTimes(2)
   })
 
-  it('TRANSACTIONAL ATOMICITY (distinct from prevalidation above): a runtime failure on one AUTHORIZED item does not abort the rest of the batch or silently drop it — each item\'s outcome is independently reported', async () => {
+  it('PER-ITEM PARTIAL SUCCESS (distinct from prevalidation above, and NOT transactional atomicity): a runtime failure on one AUTHORIZED item does not abort the rest of the batch or silently drop it — each item\'s outcome is independently reported', async () => {
     // All three ids pass the ownership guard (unlike the prevalidation tests
     // above, where an UNAUTHORIZED id blocks the whole batch before any
     // item is touched). Here every id IS authorized; the middle one's own
     // approveRegularisation() call throws at runtime (e.g. a transient DB
-    // error), simulating a failure INSIDE an otherwise-valid batch. The
-    // guarantee under test is different from prevalidation: no partial
-    // corruption (item 1's success is not undone by item 2's failure) and
+    // error), simulating a failure INSIDE an otherwise-valid batch.
+    //
+    // SYSTEM_AUDIT_2026-10-14 checkpoint 7 correction: an earlier version of
+    // this test's title called this "transactional atomicity," which the
+    // user correctly rejected — if authorized items commit independently
+    // (as asserted below: item 1 succeeds, item 2 fails, item 3 STILL
+    // succeeds, all three outcomes reported), that is per-item partial
+    // success, the opposite of atomicity, not a variant of it. The real
+    // guarantees here are: no partial corruption (item 1's success is not
+    // undone by item 2's failure — each id's own approve_regularisation_
+    // atomic call is independently atomic, but the BATCH itself is not) and
     // no silent loss (item 3 still gets processed and reported, not
-    // abandoned because item 2 blew up) — not "all-or-nothing in one DB
-    // transaction", which this bulk endpoint has never claimed to be (its
-    // own response shape, {results, summary}, is explicitly a per-item
-    // report, and each item's own approveRegularisation() call is already
-    // independently atomic via approve_regularisation_atomic).
+    // abandoned because item 2 blew up). The route's own response shape,
+    // {results, summary}, is the accurate contract: a per-item report, not
+    // an all-or-nothing transaction result. See the route's own doc comment
+    // in regularisation.ts for the full stated contract.
     approveMock.mockImplementation(async (_supabase: unknown, opts: { regularisationId: string }) => {
       if (opts.regularisationId === REG_DIRECT_2) throw new Error('simulated transient DB failure')
       return { ok: true, value: { id: opts.regularisationId, status: 'approved', employee_id: DIRECT_REPORT_ID, date: '2026-01-05', requested_check_in: null, requested_check_out: null } }
@@ -209,6 +216,61 @@ describe('POST /attendance/regularisation/bulk-approve — ownership guard scope
     expect(byId.get(REG_DIRECT_2)!.error).toContain('simulated transient DB failure')
     expect(byId.get(REG_DIRECT_3)!.ok).toBe(true)   // not abandoned because REG_DIRECT_2 failed
     expect(body.summary).toEqual({ approved: 2, failed: 1, total: 3 })
+  })
+
+  it('RETRY SAFETY: resubmitting the same batch (no Idempotency-Key) after a partial failure does not re-approve the already-succeeded items — each retry attempt is independently re-validated', async () => {
+    // SYSTEM_AUDIT_2026-10-14 checkpoint 7, point B's explicit ask: "Failed
+    // items are explicitly reported and retry safely." This simulates the
+    // realistic case the user is worried about: a manager sees "2 approved,
+    // 1 failed" and, without an Idempotency-Key (a plain UI "retry" click,
+    // not a replayed request), resubmits the SAME three ids. The already-
+    // succeeded items must not be silently re-approved (which would risk
+    // double-applying punches/balance effects downstream) — they must come
+    // back as an explicit, accurate failure, while the genuinely-still-
+    // pending item is free to succeed. This models approveRegularisation's
+    // real status pre-check (approval-service.ts: `if (regRow.status !==
+    // 'pending') return { ok:false, error:{type:'CONFLICT', ...} }`) and
+    // migration 462's approve_regularisation_atomic DB-level backstop of
+    // the exact same invariant — the mock below stands in for that already-
+    // proven real behavior so this test can assert the ROUTE reports it
+    // correctly on a second pass.
+    let firstCallDone = false
+    approveMock.mockImplementation(async (_supabase: unknown, opts: { regularisationId: string }) => {
+      if (!firstCallDone) {
+        if (opts.regularisationId === REG_DIRECT_2) throw new Error('simulated transient DB failure')
+        return { ok: true, value: { id: opts.regularisationId, status: 'approved', employee_id: DIRECT_REPORT_ID, date: '2026-01-05', requested_check_in: null, requested_check_out: null } }
+      }
+      // Second pass: REG_DIRECT/REG_DIRECT_3 are now already-approved from
+      // the first call and must be refused; REG_DIRECT_2 (the one that
+      // genuinely failed before) is free to succeed this time.
+      if (opts.regularisationId === REG_DIRECT || opts.regularisationId === REG_DIRECT_3) {
+        return { ok: false, error: { type: 'CONFLICT', message: 'Request is already approved' } }
+      }
+      return { ok: true, value: { id: opts.regularisationId, status: 'approved', employee_id: DIRECT_REPORT_ID, date: '2026-01-05', requested_check_in: null, requested_check_out: null } }
+    })
+
+    const app = await buildApp(baseFixture())
+    const ids = [REG_DIRECT, REG_DIRECT_2, REG_DIRECT_3]
+
+    const first = await app.inject({ method: 'POST', url: '/attendance/regularisation/bulk-approve', headers: HEADERS, payload: { ids } })
+    expect(JSON.parse(first.body).summary).toEqual({ approved: 2, failed: 1, total: 3 })
+
+    firstCallDone = true
+    const second = await app.inject({ method: 'POST', url: '/attendance/regularisation/bulk-approve', headers: HEADERS, payload: { ids } })
+    expect(second.statusCode).toBe(200)
+    const secondBody = JSON.parse(second.body)
+    const byId = new Map<string, { id: string; ok: boolean; error?: string }>(
+      secondBody.results.map((r: any) => [r.id, r]),
+    )
+    // The two already-succeeded items are explicitly reported as failed on
+    // retry — never silently reported as approved a second time.
+    expect(byId.get(REG_DIRECT)!.ok).toBe(false)
+    expect(byId.get(REG_DIRECT)!.error).toContain('already approved')
+    expect(byId.get(REG_DIRECT_3)!.ok).toBe(false)
+    expect(byId.get(REG_DIRECT_3)!.error).toContain('already approved')
+    // The genuinely-still-pending item processes cleanly exactly once.
+    expect(byId.get(REG_DIRECT_2)!.ok).toBe(true)
+    expect(secondBody.summary).toEqual({ approved: 1, failed: 2, total: 3 })
   })
 
   it('REASSIGNMENT: once the grandchild\'s request\'s owner is promoted to a direct report, the batch gate allows it', async () => {
@@ -295,7 +357,7 @@ describe('POST /attendance/regularisation/bulk-reject — ownership guard scope'
     expect(rejectMock).not.toHaveBeenCalled()
   })
 
-  it('BULK ATOMICITY: a mixed batch processes ZERO items when any one is unauthorized', async () => {
+  it('PREVALIDATION: a mixed batch processes ZERO items when any one is unauthorized', async () => {
     const app = await buildApp(baseFixture())
     const res = await app.inject({
       method: 'POST', url: '/attendance/regularisation/bulk-reject', headers: HEADERS,

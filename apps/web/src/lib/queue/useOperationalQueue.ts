@@ -230,35 +230,58 @@ export function useOperationalQueue(): UseOperationalQueueReturn {
   const bulkApprove = useCallback(
     async (ids: string[]) => {
       const groups = groupByType(ids)
-      const promises: Promise<unknown>[] = []
+      // SYSTEM_AUDIT_2026-10-14 checkpoint 7: these aren't all "one promise =
+      // one id" — the anomaly and regularisation calls each batch MANY ids
+      // into a SINGLE HTTP request that still returns 200 even when some of
+      // those ids individually failed (regularisation reports this in
+      // `summary.failed`; anomalies report it as `resolved_count` short of
+      // the requested count). The old code only counted a promise as
+      // "failed" when the whole HTTP call itself rejected (network/4xx/5xx),
+      // so a batch that silently processed 2 of 5 items still showed
+      // "5 items approved" — a real unconditional-success misreport, not
+      // just a styling nit. `requested` records how many ids each entry
+      // represents so a 200-with-partial-failure response is counted
+      // correctly instead of only reacting to outright rejection.
+      const entries: Array<{ requested: number; kind: 'batch-anomaly' | 'batch-reg' | 'single'; promise: Promise<unknown> }> = []
 
       // Anomalies → HR directly resolves
       if (groups['attendance_anomaly']?.length) {
-        promises.push(
-          api.post('/attendance/anomalies/bulk-resolve', { ids: groups['attendance_anomaly'] }),
-        )
+        entries.push({
+          requested: groups['attendance_anomaly'].length,
+          kind:      'batch-anomaly',
+          promise:   api.post('/attendance/anomalies/bulk-resolve', { ids: groups['attendance_anomaly'] }),
+        })
       }
       // Regularisations → approve
       if (groups['regularisation_pending']?.length) {
-        promises.push(
-          api.post('/attendance/regularisation/bulk-approve', { ids: groups['regularisation_pending'] }),
-        )
+        entries.push({
+          requested: groups['regularisation_pending'].length,
+          kind:      'batch-reg',
+          promise:   api.post('/attendance/regularisation/bulk-approve', { ids: groups['regularisation_pending'] }),
+        })
       }
       // Corrections → per-item (no bulk approve endpoint)
       for (const id of groups['correction_pending'] ?? []) {
-        promises.push(api.post(`/attendance/corrections/${id}/approve`))
+        entries.push({ requested: 1, kind: 'single', promise: api.post(`/attendance/corrections/${id}/approve`) })
       }
       // Payroll revisions → per-item
       for (const id of groups['payroll_blocker'] ?? []) {
-        promises.push(api.post(`/payroll/revisions/${id}/approve`))
+        entries.push({ requested: 1, kind: 'single', promise: api.post(`/payroll/revisions/${id}/approve`) })
       }
       // Leave collisions → acknowledge collision log
       for (const id of groups['leave_conflict'] ?? []) {
-        promises.push(api.post(`/leave/collision/log/${id}/resolve`))
+        entries.push({ requested: 1, kind: 'single', promise: api.post(`/leave/collision/log/${id}/resolve`) })
       }
 
-      const results = await Promise.allSettled(promises)
-      const failed  = results.filter(r => r.status === 'rejected').length
+      const settled = await Promise.allSettled(entries.map(e => e.promise))
+      let failed = 0
+      settled.forEach((result, i) => {
+        const { requested, kind } = entries[i]
+        if (result.status === 'rejected') { failed += requested; return }
+        const value = result.value as any
+        if (kind === 'batch-reg') failed += value?.summary?.failed ?? 0
+        else if (kind === 'batch-anomaly') failed += Math.max(0, requested - (value?.resolved_count ?? requested))
+      })
 
       if (failed === 0) {
         toast.success(ids.length === 1 ? 'Item approved' : `${ids.length} items approved`)
@@ -275,7 +298,10 @@ export function useOperationalQueue(): UseOperationalQueueReturn {
   const bulkReject = useCallback(
     async (ids: string[]) => {
       const groups = groupByType(ids)
-      const promises: Promise<unknown>[] = []
+      // See the matching comment in bulkApprove above — the regularisation
+      // call batches many ids into one 200-OK response that can still
+      // report some of them failed in `summary.failed`.
+      const entries: Array<{ requested: number; kind: 'batch-reg' | 'single'; promise: Promise<unknown> }> = []
 
       // Anomalies → no server action; snooze client-side (will auto-LOP at period lock)
       const anomalyIds = groups['attendance_anomaly'] ?? []
@@ -289,20 +315,22 @@ export function useOperationalQueue(): UseOperationalQueueReturn {
       }
       // Regularisations → reject
       if (groups['regularisation_pending']?.length) {
-        promises.push(
-          api.post('/attendance/regularisation/bulk-reject', {
+        entries.push({
+          requested: groups['regularisation_pending'].length,
+          kind:      'batch-reg',
+          promise:   api.post('/attendance/regularisation/bulk-reject', {
             ids:              groups['regularisation_pending'],
             rejection_reason: 'Rejected via work queue',
           }),
-        )
+        })
       }
       // Corrections → per-item
       for (const id of groups['correction_pending'] ?? []) {
-        promises.push(api.post(`/attendance/corrections/${id}/reject`, { rejection_reason: 'Rejected via work queue' }))
+        entries.push({ requested: 1, kind: 'single', promise: api.post(`/attendance/corrections/${id}/reject`, { rejection_reason: 'Rejected via work queue' }) })
       }
       // Payroll revisions → per-item
       for (const id of groups['payroll_blocker'] ?? []) {
-        promises.push(api.post(`/payroll/revisions/${id}/reject`, { rejection_reason: 'Rejected via work queue' }))
+        entries.push({ requested: 1, kind: 'single', promise: api.post(`/payroll/revisions/${id}/reject`, { rejection_reason: 'Rejected via work queue' }) })
       }
       // Leave conflicts → snooze (can't reject a collision)
       const leaveIds = groups['leave_conflict'] ?? []
@@ -315,8 +343,13 @@ export function useOperationalQueue(): UseOperationalQueueReturn {
         })
       }
 
-      const results = await Promise.allSettled(promises)
-      const failed  = results.filter(r => r.status === 'rejected').length
+      const settled = await Promise.allSettled(entries.map(e => e.promise))
+      let failed = 0
+      settled.forEach((result, i) => {
+        const { requested, kind } = entries[i]
+        if (result.status === 'rejected') { failed += requested; return }
+        if (kind === 'batch-reg') failed += (result.value as any)?.summary?.failed ?? 0
+      })
 
       if (failed === 0) {
         const nonSnoozeCount = ids.length - anomalyIds.length - leaveIds.length

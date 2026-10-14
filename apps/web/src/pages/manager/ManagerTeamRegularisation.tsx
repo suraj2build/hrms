@@ -102,7 +102,16 @@ export function ManagerTeamRegularisation() {
     onSuccess:  (res: BulkResult) => {
       bulkApproveKey.current = crypto.randomUUID()
       const { approved = 0, failed, total } = res.summary
-      toast.success(`Approved ${approved} of ${total}${failed > 0 ? ` · ${failed} failed` : ''}`)
+      // SYSTEM_AUDIT_2026-10-14 checkpoint 7: this is per-item partial
+      // success, not all-or-nothing — the text already named the failed
+      // count, but the toast's own styling was unconditionally "success"
+      // (green) even when some ids failed, which reads as full success at
+      // a glance. Use the warning style whenever any item failed.
+      if (failed > 0) {
+        toast.warning(`Approved ${approved} of ${total} · ${failed} failed`)
+      } else {
+        toast.success(`Approved ${approved} of ${total}`)
+      }
       setSelected(new Set())
       // Same /attendance/regularisation/team data also backs the HR-admin
       // queue (['reg-pending']), the ESS approvals tracker
@@ -127,7 +136,11 @@ export function ManagerTeamRegularisation() {
     onSuccess:  (res: BulkResult) => {
       bulkRejectKey.current = crypto.randomUUID()
       const { rejected = 0, failed, total } = res.summary
-      toast.success(`Rejected ${rejected} of ${total}${failed > 0 ? ` · ${failed} failed` : ''}`)
+      if (failed > 0) {
+        toast.warning(`Rejected ${rejected} of ${total} · ${failed} failed`)
+      } else {
+        toast.success(`Rejected ${rejected} of ${total}`)
+      }
       setSelected(new Set())
       setRejectDialogOpen(false)
       qc.invalidateQueries({ queryKey: ['manager-team-regularisation'] })

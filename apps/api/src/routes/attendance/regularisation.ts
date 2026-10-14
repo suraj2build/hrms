@@ -313,6 +313,26 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
   // ── POST /attendance/regularisation/bulk-approve ──────────────────────────────
   // Manager bulk approves team requests.
   // P6.5 security fix: every request in the batch must belong to a direct report.
+  //
+  // CONTRACT (SYSTEM_AUDIT_2026-10-14 checkpoint 7, stated explicitly per the
+  // continued audit's correction — this is NOT all-or-nothing transactional
+  // atomicity across the batch): once the ownership prevalidation above
+  // passes (which DOES guarantee zero mutations if any id is unauthorized —
+  // that check runs before any item is touched), each AUTHORIZED id commits
+  // INDEPENDENTLY via its own approve_regularisation_atomic transaction. A
+  // runtime failure on one id (already-actioned, now-locked period, a
+  // transient DB error) does not roll back or block any other id in the
+  // batch — this is per-item partial success. Always responds 200; the
+  // authoritative per-item outcome is `results` (`{id, ok, error}`) and
+  // `summary` (`{approved, failed, total}`). Callers (including this
+  // route's own callers in the web app) MUST surface `summary.failed` —
+  // treating a 200 response as unconditional success is a real UI defect,
+  // not a hypothetical one (see checkpoint 7's fixes to
+  // ManagerTeamRegularisation.tsx, ManagerRegularisationQueue.tsx, and
+  // useOperationalQueue.ts). Retries are safe without an Idempotency-Key:
+  // an id that already succeeded re-reads as non-'pending' and is refused
+  // with an explicit CONFLICT, never silently re-approved or double-
+  // applied to punches/balance.
   fastify.post('/attendance/regularisation/bulk-approve', auth, async (req: any, reply) => {
     const schema = z.object({ ids: z.array(z.string().uuid()).min(1).max(50) })
     const parsed = schema.safeParse(req.body)
@@ -441,6 +461,8 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
   // ── POST /attendance/regularisation/bulk-reject ───────────────────────────────
   // Manager bulk rejects team requests.
   // P6.5 security fix: every request in the batch must belong to a direct report.
+  // CONTRACT: same per-item partial-success contract as bulk-approve above —
+  // see that route's comment.
   fastify.post('/attendance/regularisation/bulk-reject', auth, async (req: any, reply) => {
     const schema = z.object({
       ids: z.array(z.string().uuid()).min(1).max(50),

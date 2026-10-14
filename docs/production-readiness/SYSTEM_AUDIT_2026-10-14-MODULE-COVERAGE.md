@@ -371,7 +371,15 @@ checkpoint so completed work is never repeated. Batch log:
   KEPT, reframed in code comments as a fast-fail UX optimization only —
   they are no longer the enforcement boundary.
 
-  **Proof the race is actually closed — not a sequential test**, per the
+  **Proof this specific ordering is closed — not a sequential test**
+  (checkpoint 8 correction: this heading originally claimed "the race is
+  actually closed," full stop — that overclaimed. This test proves only
+  the ordering where the period-lock write commits before the mutation's
+  check runs. The complementary ordering, and the period-lock WRITER
+  side's complete lack of any shared mechanism, were not examined here at
+  all and were NOT actually closed until checkpoint 8's migration 462 —
+  see that entry below for the real fix and the two-ordering proof),
+  per the
   user's explicit rejection of "insert a locked row, then call approve" as
   insufficient: `scripts/db/verify-period-lock-no-race.mjs` uses two raw
   `pg` connections with explicit transaction control to construct the
@@ -428,18 +436,22 @@ checkpoint so completed work is never repeated. Batch log:
   the RPC and reporting `days_restored`, and the pre-existing non-approved
   status check unaffected by the refactor).
 
-  **Prevalidation vs. transactional-atomicity, tested as two distinct
-  invariants per the user's explicit instruction** (they are not the same
-  claim and conflating them was the risk): added one new test to
-  `regularisation-bulk-scope.test.ts`, alongside the already-existing
-  prevalidation test (an unauthorized item in the batch → zero items
-  mutate, proven by the service mock never being invoked). The new test
-  mocks the service call to throw for one AUTHORIZED mid-batch item and
-  asserts the other two authorized items still process independently and
-  report correctly (`{approved: 2, failed: 1, total: 3}`, each item's
-  outcome keyed by id) — proving a runtime failure on one item of an
-  all-authorized batch does not abort or silently drop the rest, which
-  prevalidation alone does not establish.
+  **Prevalidation vs. independent-per-item-commit, tested as two distinct
+  invariants per the user's explicit instruction** (checkpoint 8
+  correction: this was originally labeled "transactional atomicity" —
+  wrong name for the second invariant, fixed in checkpoint 8 below; the
+  behavior and the test itself were correct, only the label was not):
+  added one new test to `regularisation-bulk-scope.test.ts`, alongside
+  the already-existing prevalidation test (an unauthorized item in the
+  batch → zero items mutate, proven by the service mock never being
+  invoked). The new test mocks the service call to throw for one
+  AUTHORIZED mid-batch item and asserts the other two authorized items
+  still process independently and report correctly (`{approved: 2,
+  failed: 1, total: 3}`, each item's outcome keyed by id) — proving a
+  runtime failure on one item of an all-authorized batch does not abort
+  or silently drop the rest, which prevalidation alone does not
+  establish. This is per-item partial success, not atomicity — see
+  checkpoint 8.
 
   **Fresh-install migration verification**: migration 461 (as extended
   this round with the cancel RPC) applied cleanly, zero errors, against a
@@ -488,6 +500,154 @@ checkpoint so completed work is never repeated. Batch log:
   computation); the remaining ~60 unopened `routes/attendance` files and
   `routes/approvals/governance-evolution.ts`/`workflows.ts` (next planned
   batch, below, unchanged in scope from checkpoint 6's plan).
+- **Checkpoint 8** (this commit): the user independently inspected
+  checkpoint 7 and correctly rejected two of its claims rather than taking
+  "604 tests pass" as resolution. Both corrections below are real fixes,
+  not reclassifications of already-correct behavior.
+
+  **A. The period-lock race was NOT actually closed by checkpoint 7.**
+  Migration 461's in-transaction `SELECT` only catches ONE of the two
+  possible race orderings: the one where the period-lock write already
+  committed before the mutation's check statement ran. It does nothing
+  for the complementary ordering — the mutation's check runs first,
+  correctly sees OPEN (the lock genuinely hasn't committed yet), the
+  mutation proceeds and commits, and the lock-creation write lands
+  microseconds later. Checkpoint 7's own Part 4 stochastic test actually
+  surfaced exactly this ("all resolved 'approve wins'") and the write-up
+  treated it as an acceptable unresolved race instead of recognizing it
+  as the uncaught half. Worse: checkpoint 7 never inspected the
+  period-lock WRITER side (`routes/attendance/period-locks.ts`'s
+  lock/unlock/start-payroll/finalize) at all — confirmed by reading it
+  this round: all four were plain Supabase-js UPDATE/INSERT calls with a
+  folded CAS `WHERE` clause but no lock of any kind, sharing no mechanism
+  whatsoever with the mutation RPCs' in-transaction check. Two
+  independent "hope we don't race each other" writers is not the same as
+  one shared serialization point.
+
+  **Fix (migration 462):** a Postgres advisory lock keyed by
+  `(tenant_id, period_month)` (`fn_lock_period_months`, via
+  `pg_advisory_xact_lock` — auto-released on commit/rollback), acquired
+  by BOTH writer classes before either decides anything. This works even
+  when no `attendance_period_locks` ROW exists yet for that month — the
+  exact case the user explicitly asked to be tested, and the reason a row
+  lock (`FOR UPDATE`) cannot substitute: there is no row to lock. Four new
+  atomic RPCs (`lock_period_atomic`, `unlock_period_atomic`,
+  `start_payroll_processing_atomic`, `finalize_period_atomic`) replace
+  `period-locks.ts`'s plain CAS writes; all seven mutation RPCs from
+  migration 461 (plus the cancel RPC added after it) are re-created to
+  acquire the same lock, for every month in their date range (sorted
+  ascending — a standard lock-ordering discipline so two multi-month
+  transactions can never deadlock by acquiring in different orders;
+  lock-creation only ever touches one month per call, so it can never be
+  one half of such a cycle) before their existing lock-check `SELECT`.
+
+  **Proof, both orderings, via genuine blocking (not timing inference)**:
+  `scripts/db/verify-period-lock-shared-serialization.mjs` uses two raw
+  `pg` connections with explicit transaction control and queries
+  `pg_locks` directly to confirm a real wait, not just a slow response.
+  - **Part 1 ("lock wins")**: `lock_period_atomic` holds the advisory
+    lock for a month with **no pre-existing row at all**; a concurrent
+    real `approve_leave_request_atomic` call is shown present in
+    `pg_locks` as an ungranted advisory-lock wait (confirmed `true`) —
+    genuinely blocked, not slow. Once the lock-creation call commits, the
+    approval unblocks, observes the now-committed LOCKED row, and is
+    refused with `PERIOD_LOCKED`; the request's status is confirmed
+    unchanged (`PENDING`) — no partial mutation.
+  - **Part 2 ("approval wins")**: the approval holds the lock first; a
+    concurrent `lock_period_atomic` call is shown genuinely blocked in
+    `pg_locks`. Once the approval commits (balance deducted, status
+    `APPROVED` — accepted as correct, since it genuinely preceded the
+    lock in real commit order, not a race the system failed to catch),
+    the lock-creation call proceeds and succeeds. A **third**, fresh
+    approval attempt for the same now-locked month, started only after
+    the lock is durably committed, is then refused — proving the lock is
+    enforced prospectively regardless of which writer happened to go
+    first.
+  - **Part 3**: a leave spanning two months is refused by locking
+    *either* month (tested both).
+  - **Part 4**: 10 concurrent real calls (mixed multi-month approvals and
+    lock-creation calls, overlapping months) all resolve within a bounded
+    timeout — no deadlock/hang.
+  All four parts pass. Script committed for reuse. Migration 462 also
+  re-verified against a fresh Postgres 16 instance running the complete
+  migration history (000→462, 458 files, 0 errors, 480 tables, all 5 new
+  functions present) and smoke-tested through the real compiled API
+  server over real HTTP (`lock`→`start-payroll`→`finalize`→`finalize`
+  again correctly refused 409; `lock` on a fresh month with no prior row
+  →`unlock`, both 200, persisted read-back confirmed).
+
+  **B. Bulk regularisation's guarantee was mislabeled, and the UI claim
+  needed verifying rather than assuming.** The prior checkpoint's test
+  titles called the per-item independence behavior "TRANSACTIONAL
+  ATOMICITY" and "BULK ATOMICITY" — the user correctly rejected this: if
+  authorized items commit independently (which they do — one item's
+  runtime failure doesn't block or undo the others), that is **per-item
+  partial success**, the opposite of atomicity, not a variant of it.
+  Relabeled both the tests (now PREVALIDATION for the zero-mutation gate,
+  PER-ITEM PARTIAL SUCCESS for the independent-commit behavior) and added
+  an explicit CONTRACT doc comment to both routes in `regularisation.ts`
+  stating this plainly, including that callers must surface
+  `summary.failed` rather than treating 200 as unconditional success.
+
+  Checked all four of the user's specific asks:
+  - *Unauthorized-item prevalidation causes zero mutations* — already
+    covered (pre-existing test, unchanged).
+  - *Each successful item's approval, punches, and attendance effects are
+    consistent* — already covered by the pre-existing
+    `regularisation-approve-punch-upsert.test.ts`'s bulk-path describe
+    block (2 ids in one batch, each gets its own correctly-shaped punch
+    upsert call, `summary` matches) — cited rather than re-derived.
+  - *Failed items are explicitly reported and retry safely* — **new**
+    test (`RETRY SAFETY`, `regularisation-bulk-scope.test.ts`): submits a
+    3-id batch where the middle id fails; resubmits the SAME 3 ids with
+    no Idempotency-Key (modeling a plain UI retry click, not a replayed
+    request) and confirms the two already-succeeded ids come back as an
+    explicit `CONFLICT` failure (never silently re-approved) while the
+    genuinely-still-pending id processes cleanly exactly once. This
+    models `approveRegularisation`'s real status pre-check and migration
+    462's `approve_regularisation_atomic` DB-level backstop of the same
+    invariant (both already read this round, confirming the real
+    behavior this mock stands in for).
+  - *UI shows partial failure rather than unconditional success* — **real
+    defects found, not hypothetical**, by reading all three web call
+    sites rather than assuming the existing toasts were fine:
+    1. `ManagerRegularisationQueue.tsx` (HR admin's bulk queue,
+       `/admin/attendance/regularisation`) — its `BulkResult` TypeScript
+       interface didn't even include `failed`/`total`, and its toast
+       always read "Approved N requests" with **zero mention of
+       failures**, regardless of `summary.failed`. Fixed: now reads
+       `summary.failed` and shows a `toast.warning` ("N approved, N
+       failed") whenever any item failed, `toast.success` only when none
+       did.
+    2. `ManagerTeamRegularisation.tsx` (the per-manager queue) — the text
+       already named the failed count ("Approved N of M · K failed") but
+       the toast's *styling* was unconditionally green/success even when
+       `failed > 0`, visually reading as full success at a glance. Fixed
+       to use `toast.warning` whenever `failed > 0`.
+    3. **The most serious of the three**, found in `useOperationalQueue.ts`
+       (the generic cross-module Operational Queue widget): its
+       `bulkApprove`/`bulkReject` batch MANY regularisation (and anomaly)
+       ids into a SINGLE HTTP call, then compute `failed` as "how many of
+       these `promises` themselves rejected" — but a batch call that
+       returns 200 with `summary: {approved: 2, failed: 3, total: 5}` is
+       a *fulfilled* promise, so this count was **structurally blind** to
+       any partial failure reported inside a 200 response, for both the
+       regularisation batch (`summary.failed`) and the anomaly batch
+       (`resolved_count` short of the requested count). A batch that
+       silently processed 2 of 5 would have shown "5 items approved" —
+       literal unconditional success on a call that demonstrably wasn't.
+       Fixed: each batched entry now carries its `requested` count and is
+       inspected on its own terms after settling (`value.summary.failed`
+       for regularisation, `requested - value.resolved_count` for
+       anomalies) rather than relying solely on whole-call rejection.
+  No web test infra exists in this repo (`apps/web` has no test runner
+  configured, confirmed via `package.json` and an empty-result search for
+  `*.test.ts*` under `src`) — these three fixes are source-review-verified
+  and `tsc --noEmit`-clean, not unit-tested; disclosed, not implied.
+
+  **Test suite**: 605/605 passed, 70/70 files (up from checkpoint 7's
+  604/604 — 1 new retry-safety test), 0 regressions; `tsc --noEmit` clean
+  on both `apps/api` and `apps/web`.
 - **Next planned batches** (not yet started — listed so a future session
   picks up here, not from zero): continue item 2's batch — the remaining
   ~60 unopened `routes/attendance` files (tier 1 next: `leave-employee.ts`,
