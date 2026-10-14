@@ -1511,3 +1511,41 @@ engineering gap), final-candidate CI and authenticated staging E2E/RLS,
 2,200+ employee reconciliation at the scale this sandbox cannot produce,
 concurrent-user load, managed recovery, and business UAT. **NO-GO stands.**
 PR #30 remains a draft. PMS and Travel Desk remain on hold.
+
+## Addendum (2026-10-14) — SYSTEM_AUDIT_2026-10-14: accrual and rollback made fully atomic; pilot tooling made idempotent; full module audit and real-environment validation NOT executed
+
+Full writeup: `docs/pilot/SYSTEM_AUDIT_2026-10-14_FINDINGS.md`. Summary:
+
+- **Monthly leave accrual (migration 459)**: the balance pre-fetch was the
+  one query in `accrual-engine.ts` never routed through `fetchAllRows()` —
+  a live instance of this very document's own universal pagination rule —
+  and crediting was four uncoordinated round trips with a client-computed
+  overwrite instead of an atomic increment, unsafe against retries and
+  concurrent leave deductions. Fixed with one atomic, per-employee-
+  idempotent SQL statement per chunk; proven at 2,200 employees, with an
+  injected mid-batch failure + retry, two genuinely concurrent runs, and a
+  real concurrent balance deduction racing the same row — all reconciled
+  against both ledgers (`scripts/db/verify-monthly-accrual-atomic.mjs`).
+- **Payroll rollback (migration 460)**: `rollback_payroll_run_atomic`
+  flipped status and returned; slip deletion, totals resync, encashment
+  revert, and ledger cleanup ran as separate calls afterward — a crash
+  between them could leave a leave-encashment request stuck `'paid'` for a
+  run whose slip no longer existed. Folded into one transaction; proven
+  with every guard still blocking with zero partial effect, real
+  concurrency against `mark_ledger_posted_atomic`, and idempotent retry
+  (`scripts/db/verify-payroll-rollback-atomic.mjs`).
+- **Pilot tooling**: found and fixed `POST /setup`'s anti-hijack guards
+  running before its own idempotency check (blocked legitimate retries
+  past 15 minutes). Rewrote the seed/smoke-check scripts for a stable
+  `PILOT_RUN_ID`, credential handoff gated on a confirmed `is_pilot=true`
+  read-back, and smoke checks that reject an unexpected 401/404/500
+  instead of treating it as "not blocked". Live-tested end-to-end
+  (first seed, idempotent repeat, interrupted-then-resumed run) against
+  the real compiled API + Postgres.
+- **NOT executed this round**: a complete inventory/audit of every module,
+  screen, route and workflow (configuration through owner portal), and
+  any validation against a real Supabase project (RLS, storage privacy,
+  `auth.uid()`) — unchanged from every prior round's disclosure, this
+  sandbox still cannot exercise that layer. Neither is claimed as done,
+  sampled, or safe to assume clean. **NO-GO stands.** `main` untouched;
+  PR #30 remains unmerged.
