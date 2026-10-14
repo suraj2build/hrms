@@ -122,14 +122,55 @@ checkpoint so completed work is never repeated. Batch log:
      **403 FORBIDDEN, "hr_admin or super_admin required"**. Screenshots in
      `/tmp/attendance-browser-evidence/` (not committed — ephemeral local
      evidence, re-creatable by re-running the script).
+- **Checkpoint 4** (this commit): the user explicitly authorized larger
+  30-50-file batches with the full item-2 checklist against each, in the
+  stated execution order (Employees → Attendance/Leave/Approvals →
+  Payroll/Statutory/F&F → Masters/Onboarding/Recruitment/Assets →
+  ESS/Manager/Admin/Owner → shared infra). This batch **completes item 1,
+  the Employees module** — every remaining file read this round:
+  `personal-info.ts`, `identity.ts`, `bank-statutory.ts`, `contracts.ts`,
+  `employee-documents.ts`, `addresses.ts`, `education.ts`,
+  `emergency-contacts.ts`, `family.ts`, `exit-interview.ts`,
+  `important-dates.ts`, `nominations.ts`, `passport-visa.ts`,
+  `previous-employment.ts`, `shift-history.ts`, `full-create.ts`,
+  `full-profile.ts`, `job-history.ts`, `manager.ts`, `access-cards.ts`,
+  `onboarding-status.ts`, `options.ts`, `org-context.ts`, `trust.ts`,
+  `context-data.ts`, `separation.ts`, and the non-F&F sections of
+  `separation-workflow.ts` (clearances, approve/advance/relieve/archive,
+  gratuity-config, clearance-departments — its F&F sections were already
+  extensively audited and fixed across several prior rounds, see the G12/
+  F&F history in CLAUDE.md, and were not re-derived here).
+  **One real, confirmed defect found and fixed**: `context-data.ts`'s
+  three endpoints (`/employees/:id/attendance`, `/overtime`, and —
+  critically — `/payroll-summary`, which returns CTC/net pay/total
+  deductions) were gated only on `MANAGER_ROLES` (any `manager`, `hr_admin`
+  or `super_admin`), with **no check that the target employee was actually
+  in the caller's team** — any manager in the tenant could pull any other
+  employee's compensation summary by guessing/enumerating employee UUIDs,
+  not just their own reports'. Fixed using the exact `isDirectReport`/
+  `getDirectReportIds` pattern already established elsewhere in this
+  codebase (`manager-scope.ts`, used by overtime/comp-off/separation
+  clearance) — HR admins still bypass, a manager now has to actually be in
+  the target employee's reporting chain. 6 new tests, including the
+  payroll-summary case specifically since it's the most sensitive of the
+  three. Everything else read in this batch (~26 files) was already
+  correctly tenant-scoped, FK-cross-tenant-checked, CAS-versioned, and
+  (where applicable) storage-path-prefix-validated — no further defects
+  found. The Employees module status below is now genuinely complete, not
+  partial.
 - **Next planned batches** (not yet started — listed so a future session
-  picks up here, not from zero): Leave (`routes/employees` leave
-  sub-routes, `ess` leave endpoints), Approvals, Payroll authorization
-  (beyond the nav-link pass already done), Masters, Documents, Assets,
-  Recruitment/Careers, Compensation, remaining `employees/*` sub-routes
-  (bank-statutory.ts, personal-info.ts, identity.ts, contracts.ts and the
-  ~20 other files in that directory not yet opened this round). Also
-  recommended, not yet done: delete the confirmed-100%-dead
+  picks up here, not from zero): item 2 of the execution order — Attendance,
+  shifts, rosters, holidays, Leave, comp-off and Approvals (`routes/
+  attendance`, `routes/employees` leave sub-routes if any remain,
+  `ess` leave endpoints, `routes/approvals`). Then item 3 — Compensation,
+  Payroll, statutory calculations, reimbursements, loans/advances, F&F and
+  accounting (much of this has prior-round coverage per CLAUDE.md, but
+  has not been re-verified against this round's full item-2 checklist).
+  Then items 4-6 per the user's stated execution order: Masters/
+  organization/positions/onboarding/recruitment/assets/documents; ESS/
+  manager/admin/owner portals + dashboards/reports/imports/notifications/
+  support/integrations; shared infrastructure and cross-module
+  interactions. Also recommended, not yet done: delete the confirmed-100%-dead
   `AdminDashboard.tsx` / `Dashboard.tsx` (zero route registrations,
   verified above) — flagging rather than deleting this round since the
   session's own destructive-action guard declined the delete.
@@ -161,7 +202,7 @@ started.
 | **Attendance** (`routes/attendance`, `pages/attendance`) | Partially tested | Nav links fixed: `EmployeeShifts.tsx` dead `<a href="/shift-master">` → `<Link to="/admin/shift-master">`; `MusterRoll.tsx`'s `/admin/payroll/readiness` → `/admin/payroll-readiness`. **Admin attendance-processing gap closed for real, on the actually-reachable pages this time** (checkpoint 3; checkpoints 1–2 fixed the correct behavior on `AdminDashboard.tsx`, which turned out to be 100% dead code — see the checkpoint 3 writeup above). The backend (`apps/api/src/routes/attendance/process.ts`) already correctly authorizes `hr_admin`/`super_admin` and needed no fix. Fixed the real live call sites: `pages/admin/ControlCenter.tsx` (the "Process now" banner button and the "Process Attendance" quick action, both previously → `/admin/attendance/center`, confirmed to have no trigger button) and `components/operational/CommandPalette.tsx`'s global "Process Attendance" command (same dead-end target). All three now point at `/manager/team/attendance`, where `Attendance.tsx` unconditionally renders the real trigger button for `isAdmin` roles. **Proven end-to-end in a real Chromium browser** (`scripts/db/browser-test-attendance-processing.mjs`): real login → real dashboard click → real visible button → real `POST /attendance/process` → 200 → "Processing Complete" banner visible on screen, for both `super_admin` and `hr_admin`; `employee` never sees the control AND is refused 403 when a direct API call is made using that role's own real captured session token. API-level correctness (processing idempotency, anomaly reconciliation) last verified in the Round 2026-10-11 de-emphasis work and the earlier UAT scenario matrix (W/WO/H/X/P/L-series), not re-run this round. |
 | **Payroll** (`routes/payroll`, `pages/payroll`) | Partially tested | Nav links fixed: 3 call sites (`WorkflowRecommendations.tsx`, `OperationalInboxV2.tsx`, `PayrollContextPanel.tsx`) hardcoded `/admin/payroll/blockers` with no `:runId` — none of their data sources carry a `run_id` (`PayrollContextPanel`'s blockers are month-aggregated, not run-scoped), so each now falls back to the runs list `/admin/payroll`, matching the pattern `PayrollOperationsCenter.tsx` and `navigation.config.ts` already use correctly. `AdminDashboard.tsx`'s "Compliance" quick action pointed at the real `/admin/payroll/statutory-dashboard` ("Compliance Cockpit") instead of the non-existent `/admin/compliance`. Approval/finalization/reversal correctness, F&F, leave encashment — extensively tested in prior rounds (G12, F&F concurrency, accounting-ledger fixes); not re-run this round. |
 | **Leave** (`routes/employees` leave endpoints, `pages/leave`, `pages/ess` leave) | Not examined this round | Raise-leave-on-behalf, cancellation, encashment all previously tested (G12, prior rounds). Settings.tsx's "Leave Types & Balances" and "Leave Accrual Jobs" nav links fixed this round; `RightRail.tsx`'s leave-types link fixed. No new API-level leave audit performed this round. |
-| **Employees / People Directory** (`routes/employees`, `pages/employees`) | Partially tested | **2 of ~30 route files read end-to-end against all 6 item-2 categories this round: `index.ts` (core CRUD — search/org-tree/list/get/create/patch-me/put/delete) and `user-account.ts` (account provisioning/suspend/reactivate/reset-password).** `index.ts` is otherwise well-hardened from prior rounds (tenant-scoped everywhere, object-level auth on `GET /:id`, cross-tenant FK validation + circular-reference guard on `PUT /:id`'s manager fields, optimistic concurrency, `fetchAllRows` on the unbounded org-tree query) — but had one real defect, now fixed: **`PUT /employees/:id` could set `status: 'separated'` (reachable from `EmployeeProfile.tsx`'s Overview tab) without revoking the employee's auth access**, unlike `DELETE /employees/:id` and the dedicated separation routes. Fixed to call `revokeEmployeeAuth` on the transition into `separated` (not on a no-op resubmission), with 3 new regression tests. `user-account.ts` read in full — no defect found (tenant-scoped, role-gated, rollback-on-partial-failure for both invite and direct-create paths, auth ban/unban kept in sync with `profiles.is_active`, version-conflict handling). **Remaining ~27 files not yet opened this round**: `bank-statutory.ts`, `personal-info.ts`, `identity.ts`, `contracts.ts`, `addresses.ts`, `education.ts`, `emergency-contacts.ts`, `employee-documents.ts`, `exit-interview.ts`, `family.ts`, `full-create.ts`, `full-profile.ts`, `important-dates.ts`, `job-history.ts`, `manager.ts`, `nominations.ts`, `onboarding-status.ts`, `options.ts`, `org-context.ts`, `passport-visa.ts`, `previous-employment.ts`, `probation-confirmations.ts` (tested in a prior round per CLAUDE.md), `separation.ts`/`separation-workflow.ts` (spot-checked this round only for the `revokeEmployeeAuth` call sites — confirmed both already correct, not otherwise re-audited), `shift-history.ts`, `trust.ts`, `access-cards.ts`, `context-data.ts`. |
+| **Employees / People Directory** (`routes/employees`, `pages/employees`) | **Tested — module complete** | **Checkpoint 4: all ~30 route files now read against the item-2 checklist** (tenant scoping, object/team-level authorization, FK cross-tenant validation, CAS/optimistic concurrency, storage-path privacy, approval/reversal correctness). Two real defects found and fixed across the whole module: (1) `PUT /employees/:id` could set `status: 'separated'` without revoking auth access — fixed in checkpoint 2 (3 tests). (2) `context-data.ts`'s attendance/overtime/**payroll-summary** endpoints were gated on role only (`MANAGER_ROLES`), not on team membership — any manager could view any employee's CTC/net pay/deductions tenant-wide; fixed in checkpoint 4 using the established `isDirectReport`/`getDirectReportIds` pattern (6 tests). Every other file (`index.ts`, `user-account.ts`, `personal-info.ts`, `identity.ts`, `bank-statutory.ts`, `contracts.ts`, `employee-documents.ts`, `addresses.ts`, `education.ts`, `emergency-contacts.ts`, `family.ts`, `exit-interview.ts`, `important-dates.ts`, `nominations.ts`, `passport-visa.ts`, `previous-employment.ts`, `shift-history.ts`, `full-create.ts`, `full-profile.ts`, `job-history.ts`, `manager.ts`, `access-cards.ts`, `onboarding-status.ts`, `options.ts`, `org-context.ts`, `trust.ts`, `separation.ts`, `separation-workflow.ts`'s non-F&F sections) was read and found already correctly tenant-scoped, FK-cross-tenant-checked, CAS-versioned and storage-path-validated — much of it carries visible scars from prior audit rounds (explicit "Fresh audit finding" / "P6.0d — ownership guard" comments), consistent with the extensive prior work recorded in CLAUDE.md. `separation-workflow.ts`'s F&F sections (lines ~416-972) were not re-derived this round — they were extensively audited and fixed across several documented prior rounds (G12, F&F concurrency, accounting-ledger fixes) and re-verifying them from scratch was judged lower-value than covering the genuinely-unexamined files above; `probation-confirmations.ts` has its own dedicated test file from a prior round. No browser/real-Postgres evidence was produced for this specific batch — the defects found were authorization logic, fully provable (and proven) via route-level tests with explicit positive/negative cases; a browser click cannot demonstrate a 403 any more rigorously than an HTTP assertion can for this class of bug. |
 | **Approvals** (`routes/approvals`, `pages/approvals`) | Partially tested | `Settings.tsx`'s Governance Matrix link fixed (`/admin/approvals/governance` → `/admin/approvals/governance-matrix`). `OperationalInbox.tsx`'s stale `/approvals/inbox` → `/admin/approvals/inbox` fixed (prior turn, this audit). Underlying approval-hierarchy/on-behalf logic last verified in the UAT round recorded in CLAUDE.md/STATUS.md. |
 | **Masters / Org structure** (`routes/masters`, `pages/masters`) | Partially tested | `OrgGovernancePanel.tsx`'s 6 stale `/masters/*` nav calls fixed → `/admin/masters/*` (prior turn, this audit). No further audit this round. |
 | **Settings** (`pages/settings/Settings.tsx`) | Tested (nav only) | "Coming soon" badge on Session & Auth Policy now actually disables the card (was cosmetic-only — fully clickable to a dead route). Data Explorer, Leave Accrual Jobs, Governance Matrix links fixed. Rest of Settings (webhooks, integrations, AI provider config, billing) not independently re-audited. |
