@@ -20,9 +20,12 @@ checkpoint so completed work is never repeated. Batch log:
   validation from a blacklist to an allowlist (closes encoded-traversal,
   backslash, empty-filename, nested-path bypasses the first pass missed);
   added setup.ts tests for interrupted-retry-while-fresh, USER_NOT_FOUND,
-  validation error, and a real concurrent-insert race; audited the
-  **Employees module end-to-end** (`routes/employees/index.ts`,
-  `user-account.ts`) against all 6 of item 2's categories and found +
+  validation error, and a real concurrent-insert race; audited **2 of
+  ~30 files in the Employees module** (`routes/employees/index.ts`,
+  `user-account.ts`) against all 6 of item 2's categories — this was
+  initially mis-described as an "end-to-end" module audit, which was
+  wrong and is corrected here: with 27 files still unopened the module
+  status is PARTIAL, not complete, for either checkpoint. Found +
   fixed a real defect: `PUT /employees/:id` could transition status to
   `'separated'` (reachable from `EmployeeProfile.tsx`'s Overview tab, not
   only the dedicated Separation Workflow) without revoking the employee's
@@ -30,13 +33,106 @@ checkpoint so completed work is never repeated. Batch log:
   had documented covering only 5. Verified the real Postgres SQLSTATE for
   the setup.ts race (`23505`) against an actual local Postgres 16 instance,
   separate from the mocked unit tests.
+- **Checkpoint 3** (this commit): user correctly rejected checkpoint 2 on
+  three counts — fixed below, not just acknowledged:
+  1. **The admin attendance-processing fix was pointed at dead code.**
+     `AdminDashboard.tsx` (checkpoint 1 and 2's edit target) has **zero
+     route registrations anywhere** — `/admin/dashboard` is a hard
+     `<Navigate>` redirect straight to `/admin/control-center`
+     (`ControlCenter.tsx`), and the one component that would have rendered
+     `AdminDashboard` (`Dashboard.tsx`, a role router) is itself never
+     registered on any route either. Confirmed via `grep` across the whole
+     `apps/web/src` tree: zero importers of `Dashboard.tsx`, exactly one
+     importer of `AdminDashboard.tsx` (`Dashboard.tsx`, also dead). A real
+     Chromium browser session logging in as a seeded super_admin landed on
+     `ControlCenter.tsx` and confirmed this directly — clicking "Process
+     Attendance" from the live dashboard navigated to `/admin/attendance/
+     center`, not `/manager/team/attendance` as checkpoint 2 claimed to
+     have fixed. **Both prior checkpoints' edits to `AdminDashboard.tsx`
+     were real, correct fixes to a file nothing renders** — left in place
+     (not deleted; file deletion was denied by the session's destructive-
+     action guard) but flagged here so no future session trusts it as a
+     coverage data point. The actually-reachable pages
+     (`pages/admin/ControlCenter.tsx`'s "Process now" banner + "Process
+     Attendance" quick action, and `components/operational/
+     CommandPalette.tsx`'s "Process Attendance" command) each independently
+     had the SAME defect (→ `/admin/attendance/center`, which
+     `AttendanceOperationsCenter.tsx` confirmed has no trigger button
+     either) and are now fixed to the real destination
+     (`/manager/team/attendance`) and **proven working end-to-end in a
+     real browser** — see the browser-evidence item below.
+  2. **Separation-revocation fix strengthened per the user's specific asks:**
+     added `apps/api/src/lib/__tests__/user-account-service.test.ts` (7
+     tests) — `revokeEmployeeAuth` itself had ZERO direct unit tests before
+     this; now covers the happy path, profile-update failure (auth ban
+     still attempted regardless, not skipped), auth-ban failure, both
+     failing, and two retry scenarios (a failed call followed by a
+     succeeding one; calling it twice in a row is a harmless idempotent
+     no-op). Added `apps/api/src/plugins/__tests__/auth-is-active-
+     rejection.test.ts` (4 tests) exercising the REAL `authenticate`
+     preHandler (not a mock of it) to prove an existing cached session is
+     actually rejected with 401 within the bounded 60s recheck window once
+     `profiles.is_active` flips to false — not just that `revokeEmployeeAuth`
+     was *called*. Explicitly disclosed what this does NOT prove: Supabase
+     Auth's own JWT-level ban (`ban_duration`) is a hosted-Supabase
+     mechanism with no local equivalent to test — still blocked. Checked
+     for alternative/bulk status-changing paths: `lib/import-engine/
+     importer.ts`'s bulk employee CSV update path does write `employees.
+     status`, but the import template's enum (`templates.ts`) only allows
+     `active`/`inactive` and the validator (`validator.ts`) rejects any
+     other value including `separated` — confirmed this path cannot reach
+     the transition that needs revocation, so it is not a gap. Confirmed
+     reactivation is NOT automatic: grepped every `profiles` write of
+     `is_active: true` in the entire API — the only one outside account
+     creation (`setup.ts`) is the explicit, HR-admin-gated `PATCH
+     /employees/:id/user-account` (`action: 'reactivate'`); no code path
+     revives a separated employee's login as a side effect of anything else.
+  3. **Concurrent /setup tested through the real stack, not just Postgres
+     in isolation.** Rebuilt the local sandbox stack (Postgres 16 + the
+     PostgREST-compatible gateway shim + the compiled API server, all
+     re-verified running — see Verification evidence below) and wrote
+     `scripts/db/verify-setup-concurrency-live.mjs`, which fires genuinely
+     concurrent HTTP `POST /setup` requests at the real API and checks the
+     real database afterward: exactly one profile/tenant pair, both callers
+     agree on the same tenant, zero orphaned tenant rows, a real
+     interrupted-retry (20 minutes later, past the freshness window,
+     recovered via the real metadata-match path — not simulated) returns
+     the SAME tenant/profile with no duplicate, and a stranger who only
+     knows the `user_id` is still refused for an existing profile. Along
+     the way, patched the local-sandbox-only gateway shim (disclosed, not
+     a product change) to actually persist and return `user_metadata` on
+     `/auth/v1/admin/users` — it previously always returned `{}`, which
+     would have made this round's new interrupted-retry test pass for the
+     wrong reason (freshness only) instead of exercising the real
+     metadata-match code path `setup.ts` relies on for a late retry.
+  4. **Browser-tested both dashboard "Process Attendance" actions, real
+     Chromium via Playwright** — `scripts/db/browser-test-attendance-
+     processing.mjs`, run against a freshly seeded 4-role tenant
+     (`scripts/pilot/seed-pilot-tenant.mjs`, reused unmodified). For both
+     `super_admin` and `hr_admin`: real login → real dashboard → click the
+     real "Process Attendance" quick action → lands on
+     `/manager/team/attendance` → the real trigger button is visible →
+     clicking it fires a real `POST /attendance/process` → **200,
+     persisted result visible on screen** ("Processing Complete" banner,
+     screenshotted). For `employee`: the quick action is correctly absent
+     from whatever dashboard this role gets, AND — to prove server-side
+     enforcement independent of the UI hiding it — the test captures this
+     role's own real bearer token from its ordinary traffic (not
+     fabricated) and fires a direct `POST /attendance/process` with it:
+     **403 FORBIDDEN, "hr_admin or super_admin required"**. Screenshots in
+     `/tmp/attendance-browser-evidence/` (not committed — ephemeral local
+     evidence, re-creatable by re-running the script).
 - **Next planned batches** (not yet started — listed so a future session
   picks up here, not from zero): Leave (`routes/employees` leave
   sub-routes, `ess` leave endpoints), Approvals, Payroll authorization
   (beyond the nav-link pass already done), Masters, Documents, Assets,
   Recruitment/Careers, Compensation, remaining `employees/*` sub-routes
   (bank-statutory.ts, personal-info.ts, identity.ts, contracts.ts and the
-  ~20 other files in that directory not yet opened this round).
+  ~20 other files in that directory not yet opened this round). Also
+  recommended, not yet done: delete the confirmed-100%-dead
+  `AdminDashboard.tsx` / `Dashboard.tsx` (zero route registrations,
+  verified above) — flagging rather than deleting this round since the
+  session's own destructive-action guard declined the delete.
 
 **Scale disclosure, stated up front so it isn't mistaken for completion:**
 the API has **289 route files** across **52 route namespaces**; the web
@@ -62,7 +158,7 @@ started.
 | **Pilot guard** (`lib/pilot-guard.ts`) | Tested | Fail-open→fail-closed fixed this round for null/undefined/string/number `is_pilot` values; 10 tests. Fixed resulting regressions in 3 unrelated payroll test mocks. |
 | **Support / feedback** (`routes/support`) | Tested | Screenshot-path tenant-folder validation added this round (write side); 5 tests. |
 | **Owner admin** (`routes/owner`, `pages/owner`) | Partially tested | Screenshot-signing independent re-validation fixed this round (read side, incl. pre-existing invalid records); 5 tests. Owner route nav links spot-checked (nested `/owner/*` routes resolve correctly). Platform-admin authorization on other `/owner/*` endpoints (activate/suspend/cancel/hard-delete) not re-audited this round — last verified in the tenant-licensing work recorded in CLAUDE.md. |
-| **Attendance** (`routes/attendance`, `pages/attendance`) | Partially tested | Nav links fixed: `EmployeeShifts.tsx` dead `<a href="/shift-master">` → `<Link to="/admin/shift-master">`; `MusterRoll.tsx`'s `/admin/payroll/readiness` → `/admin/payroll-readiness`. **Admin attendance-processing gap closed for real** (checkpoint 2): read `apps/api/src/routes/attendance/process.ts` and confirmed the backend already correctly authorizes `hr_admin`/`super_admin` for `POST /attendance/process` (two-layer advisory+table locking, TTL takeover, period-lock guard — this route itself needed no fix). The gap was purely frontend: `AdminDashboard.tsx`'s two "Process Attendance" actions pointed at a route with no trigger UI. Checkpoint 1 had pointed them at `/admin/operational-health` (read-only observability — still not a real fix, correctly called out). Found that `Attendance.tsx` is role-aware (not route-gated): `isAdmin = ['super_admin','hr_admin'].includes(role)` unconditionally renders the real trigger button (date picker, force checkbox, `processMutation` → `POST /attendance/process`) whenever an admin views it, and the page is reachable by admins at `/manager/team/attendance` (`ManagerShell` only blocks `role === 'employee'` — the file's own comment documents "hr_admin/super_admin reach manager pages via RoleSwitcher"). Re-pointed both AdminDashboard actions there instead — zero new code, reuses the existing authorized workflow, verified by reading the exact JSX that renders the button and confirming the route guard doesn't exclude admins. API-level correctness (processing idempotency, anomaly reconciliation) last verified in the Round 2026-10-11 de-emphasis work and the earlier UAT scenario matrix (W/WO/H/X/P/L-series), not re-run this round. |
+| **Attendance** (`routes/attendance`, `pages/attendance`) | Partially tested | Nav links fixed: `EmployeeShifts.tsx` dead `<a href="/shift-master">` → `<Link to="/admin/shift-master">`; `MusterRoll.tsx`'s `/admin/payroll/readiness` → `/admin/payroll-readiness`. **Admin attendance-processing gap closed for real, on the actually-reachable pages this time** (checkpoint 3; checkpoints 1–2 fixed the correct behavior on `AdminDashboard.tsx`, which turned out to be 100% dead code — see the checkpoint 3 writeup above). The backend (`apps/api/src/routes/attendance/process.ts`) already correctly authorizes `hr_admin`/`super_admin` and needed no fix. Fixed the real live call sites: `pages/admin/ControlCenter.tsx` (the "Process now" banner button and the "Process Attendance" quick action, both previously → `/admin/attendance/center`, confirmed to have no trigger button) and `components/operational/CommandPalette.tsx`'s global "Process Attendance" command (same dead-end target). All three now point at `/manager/team/attendance`, where `Attendance.tsx` unconditionally renders the real trigger button for `isAdmin` roles. **Proven end-to-end in a real Chromium browser** (`scripts/db/browser-test-attendance-processing.mjs`): real login → real dashboard click → real visible button → real `POST /attendance/process` → 200 → "Processing Complete" banner visible on screen, for both `super_admin` and `hr_admin`; `employee` never sees the control AND is refused 403 when a direct API call is made using that role's own real captured session token. API-level correctness (processing idempotency, anomaly reconciliation) last verified in the Round 2026-10-11 de-emphasis work and the earlier UAT scenario matrix (W/WO/H/X/P/L-series), not re-run this round. |
 | **Payroll** (`routes/payroll`, `pages/payroll`) | Partially tested | Nav links fixed: 3 call sites (`WorkflowRecommendations.tsx`, `OperationalInboxV2.tsx`, `PayrollContextPanel.tsx`) hardcoded `/admin/payroll/blockers` with no `:runId` — none of their data sources carry a `run_id` (`PayrollContextPanel`'s blockers are month-aggregated, not run-scoped), so each now falls back to the runs list `/admin/payroll`, matching the pattern `PayrollOperationsCenter.tsx` and `navigation.config.ts` already use correctly. `AdminDashboard.tsx`'s "Compliance" quick action pointed at the real `/admin/payroll/statutory-dashboard` ("Compliance Cockpit") instead of the non-existent `/admin/compliance`. Approval/finalization/reversal correctness, F&F, leave encashment — extensively tested in prior rounds (G12, F&F concurrency, accounting-ledger fixes); not re-run this round. |
 | **Leave** (`routes/employees` leave endpoints, `pages/leave`, `pages/ess` leave) | Not examined this round | Raise-leave-on-behalf, cancellation, encashment all previously tested (G12, prior rounds). Settings.tsx's "Leave Types & Balances" and "Leave Accrual Jobs" nav links fixed this round; `RightRail.tsx`'s leave-types link fixed. No new API-level leave audit performed this round. |
 | **Employees / People Directory** (`routes/employees`, `pages/employees`) | Partially tested | **2 of ~30 route files read end-to-end against all 6 item-2 categories this round: `index.ts` (core CRUD — search/org-tree/list/get/create/patch-me/put/delete) and `user-account.ts` (account provisioning/suspend/reactivate/reset-password).** `index.ts` is otherwise well-hardened from prior rounds (tenant-scoped everywhere, object-level auth on `GET /:id`, cross-tenant FK validation + circular-reference guard on `PUT /:id`'s manager fields, optimistic concurrency, `fetchAllRows` on the unbounded org-tree query) — but had one real defect, now fixed: **`PUT /employees/:id` could set `status: 'separated'` (reachable from `EmployeeProfile.tsx`'s Overview tab) without revoking the employee's auth access**, unlike `DELETE /employees/:id` and the dedicated separation routes. Fixed to call `revokeEmployeeAuth` on the transition into `separated` (not on a no-op resubmission), with 3 new regression tests. `user-account.ts` read in full — no defect found (tenant-scoped, role-gated, rollback-on-partial-failure for both invite and direct-create paths, auth ban/unban kept in sync with `profiles.is_active`, version-conflict handling). **Remaining ~27 files not yet opened this round**: `bank-statutory.ts`, `personal-info.ts`, `identity.ts`, `contracts.ts`, `addresses.ts`, `education.ts`, `emergency-contacts.ts`, `employee-documents.ts`, `exit-interview.ts`, `family.ts`, `full-create.ts`, `full-profile.ts`, `important-dates.ts`, `job-history.ts`, `manager.ts`, `nominations.ts`, `onboarding-status.ts`, `options.ts`, `org-context.ts`, `passport-visa.ts`, `previous-employment.ts`, `probation-confirmations.ts` (tested in a prior round per CLAUDE.md), `separation.ts`/`separation-workflow.ts` (spot-checked this round only for the `revokeEmployeeAuth` call sites — confirmed both already correct, not otherwise re-audited), `shift-history.ts`, `trust.ts`, `access-cards.ts`, `context-data.ts`. |
@@ -89,12 +185,15 @@ started.
 
 **Mocked unit/route tests** (`npx vitest run` on `apps/api`):
 - Checkpoint 1: 494/494 passed, 59/59 files.
-- Checkpoint 2: **526/526 passed, 61/61 files**, 0 regressions — adds the feedback-screenshot-path allowlist unit tests (17), the hardened route-level bypass tests (9 + 9 new cases across the support/owner screenshot-path tests), the setup.ts interrupted-retry/USER_NOT_FOUND/validation/concurrency tests (4 new), and the PUT /employees/:id revocation regression (3 new).
-- `npx tsc --noEmit` on both `apps/web` and `apps/api` — **0 errors** on both, checkpoint 2.
+- Checkpoint 2: 526/526 passed, 61/61 files, 0 regressions — adds the feedback-screenshot-path allowlist unit tests (17), the hardened route-level bypass tests (9 + 9 new cases across the support/owner screenshot-path tests), the setup.ts interrupted-retry/USER_NOT_FOUND/validation/concurrency tests (4 new), and the PUT /employees/:id revocation regression (3 new).
+- Checkpoint 3: **537/537 passed, 63/63 files**, 0 regressions — adds `revokeEmployeeAuth`'s first-ever direct unit tests (7, including 2 retry scenarios) and the real-`authenticate`-preHandler is_active-rejection tests (4).
+- `npx tsc --noEmit` on both `apps/web` and `apps/api` — **0 errors** on both, every checkpoint including this one (re-run after the `ControlCenter.tsx`/`CommandPalette.tsx` fixes).
 
-**Real Postgres** (separate from the mocks above, run against an actual local Postgres 16 instance started this round — `pg_ctlcluster 16 main start`, stopped again after): a minimal `profiles`/`tenants` schema was created and two genuinely concurrent `psql` transactions were raced against the same `profiles.id` primary key. Confirmed the loser receives a real `duplicate key value violates unique constraint` error with **SQLSTATE 23505** — the exact code `setup.ts`'s race-handling branch checks for — so the mocked concurrency test's assumption is empirically grounded, not merely asserted. No other real-Postgres work was done this batch (the full 450-migration history was not re-applied this round; checkpoint 1's prior rounds already did that for the leave-accrual/payroll-rollback work).
+**Real Postgres**, checkpoint 2 (isolated): a minimal `profiles`/`tenants` schema was created and two genuinely concurrent `psql` transactions were raced against the same `profiles.id` primary key, confirming SQLSTATE 23505. The user correctly noted this alone doesn't prove the whole workflow — superseded by checkpoint 3's live-stack test below, kept as evidence that the raw Postgres-level assumption was independently verified before building on it.
 
-**Local browser journeys**: **not run this batch.** The sandbox PostgREST-like gateway shim used in prior rounds (`/tmp/supabase-gateway.mjs`) was explicitly local-sandbox-only and does not persist across sessions — this session started in a fresh container with no running gateway/API/web stack. Rebuilding that shim from scratch was judged lower-value for this batch's specific fixes (nav-link string targets, verified more strongly by route-table cross-reference than a visual click would add; the attendance-processing fix, verified by reading the exact render-gated JSX) than continuing the source+test audit of unexamined modules. This is a disclosed scope decision for this batch, not a silent skip — browser journeys remain planned for whichever future batch produces a finding that genuinely needs visual confirmation to resolve.
+**Real stack, checkpoint 3** (Postgres 16 + the PostgREST-compatible gateway shim + the compiled, freshly-rebuilt API server, all brought up this round — `pg_ctlcluster 16 main start`, `node /tmp/supabase-gateway.mjs`, `node --env-file=.env dist/index.js`; the `hrms_uat` database and its full migration history survived from earlier in this session): `scripts/db/verify-setup-concurrency-live.mjs` fires real, concurrent HTTP `POST /setup` requests at the real API and inspects the real database afterward — **all 4 checks pass**: exactly one profile/tenant pair survives the race with both callers agreeing on it, zero orphaned tenant rows, a real 20-minutes-later interrupted retry recovers the same tenant/profile via the genuine metadata-match code path (not simulated — the gateway shim was patched to actually persist `user_metadata`, which it previously discarded), and a stranger who only knows the `user_id` is still refused for an existing profile. This script is committed (not a throwaway) so a future session can re-run it without rebuilding the test.
+
+**Local browser journeys, checkpoint 3**: real Chromium (Playwright, the environment's pre-installed browser) against the live stack above, `scripts/db/browser-test-attendance-processing.mjs`, run against a freshly seeded 4-role tenant. Found and fixed the dead-code misdirection described in the checkpoint 3 batch log above as a direct result of this browser run (the test's first pass navigated to the WRONG page and immediately surfaced that checkpoints 1–2 had fixed unreachable code). After the fix: super_admin and hr_admin both get navigation → visible control → real processing → a persisted "Processing Complete" result visible on screen (screenshotted); employee gets neither the control nor server-side permission. This script is also committed for re-use. Screenshots are ephemeral (`/tmp/attendance-browser-evidence/`, not committed) — re-run the script to regenerate them.
 
 ## Explicitly still blocked / out of scope (unchanged from the prior round)
 
