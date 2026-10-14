@@ -265,6 +265,25 @@ checkpoint so completed work is never repeated. Batch log:
   needed) — no fix there. Full suite re-run: 561/561 passed, 67/67 files,
   0 regressions; `tsc --noEmit` clean.
 
+  **Checked, confirmed already-known, not a fresh finding**: read
+  `routes/attendance/leave.ts` in full (its own apply/my/pending/approve/
+  reject set, against the legacy `leave_applications` table — a different
+  table from `leave_requests`). Initially looked like a live parallel
+  leave system that could silently desync from the canonical
+  `leave_requests` flow. Traced into the web app: 9 files
+  (`LeaveApply.tsx`, `EssLeaveBalance.tsx`, `EssApprovals.tsx`,
+  `EssMyProfile.tsx`, `EmployeeDashboard.tsx`, `EmployeeSidebar.tsx`,
+  `MobileLeave.tsx`, `MobileFlowDesk.tsx`, `MobileApprovals.tsx`) all
+  carry the identical comment confirming this was already found and fixed
+  in a prior round — "nothing writes to that table from this app
+  anymore" — and that is correct: nothing in the current frontend calls
+  `POST /attendance/leave/apply`, so `leave_applications` never receives
+  a new 'pending' row for its own `/pending`/`:id/approve`/`:id/reject`
+  routes to act on. Confirmed dead in practice, not merely in principle —
+  not re-litigating a prior finding, just verifying it still holds. No
+  fix applied (nothing to fix; a removal decision is a product/cleanup
+  call, not an audit fix, and parallels the already-flagged-not-deleted
+  `AdminDashboard.tsx`).
   **Verification honestly scoped**: all of the above is source review +
   mocked/route-level tests. No real-Postgres or browser verification was
   run this batch for Leave/Approvals — the pending-count/Approved-tab/
