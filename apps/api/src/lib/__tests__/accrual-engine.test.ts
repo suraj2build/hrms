@@ -93,10 +93,6 @@ function mockSupabase(opts: {
         return chain
       }
       if (table === 'leave_accrual_ledger') {
-        // DEFECT-02 fix: a pre-check SELECT (filtered by .in('employee_id', ...))
-        // followed by an INSERT of only the not-already-present rows — no
-        // upsert() against the partial unique index anymore. This mock has no
-        // pre-existing rows to simulate, so every employee_id is "new".
         const chain: any = {
           select: () => chain, eq: () => chain,
           in: () => Promise.resolve({ data: [], error: null }),
@@ -109,6 +105,28 @@ function mockSupabase(opts: {
         insert: (rows: any[]) => { record(rows); return Promise.resolve({ data: null, error: null }) },
       }
       return chain
+    },
+    // Simulates credit_monthly_accrual_batch (migration 459) — the atomic
+    // SQL function that now does the per-employee crediting in one
+    // statement per chunk, replacing the old client-side read-balances /
+    // compute-in-memory / write-balance-and-two-ledgers sequence these
+    // tests originally exercised directly against employee_leave_balance.
+    rpc(fnName: string, params: any) {
+      if (fnName !== 'credit_monthly_accrual_batch') {
+        return Promise.resolve({ data: null, error: { message: `mockSupabase: unexpected rpc "${fnName}"` } })
+      }
+      const chunk = (params.p_employee_days ?? []) as Array<{ employee_id: string; days: number }>
+      let total = 0
+      for (const { employee_id, days } of chunk) {
+        const current = Number(existingBalances.find((b) => b.employee_id === employee_id)?.balance ?? 0)
+        const newBalance = parseFloat((current + days).toFixed(2))
+        ;(upserts['employee_leave_balance'] ??= []).push({
+          tenant_id: TENANT, employee_id, leave_type_id: params.p_leave_type_id,
+          year: params.p_year, balance: newBalance, updated_at: new Date().toISOString(),
+        })
+        total = parseFloat((total + days).toFixed(2))
+      }
+      return Promise.resolve({ data: [{ employees_credited: chunk.length, total_days: total }], error: null })
     },
     __upserts: upserts,
   } as any

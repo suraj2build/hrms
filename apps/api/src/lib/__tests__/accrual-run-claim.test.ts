@@ -1,7 +1,8 @@
 /**
  * accrual-engine — DEFECT-02 regression: atomic run claim, not just a
  * pre-check (found during the PR #30 live-screen Attendance/Leave UAT,
- * 2026-10-12, Round 8 follow-up).
+ * 2026-10-12, Round 8 follow-up), PLUS SYSTEM_AUDIT_2026-10-14 item 1's
+ * stale-'running'-claim reclaim (migration 459).
  *
  * The old idempotency check was a pre-check SELECT against
  * leave_accrual_runs, with the whole employee-crediting loop below it and a
@@ -19,7 +20,14 @@
  * unique constraint claims the slot; the loser of a genuine race gets a real
  * Postgres 23505 back immediately, before touching a single employee's
  * balance, and reclaims a prior 'partial'/'failed' run (but not 'success' or
- * a live 'running' claim) via a conditional UPDATE.
+ * a genuinely LIVE 'running' claim) via a conditional UPDATE.
+ *
+ * Migration 459 additionally made a STALE 'running' claim (one whose ran_at
+ * is older than the caller's threshold — i.e. a process that claimed the
+ * run and then crashed before finalizing it) reclaimable too, now that
+ * crediting itself (credit_monthly_accrual_batch) is idempotent per
+ * employee. A FRESH 'running' claim (ran_at recent — someone else's run is
+ * genuinely in flight right now) must still block, same as before.
  *
  * These tests exercise runMonthlyAccrual() end-to-end with a mock that
  * tracks real row state for leave_accrual_runs (not just "always succeeds"),
@@ -33,6 +41,7 @@ import { describe, it, expect } from 'vitest'
 import { runMonthlyAccrual } from '../accrual-engine.js'
 
 const TENANT = 'tenant-001'
+const RUN_KEY = 'tenant-001|2026-10|lt-earned'
 const RULE = {
   id: 'rule-1', leave_type_id: 'lt-earned', accrual_frequency: 'monthly',
   days_per_period: '1.00', prorate_on_joining: false,
@@ -43,16 +52,23 @@ const EMPLOYEES = [{ id: 'emp-1', joining_date: '2020-01-01' }]
 /**
  * A mock Supabase client whose leave_accrual_runs table is a real in-memory
  * row store (keyed by tenant+run_period+leave_type), so INSERT can actually
- * conflict and UPDATE can actually be conditional on current status — not a
- * stub that always succeeds regardless of prior state.
+ * conflict and UPDATE can actually be conditional on current status/ran_at —
+ * not a stub that always succeeds regardless of prior state. The crediting
+ * side effect is now a single `credit_monthly_accrual_batch` RPC call
+ * (migration 459) rather than direct table writes.
  */
-function mockSupabase(opts: { existingRun?: { status: string } } = {}) {
+function mockSupabase(opts: { existingRun?: { status: string; ranAt?: string } } = {}) {
   let employeesPageServed = false
-  const runsStore = new Map<string, { id: string; status: string }>()
+  const runsStore = new Map<string, { id: string; status: string; ran_at: string }>()
   if (opts.existingRun) {
-    runsStore.set('tenant-001|2026-10|lt-earned', { id: 'existing-run-id', status: opts.existingRun.status })
+    runsStore.set(RUN_KEY, {
+      id: 'existing-run-id',
+      status: opts.existingRun.status,
+      ran_at: opts.existingRun.ranAt ?? new Date().toISOString(),
+    })
   }
   const insertAttempts: string[] = []
+  let rpcCalls = 0
 
   return {
     from(table: string) {
@@ -72,48 +88,63 @@ function mockSupabase(opts: { existingRun?: { status: string } } = {}) {
         return chain
       }
       if (table === 'leave_accrual_runs') {
-        const key = 'tenant-001|2026-10|lt-earned'
-        let updateFilter: { status?: string[] } = {}
+        const key = RUN_KEY
         const chain: any = {
           select: () => chain,
           eq: () => chain,
-          in: (_col: string, statuses: string[]) => { updateFilter.status = statuses; return chain },
           insert: (row: any) => {
             insertAttempts.push(row.status)
             if (runsStore.has(key)) {
               return { select: () => Promise.resolve({ data: null, error: { code: '23505', message: 'duplicate key' } }) }
             }
-            runsStore.set(key, { id: 'new-run-id', status: row.status })
+            runsStore.set(key, { id: 'new-run-id', status: row.status, ran_at: row.ran_at })
             return { select: () => Promise.resolve({ data: [{ id: 'new-run-id' }], error: null }) }
           },
           update: (patch: any) => {
-            const apply = () => {
+            const filters: Array<(r: { id: string; status: string; ran_at: string }) => boolean> = []
+            const applyUpdate = () => {
               const existing = runsStore.get(key)
               if (!existing) return Promise.resolve({ data: [], error: null })
-              if (updateFilter.status && !updateFilter.status.includes(existing.status)) {
-                return Promise.resolve({ data: [], error: null })
-              }
-              existing.status = patch.status
+              if (!filters.every((f) => f(existing))) return Promise.resolve({ data: [], error: null })
+              Object.assign(existing, patch)
               return Promise.resolve({ data: [{ id: existing.id }], error: null })
             }
-            const updateChain: any = { eq: () => updateChain, in: (_c: string, s: string[]) => { updateFilter.status = s; return updateChain }, select: apply, then: (r: any) => r(apply()) }
+            const updateChain: any = {
+              eq: (col: string, val: any) => {
+                if (col === 'status') filters.push((r) => r.status === val)
+                if (col === 'id') filters.push((r) => r.id === val)
+                return updateChain
+              },
+              in: (col: string, vals: string[]) => {
+                if (col === 'status') filters.push((r) => vals.includes(r.status))
+                return updateChain
+              },
+              lt: (col: string, val: string) => {
+                filters.push((r) => r.ran_at < val)
+                return updateChain
+              },
+              select: () => applyUpdate(),
+              then: (resolve: any, reject?: any) => applyUpdate().then(resolve, reject),
+            }
             return updateChain
           },
         }
         return chain
       }
-      if (table === 'employee_leave_balance') {
-        const chain: any = { select: () => chain, eq: () => chain, then: (resolve: any) => resolve({ data: [], error: null }), upsert: () => Promise.resolve({ data: null, error: null }) }
-        return chain
-      }
-      if (table === 'leave_accrual_ledger') {
-        const chain: any = { select: () => chain, eq: () => chain, in: () => Promise.resolve({ data: [], error: null }), insert: () => Promise.resolve({ data: null, error: null }) }
-        return chain
-      }
       return { insert: () => Promise.resolve({ data: null, error: null }) }
+    },
+    rpc(fnName: string, params: any) {
+      if (fnName === 'credit_monthly_accrual_batch') {
+        rpcCalls++
+        const chunk = (params.p_employee_days ?? []) as Array<{ employee_id: string; days: number }>
+        const total = chunk.reduce((s, r) => s + r.days, 0)
+        return Promise.resolve({ data: [{ employees_credited: chunk.length, total_days: total }], error: null })
+      }
+      return Promise.resolve({ data: null, error: new Error(`unexpected rpc ${fnName}`) })
     },
     __runsStore: runsStore,
     __insertAttempts: insertAttempts,
+    __rpcCalls: () => rpcCalls,
   } as any
 }
 
@@ -124,7 +155,8 @@ describe('runMonthlyAccrual — DEFECT-02: atomic run claim', () => {
 
     expect(result.employees_credited).toBe(1)
     expect(result.skipped).toBe(0)
-    expect(supabase.__runsStore.get('tenant-001|2026-10|lt-earned')?.status).toBe('success')
+    expect(supabase.__runsStore.get(RUN_KEY)?.status).toBe('success')
+    expect(supabase.__rpcCalls()).toBe(1)
   })
 
   it('a prior SUCCESS run blocks a second claim — no re-credit', async () => {
@@ -133,6 +165,7 @@ describe('runMonthlyAccrual — DEFECT-02: atomic run claim', () => {
 
     expect(result.employees_credited).toBe(0)
     expect(result.skipped).toBe(1)
+    expect(supabase.__rpcCalls()).toBe(0)
   })
 
   it('a prior FAILED run is reclaimable — retry credits normally', async () => {
@@ -141,7 +174,7 @@ describe('runMonthlyAccrual — DEFECT-02: atomic run claim', () => {
 
     expect(result.employees_credited).toBe(1)
     expect(result.skipped).toBe(0)
-    expect(supabase.__runsStore.get('tenant-001|2026-10|lt-earned')?.status).toBe('success')
+    expect(supabase.__runsStore.get(RUN_KEY)?.status).toBe('success')
   })
 
   it('a prior PARTIAL run is reclaimable — retry credits normally', async () => {
@@ -152,19 +185,30 @@ describe('runMonthlyAccrual — DEFECT-02: atomic run claim', () => {
     expect(result.skipped).toBe(0)
   })
 
-  it('a currently-RUNNING claim (a concurrent request in flight) blocks a second claim — the core race fix', async () => {
+  it('a currently-RUNNING claim with a FRESH ran_at (a concurrent request genuinely in flight) blocks a second claim', async () => {
     // This is the exact scenario the pre-fix pre-check-SELECT code could not
-    // prevent: another call's claim is live ('running', not yet finalized to
-    // success/partial/failed). The second call must NOT proceed to credit
-    // employees in parallel.
-    const supabase = mockSupabase({ existingRun: { status: 'running' } })
+    // prevent: another call's claim is live ('running', ran_at just now —
+    // not stale). The second call must NOT proceed to credit employees in
+    // parallel, and must NOT treat this as a crashed/stale claim either.
+    const supabase = mockSupabase({ existingRun: { status: 'running', ranAt: new Date().toISOString() } })
     const result = await runMonthlyAccrual(supabase, TENANT, 2026, 10)
 
     expect(result.employees_credited).toBe(0)
     expect(result.skipped).toBe(1)
+    expect(supabase.__rpcCalls()).toBe(0)
     // Confirms the mock's INSERT was actually attempted and rejected (the
     // real race-safety mechanism), not that the code just happened to skip
     // some other way.
     expect(supabase.__insertAttempts).toContain('running')
+  })
+
+  it('a currently-RUNNING claim with a STALE ran_at (a crashed process that never finalized) is reclaimed and retried — migration 459', async () => {
+    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString()
+    const supabase = mockSupabase({ existingRun: { status: 'running', ranAt: twoHoursAgo } })
+    const result = await runMonthlyAccrual(supabase, TENANT, 2026, 10)
+
+    expect(result.employees_credited).toBe(1)
+    expect(result.skipped).toBe(0)
+    expect(supabase.__runsStore.get(RUN_KEY)?.status).toBe('success')
   })
 })

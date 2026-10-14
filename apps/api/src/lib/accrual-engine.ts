@@ -70,11 +70,12 @@ function proratedDays(
 // failed run is a real, intended use case, not something this claim should
 // block forever.
 async function claimAccrualRun(
-  supabase:     SupabaseClient,
-  tenantId:     string,
-  runPeriod:    string,
-  leaveTypeId:  string,
-  nowIso:       string,
+  supabase:      SupabaseClient,
+  tenantId:      string,
+  runPeriod:     string,
+  leaveTypeId:   string,
+  nowIso:        string,
+  staleBeforeIso: string,
 ): Promise<string | null> {
   const { data: inserted, error: insertErr } = await supabase
     .from('leave_accrual_runs')
@@ -102,8 +103,7 @@ async function claimAccrualRun(
 
   // Try to reclaim a previous 'partial' or 'failed' run. Matches 0 rows if
   // the existing row is 'success' (already done — correctly skip) or
-  // 'running' (someone else's claim is live right now — correctly skip,
-  // don't race them).
+  // 'running' (someone else's claim may be live right now).
   const { data: reclaimed } = await supabase
     .from('leave_accrual_runs')
     .update({ status: 'running', ran_at: nowIso })
@@ -116,8 +116,46 @@ async function claimAccrualRun(
   if ((reclaimed?.length ?? 0) > 0) {
     return (reclaimed as Array<{ id: string }>)[0].id
   }
+
+  // Reclaim a STALE 'running' claim (migration 459): a process that claimed
+  // this run and then crashed before the finalizing UPDATE used to leave it
+  // stuck in 'running' forever — unretryable by design, because the old
+  // per-employee crediting loop below was not safe to resume (it would
+  // double-credit whoever the crashed attempt already wrote). That is no
+  // longer true: credit_monthly_accrual_batch() checks per-employee
+  // idempotency against leave_accrual_ledger inside the same statement that
+  // writes it, so resuming a stale claim just skips whoever is already
+  // credited and continues with the rest. A 'running' row is only "stale"
+  // if its ran_at (stamped at claim time, same column the finalize UPDATE
+  // would have refreshed) is older than the caller's threshold — a row
+  // claimed moments ago by a genuinely live run must NOT match this.
+  const { data: staleReclaimed } = await supabase
+    .from('leave_accrual_runs')
+    .update({ status: 'running', ran_at: nowIso })
+    .eq('tenant_id', tenantId)
+    .eq('run_period', runPeriod)
+    .eq('leave_type_id', leaveTypeId)
+    .eq('status', 'running')
+    .lt('ran_at', staleBeforeIso)
+    .select('id')
+
+  if ((staleReclaimed?.length ?? 0) > 0) {
+    return (staleReclaimed as Array<{ id: string }>)[0].id
+  }
   return null
 }
+
+// A 'running' claim older than this is assumed to belong to a crashed
+// process, not a live one — see claimAccrualRun's stale-reclaim branch.
+const STALE_RUNNING_CLAIM_MS = 15 * 60 * 1000
+
+// Chunk size for credit_monthly_accrual_batch() calls. Keeps each database
+// transaction short (bounded lock/row-count) and gives interruption
+// recovery a granularity finer than "the whole tenant" — if the process
+// dies mid-run, only the chunk in flight at that moment is lost work; every
+// earlier chunk already committed (with its own idempotency guarantee) and
+// every later chunk has simply not started yet.
+const ACCRUAL_BATCH_SIZE = 500
 
 // ── Core: run monthly accrual for one tenant ─────────────────────────────────
 
@@ -202,7 +240,8 @@ export async function runMonthlyAccrual(
     // constraint for this) — the loser of a genuine race gets a real Postgres
     // 23505 back immediately, before either side has touched a single
     // employee's balance.
-    const claimedRunId = await claimAccrualRun(supabase, tenantId, runPeriod, rule.leave_type_id, nowIso)
+    const staleBeforeIso = new Date(Date.now() - STALE_RUNNING_CLAIM_MS).toISOString()
+    const claimedRunId = await claimAccrualRun(supabase, tenantId, runPeriod, rule.leave_type_id, nowIso, staleBeforeIso)
     if (!claimedRunId) {
       result.skipped++
       continue
@@ -212,126 +251,57 @@ export async function runMonthlyAccrual(
     let totalDays = 0
     const runErrors: string[] = []
 
-    // Batch-fetch existing balances so we can compute new balances in memory
-    // without a per-employee SELECT (eliminates ISSUE-030).
-    const { data: existingBalances, error: balFetchErr } = await supabase
-      .from('employee_leave_balance')
-      .select('employee_id, balance')
-      .eq('tenant_id', tenantId)
-      .eq('leave_type_id', rule.leave_type_id)
-      .eq('year', periodYear)
-
-    if (balFetchErr) {
-      runErrors.push(`Balance pre-fetch failed: ${balFetchErr.message}`)
-    }
-
-    const balanceMap = new Map<string, number>(
-      (existingBalances ?? []).map((b: { employee_id: string; balance: number }) => [b.employee_id, Number(b.balance)])
-    )
-
-    const balUpserts: Record<string, unknown>[] = []
-    const ledInserts: Record<string, unknown>[] = []
-    const alUpserts:  Record<string, unknown>[] = []
-
     // days_per_period is DECIMAL(5,2) — PostgREST serializes it as a string. Number()
     // it here: proratedDays()'s full-month branch (`joining <= periodStart`) returns
     // its `daysPerPeriod` argument UNCHANGED, so for any employee who joined before
-    // this period (i.e. most employees, every month) `days` stayed a raw string.
-    // `currentBalance + days` then string-concatenated, and `.toFixed()` on the
-    // resulting string threw a TypeError — crashing this loop for the whole rule,
-    // before any employee's credit was written (confirmed by direct reproduction
-    // with this table's real seed values; G13 sweep).
+    // this period (i.e. most employees, every month) `days` stayed a raw string,
+    // which previously broke `currentBalance + days` string-concatenation downstream.
+    const daysPerPeriod = Number(rule.days_per_period)
+    const employeeDays: Array<{ employee_id: string; days: number }> = []
     for (const emp of employees as Array<{ id: string; joining_date: string }>) {
-      const daysPerPeriod = Number(rule.days_per_period)
       const days = rule.prorate_on_joining
         ? proratedDays(daysPerPeriod, emp.joining_date, periodYear, periodMonth)
         : daysPerPeriod
-
-      if (days <= 0) continue
-
-      const currentBalance = balanceMap.get(emp.id) ?? 0
-      const newBalance = parseFloat((currentBalance + days).toFixed(2))
-
-      balUpserts.push({
-        tenant_id:     tenantId,
-        employee_id:   emp.id,
-        leave_type_id: rule.leave_type_id,
-        year:          periodYear,
-        balance:       newBalance,
-        updated_at:    nowIso,
-      })
-
-      ledInserts.push({
-        tenant_id:     tenantId,
-        employee_id:   emp.id,
-        leave_type_id: rule.leave_type_id,
-        year:          periodYear,
-        txn_type:      'accrual',
-        delta:         days,
-        balance_after: newBalance,
-        notes:         `Monthly accrual — ${runPeriod}`,
-      })
-
-      alUpserts.push({
-        tenant_id:     tenantId,
-        employee_id:   emp.id,
-        leave_type_id: rule.leave_type_id,
-        year:          periodYear,
-        accrual_type:  'monthly',
-        days,
-        accrued_on:    periodLastDay,
-        is_expired:    false,
-        notes:         `Monthly accrual — ${runPeriod}`,
-      })
-
-      employeesCredited++
-      totalDays = parseFloat((totalDays + days).toFixed(2))
+      if (days > 0) employeeDays.push({ employee_id: emp.id, days })
     }
 
-    // Batch write: 3 calls per rule regardless of employee count
-    // (was 4 × N_employees sequential calls — ISSUE-030 through ISSUE-033).
-    if (balUpserts.length) {
-      const { error: balErr } = await supabase
-        .from('employee_leave_balance')
-        .upsert(balUpserts, { onConflict: 'tenant_id,employee_id,leave_type_id,year' })
-      if (balErr) runErrors.push(`Balance batch failed: ${balErr.message}`)
+    // Credit in bounded chunks via ONE atomic SQL statement per chunk
+    // (credit_monthly_accrual_batch, migration 459) instead of a client-side
+    // read-balances / compute-in-memory / write-balances-and-two-ledgers
+    // sequence. That old sequence had no shared transaction across its
+    // steps, computed each employee's new balance from a pre-fetch that was
+    // never paginated (silently capped at PostgREST's max-rows ceiling —
+    // an omitted employee's real balance would be overwritten to
+    // `0 + days` instead of `existing + days`), and had no idempotency
+    // check on employee_leave_balance or leave_balance_ledger — so a retry
+    // after a partial failure, or two genuinely concurrent runs, could
+    // double-credit. The batch function instead does a true atomic
+    // increment (`balance = balance + delta`, serialized against concurrent
+    // leave approval/cancellation by Postgres's own row lock, never a
+    // client-computed overwrite) and skips any employee already credited
+    // for this exact run inside the SAME statement that credits the rest —
+    // safe to call repeatedly, and safe to resume after any interruption,
+    // chunk-by-chunk. A failed chunk is recorded and the loop continues
+    // with the remaining chunks rather than abandoning the whole rule.
+    for (let i = 0; i < employeeDays.length; i += ACCRUAL_BATCH_SIZE) {
+      const chunk = employeeDays.slice(i, i + ACCRUAL_BATCH_SIZE)
+      const { data: batchData, error: batchErr } = await supabase.rpc('credit_monthly_accrual_batch', {
+        p_tenant_id:       tenantId,
+        p_leave_type_id:   rule.leave_type_id,
+        p_year:            periodYear,
+        p_period_last_day: periodLastDay,
+        p_run_period:      runPeriod,
+        p_employee_days:   chunk,
+      })
 
-      const { error: ledErr } = await supabase
-        .from('leave_balance_ledger')
-        .insert(ledInserts)
-      if (ledErr) runErrors.push(`Ledger batch failed: ${ledErr.message}`)
-
-      // leave_accrual_ledger's matching unique index (uidx_accrual_ledger_idempotency)
-      // is PARTIAL (scoped to a fixed list of accrual_types, which 'monthly' is
-      // one of) — Postgres can only use a partial index as an ON CONFLICT
-      // inference target when the statement itself repeats the index's WHERE
-      // predicate, which PostgREST's upsert(onConflict: '...') has no way to
-      // express. A plain onConflict column list against it fails outright
-      // ("no unique or exclusion constraint matching the ON CONFLICT
-      // specification"). Sidestep it: pre-check which of this batch's keys
-      // already exist and insert only the new ones — same idempotent effect
-      // as the upsert's ignoreDuplicates was going for, without relying on
-      // ON CONFLICT resolving against a partial index.
-      const { data: existingLedgerRows, error: alFetchErr } = await supabase
-        .from('leave_accrual_ledger')
-        .select('employee_id')
-        .eq('tenant_id', tenantId)
-        .eq('leave_type_id', rule.leave_type_id)
-        .eq('year', periodYear)
-        .eq('accrual_type', 'monthly')
-        .eq('accrued_on', periodLastDay)
-        .in('employee_id', alUpserts.map((r) => r.employee_id as string))
-
-      if (alFetchErr) {
-        runErrors.push(`Accrual ledger pre-check failed: ${alFetchErr.message}`)
-      } else {
-        const alreadyLogged = new Set((existingLedgerRows ?? []).map((r: { employee_id: string }) => r.employee_id))
-        const newAlRows = alUpserts.filter((r) => !alreadyLogged.has(r.employee_id as string))
-        if (newAlRows.length) {
-          const { error: alErr } = await supabase.from('leave_accrual_ledger').insert(newAlRows)
-          if (alErr) runErrors.push(`Accrual ledger batch failed: ${alErr.message}`)
-        }
+      if (batchErr) {
+        runErrors.push(`Batch ${Math.floor(i / ACCRUAL_BATCH_SIZE) + 1} failed: ${batchErr.message}`)
+        continue
       }
+      const row = (Array.isArray(batchData) ? batchData[0] : batchData) as
+        { employees_credited?: number; total_days?: number } | null
+      employeesCredited += Number(row?.employees_credited ?? 0)
+      totalDays = parseFloat((totalDays + Number(row?.total_days ?? 0)).toFixed(2))
     }
 
     // Finalize the claimed run — a plain UPDATE on the row this call alone

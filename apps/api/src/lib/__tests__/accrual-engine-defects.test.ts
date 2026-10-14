@@ -15,8 +15,16 @@
  * PARTIAL unique index — Postgres can only honor ON CONFLICT against a
  * partial index when the statement repeats its WHERE predicate, which
  * PostgREST's upsert() has no way to express, so the write failed outright
- * on any re-run. Fixed by pre-checking which employee_id keys already have
- * a ledger row for this period and inserting only the new ones.
+ * on any re-run. Originally fixed with a client-side pre-check (a SELECT of
+ * which employee_id keys already had a ledger row, then an INSERT of only
+ * the rest). SYSTEM_AUDIT_2026-10-14 item 1 / migration 459 superseded that
+ * client-side pre-check with the same idempotency check done INSIDE the
+ * atomic SQL batch function (credit_monthly_accrual_batch), in the same
+ * statement that writes the ledger — the real ON CONFLICT target the
+ * partial index needed all along, which raw SQL inside a function can
+ * express but a PostgREST client call never could. These tests now
+ * simulate that function via the mock's `rpc()` method instead of
+ * `leave_accrual_ledger`'s own `.select()/.in()/.upsert()` chain.
  */
 
 import { describe, it, expect } from 'vitest'
@@ -136,6 +144,35 @@ function mockSupabase(opts: {
       }
       throw new Error(`mockSupabase: unexpected table "${table}"`)
     },
+    // Simulates credit_monthly_accrual_batch (migration 459): the real
+    // idempotency check (skip any employee_id already ledgered for this
+    // exact run) now happens inside this one atomic call, not via a
+    // separate client-side SELECT against leave_accrual_ledger.
+    rpc(fnName: string, params: any) {
+      if (fnName !== 'credit_monthly_accrual_batch') {
+        return Promise.resolve({ data: null, error: { message: `mockSupabase: unexpected rpc "${fnName}"` } })
+      }
+      (calls['rpc.credit_monthly_accrual_batch'] ??= []).push(params)
+      const alreadyCredited = new Set(existingLedgerRows.map((r) => r.employee_id))
+      const chunk = (params.p_employee_days ?? []) as Array<{ employee_id: string; days: number }>
+      const todo = chunk.filter((r) => !alreadyCredited.has(r.employee_id))
+
+      record(upserts, 'employee_leave_balance', todo.map((r) => ({
+        tenant_id: params.p_tenant_id, employee_id: r.employee_id, leave_type_id: params.p_leave_type_id,
+        year: params.p_year, balance: r.days,
+      })))
+      record(inserts, 'leave_balance_ledger', todo.map((r) => ({
+        tenant_id: params.p_tenant_id, employee_id: r.employee_id, leave_type_id: params.p_leave_type_id,
+        year: params.p_year, txn_type: 'accrual', delta: r.days, balance_after: r.days,
+      })))
+      record(inserts, 'leave_accrual_ledger', todo.map((r) => ({
+        tenant_id: params.p_tenant_id, employee_id: r.employee_id, leave_type_id: params.p_leave_type_id,
+        year: params.p_year, accrual_type: 'monthly', days: r.days,
+      })))
+
+      const totalDays = todo.reduce((s, r) => s + r.days, 0)
+      return Promise.resolve({ data: [{ employees_credited: todo.length, total_days: totalDays }], error: null })
+    },
     __upserts: upserts,
     __inserts: inserts,
     __calls: calls,
@@ -181,7 +218,7 @@ describe('runMonthlyAccrual — DEFECT-01: mid-period rule effective_from', () =
 })
 
 describe('runMonthlyAccrual — DEFECT-02: leave_accrual_ledger write against a partial unique index', () => {
-  it('writes the ledger row via pre-check + insert, not a plain upsert (which fails against the partial index)', async () => {
+  it('writes the ledger row via the atomic batch RPC, not a plain client-side upsert (which fails against the partial index)', async () => {
     const supabase = mockSupabase({
       rules: [{
         id: 'rule-1', leave_type_id: 'lt-earned', accrual_frequency: 'monthly',
@@ -194,7 +231,7 @@ describe('runMonthlyAccrual — DEFECT-02: leave_accrual_ledger write against a 
     const result = await runMonthlyAccrual(supabase, TENANT, 2026, 10)
 
     expect(result.errors).toEqual([])
-    expect(supabase.__calls['leave_accrual_ledger.select.in']).toBeDefined()
+    expect(supabase.__calls['rpc.credit_monthly_accrual_batch']).toBeDefined()
     expect(supabase.__inserts['leave_accrual_ledger']).toHaveLength(1)
     expect(supabase.__inserts['leave_accrual_ledger'][0]).toMatchObject({ employee_id: 'emp-1', days: 1 })
   })

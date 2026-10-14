@@ -3860,21 +3860,25 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
     if (await blockIfPilotTenant(fastify.supabase, tenantId, reply, 'Rolling back a payroll run')) return
     const { reason } = (req.body ?? {}) as { reason?: string }
 
-    // rollback_payroll_run_atomic (migration 452) locks the payroll_runs
-    // row FOR UPDATE as its first action and re-validates everything
-    // (processing guard, authorization against the FINALIZED status,
-    // posted-ledger check, filed-statutory check) inside that lock before
-    // flipping status to 'draft' — all in one transaction. This closes a
-    // real concurrency gap a route-level check-then-write could not: a
-    // concurrent POST /payroll/ledgers/:id/post or POST /payroll/
-    // statutory-reconciliation/close could otherwise land in the gap
-    // between an unlocked SELECT check and a separate UPDATE, creating
-    // exactly the posted-ledger/filed-closure fact the check had just
-    // confirmed didn't exist. mark_ledger_posted_atomic and close_
-    // statutory_filing_atomic lock the SAME payroll_runs row (in the same
-    // order — run row first) as their own first action, so whichever of
-    // the three operations gets there first forces the others to wait,
-    // re-check fresh state under the lock, and correctly lose.
+    // rollback_payroll_run_atomic (migration 452, extended by migration 460
+    // — SYSTEM_AUDIT_2026-10-14 item 2) locks the payroll_runs row FOR
+    // UPDATE as its first action, re-validates everything (processing
+    // guard, authorization against the FINALIZED status, posted-ledger
+    // check, filed-statutory check), and then — all inside that SAME
+    // transaction — flips status to 'draft', deletes the run's slips,
+    // zeroes its totals, reverts any leave-encashment request it had
+    // marked 'paid', and cleans up its never-posted GL ledgers (entries,
+    // cost allocations, headers) and its now-stale finalized snapshot.
+    // Previously these were separate, uncoordinated calls made AFTER the
+    // RPC had already committed — a crash between any two of them left a
+    // "rolled back" run with a torn remainder of its old finalized state
+    // still attached (most seriously: a leave-encashment request still
+    // marked 'paid' for a run whose slip no longer exists). Now either the
+    // whole rollback completes or none of it does. mark_ledger_posted_atomic
+    // and close_statutory_filing_atomic lock the SAME payroll_runs row (in
+    // the same order — run row first) as their own first action, so
+    // whichever of the three operations gets there first forces the others
+    // to wait, re-check fresh state under the lock, and correctly lose.
     const { data: rbResult, error: rbErr } = await fastify.supabase.rpc('rollback_payroll_run_atomic', {
       p_tenant_id: tenantId, p_run_id: id, p_is_super_admin: req.userRole === 'super_admin',
     })
@@ -3890,102 +3894,6 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
     }
 
     const run = { month: (rbResult as any).month as string }
-
-    const { data: runLedgers } = await fastify.supabase
-      .from('payroll_financial_ledgers')
-      .select('id, ledger_status, reverses_ledger_id')
-      .eq('tenant_id', tenantId)
-      .eq('run_id', id)
-
-    // Never-posted ledgers ('draft'/'balanced') carry no live accounting fact
-    // — they're staging artifacts that would otherwise become orphaned
-    // (pointing at slips about to be deleted) and keep counting toward the
-    // liability dashboard for a run no longer in that state. Safe to clean
-    // up as part of rollback; 'reversed' ledgers are left alone (already
-    // neutralized, and are the historical record of what was reversed). The
-    // atomic RPC above already proved no 'posted', non-reversal ledger
-    // exists at this point, so only draft/balanced rows are ever found here.
-    const unpostedLedgerIds = (runLedgers ?? [])
-      .filter((l: any) => l.ledger_status === 'draft' || l.ledger_status === 'balanced')
-      .map((l: any) => (l as any).id as string)
-
-    // Now delete the slips (parent run is 'draft' → trigger permits deletion).
-    const { error: slipDelErr } = await fastify.supabase
-      .from('payroll_slips').delete().eq('run_id', id).eq('tenant_id', tenantId)
-    if (slipDelErr) return serverError(req, reply, slipDelErr, ErrorCode.DELETE_FAILED, 'Run reset to draft but slip deletion failed')
-
-    // Resync run-level totals: every slip was just deleted, so
-    // total_gross/total_deductions/total_net/total_lop_amount (set at run
-    // creation) are now phantom values for a run with zero slips — without
-    // this, a rolled-back run keeps displaying its pre-rollback totals on
-    // any dashboard reading payroll_runs directly. Non-fatal: the rollback
-    // itself already succeeded above.
-    try {
-      await resyncRunTotals(fastify.supabase, tenantId, id)
-    } catch (resyncErr: any) {
-      req.log.warn({ err: resyncErr, run_id: id }, 'payroll rollback: run-totals resync failed (non-fatal)')
-    }
-
-    // G12: a 'paid' leave-encashment request only became 'paid' because THIS
-    // run finalized (see the finalize route's own non-fatal paid-flip block) —
-    // rolling the run back to draft means it is no longer actually paid, so
-    // revert it to 'approved' (still assigned to this run — the next
-    // regeneration picks it up fresh again, see fetchEncashmentPayout).
-    // Non-fatal, same resilience pattern as the resync above.
-    try {
-      const { error: encRevertErr } = await fastify.supabase.rpc('fn_revert_leave_encashments_for_rollback', {
-        p_tenant_id: tenantId, p_run_id: id,
-      })
-      if (encRevertErr) req.log.warn({ err: encRevertErr, run_id: id }, 'payroll rollback: leave encashment revert failed (non-fatal)')
-    } catch (encErr: any) {
-      req.log.warn({ err: encErr, run_id: id }, 'payroll rollback: leave encashment revert failed (non-fatal)')
-    }
-
-    // Clean up the never-posted ledgers identified above — now that the
-    // slips they were built from are gone, leaving them around would corrupt
-    // the accounting dashboard with figures for a run no longer in that
-    // state. Entries first (no FK cascade from payroll_financial_ledgers to
-    // payroll_ledger_entries). Non-fatal: the rollback itself already
-    // succeeded above, and a stray draft ledger is a dashboard-accuracy
-    // issue, not a data-loss one.
-    if (unpostedLedgerIds.length > 0) {
-      try {
-        const { error: entriesDelErr } = await fastify.supabase
-          .from('payroll_ledger_entries').delete().in('ledger_id', unpostedLedgerIds)
-        if (entriesDelErr) req.log.warn({ err: entriesDelErr, run_id: id }, 'payroll rollback: unposted ledger entry cleanup failed (non-fatal)')
-        // payroll_cost_allocations.ledger_id also FKs to payroll_financial_
-        // ledgers(id) with no cascade — building the ledger builds this too
-        // (buildCostCenterAllocations), so it must go before the header or
-        // the header delete fails on the FK.
-        const { error: allocDelErr } = await fastify.supabase
-          .from('payroll_cost_allocations').delete().in('ledger_id', unpostedLedgerIds)
-        if (allocDelErr) req.log.warn({ err: allocDelErr, run_id: id }, 'payroll rollback: unposted ledger cost-allocation cleanup failed (non-fatal)')
-        const { error: ledgerDelErr } = await fastify.supabase
-          .from('payroll_financial_ledgers').delete().in('id', unpostedLedgerIds).eq('tenant_id', tenantId)
-        if (ledgerDelErr) req.log.warn({ err: ledgerDelErr, run_id: id }, 'payroll rollback: unposted ledger cleanup failed (non-fatal)')
-      } catch (ledgerErr: any) {
-        req.log.warn({ err: ledgerErr, run_id: id }, 'payroll rollback: unposted ledger cleanup threw (non-fatal)')
-      }
-    }
-
-    // Archive the pre-rollback finalized snapshot rather than leave it
-    // dangling: payroll_runs.snapshot_id still points at it (only finalize/
-    // buildPayrollRunSnapshot ever set it) and it is still marked
-    // replayable=true, which would let buildPayrollFinancialLedger's
-    // self-heal path (or a future replay) treat deleted-slip-era data as a
-    // valid source. Mark it archived and clear the run's own reference; the
-    // next successful recompute builds a fresh one (buildPayrollRunSnapshot
-    // already supersedes whatever it finds for this run_id). The row itself
-    // is kept, not deleted — it remains the historical record of what was
-    // actually finalized and then rolled back.
-    try {
-      await fastify.supabase.from('payroll_runs').update({ snapshot_id: null }).eq('id', id).eq('tenant_id', tenantId)
-      const { error: archiveErr } = await fastify.supabase
-        .from('payroll_run_snapshots').update({ replayable: false }).eq('run_id', id).eq('tenant_id', tenantId)
-      if (archiveErr) req.log.warn({ err: archiveErr, run_id: id }, 'payroll rollback: snapshot archive failed (non-fatal)')
-    } catch (snapErr: any) {
-      req.log.warn({ err: snapErr, run_id: id }, 'payroll rollback: snapshot archive threw (non-fatal)')
-    }
 
     // If the month was frozen, also lift the freeze so the period is actually
     // runnable again — otherwise the freeze guard blocks the re-run and the

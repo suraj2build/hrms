@@ -55,7 +55,38 @@ export default async function setupRoute(fastify: FastifyInstance) {
       })
     }
 
-    // ── 1b. Anti-hijack guards ──────────────────────────────────────────────────
+    // ── 2. Idempotency: check if profile already exists ────────────────────────
+    // Moved ahead of the anti-hijack guards below (SYSTEM_AUDIT_2026-10-14
+    // item 3): returning a profile that already exists for THIS EXACT
+    // user_id carries no hijack risk — whatever protected its creation
+    // already ran at that earlier, successful call. Checking this first
+    // means a legitimate retry (the first /setup call succeeded but the
+    // client never saw the response — a dropped connection, a process
+    // restart, a pilot-seeding script resuming after an interruption) is
+    // never wrongly told SETUP_WINDOW_EXPIRED just because more than 15
+    // minutes have passed since the ORIGINAL signup. Before this reorder,
+    // every retry past that window failed even though the real work was
+    // already done, with no way to recover except creating a brand new
+    // auth account.
+    const { data: existingProfile, error: existingProfileErr } = await fastify.supabase
+      .from('profiles')
+      .select('id, tenant_id, role')
+      .eq('id', user_id)
+      .maybeSingle()
+    if (existingProfileErr) return serverError(req, reply, existingProfileErr, ErrorCode.QUERY_FAILED, 'Failed to check for existing setup')
+
+    if (existingProfile) {
+      const { data: existingTenant, error: existingTenantErr } = await fastify.supabase
+        .from('tenants')
+        .select('*')
+        .eq('id', existingProfile.tenant_id)
+        .maybeSingle()
+      if (existingTenantErr) return serverError(req, reply, existingTenantErr, ErrorCode.QUERY_FAILED, 'Failed to fetch existing tenant')
+
+      return reply.send({ profile: existingProfile, tenant: existingTenant })
+    }
+
+    // ── 1b. Anti-hijack guards (CREATE path only — see reorder note above) ──────
     // This route is intentionally unauthenticated — Signup.tsx calls it
     // immediately after supabase.auth.signUp(), and this app requires email
     // confirmation before a session exists ("check your email to verify, then
@@ -66,7 +97,7 @@ export default async function setupRoute(fastify: FastifyInstance) {
     // the request body with no ownership check) could call /setup first with
     // their own company_name, silently pre-provisioning that identity into an
     // attacker-chosen tenant before the real signup's own /setup call runs —
-    // the idempotency check below would then hand the real user back the
+    // the idempotency check above would then hand the real user back the
     // attacker's fabricated tenant instead of creating their own.
     //
     // Two checks that don't require a session:
@@ -85,25 +116,6 @@ export default async function setupRoute(fastify: FastifyInstance) {
     const metadataFullName = (user.user_metadata as { full_name?: string } | null)?.full_name
     if (metadataFullName && metadataFullName.trim().toLowerCase() !== full_name.trim().toLowerCase()) {
       return forbidden(reply, 'SETUP_VERIFICATION_FAILED', 'Setup details do not match the account that was just created.')
-    }
-
-    // ── 2. Idempotency: check if profile already exists ────────────────────────
-    const { data: existingProfile, error: existingProfileErr } = await fastify.supabase
-      .from('profiles')
-      .select('id, tenant_id, role')
-      .eq('id', user_id)
-      .maybeSingle()
-    if (existingProfileErr) return serverError(req, reply, existingProfileErr, ErrorCode.QUERY_FAILED, 'Failed to check for existing setup')
-
-    if (existingProfile) {
-      const { data: existingTenant, error: existingTenantErr } = await fastify.supabase
-        .from('tenants')
-        .select('*')
-        .eq('id', existingProfile.tenant_id)
-        .maybeSingle()
-      if (existingTenantErr) return serverError(req, reply, existingTenantErr, ErrorCode.QUERY_FAILED, 'Failed to fetch existing tenant')
-
-      return reply.send({ profile: existingProfile, tenant: existingTenant })
     }
 
     // ── 3. Create tenant ────────────────────────────────────────────────────────
