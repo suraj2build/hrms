@@ -423,24 +423,39 @@ export default async function compOffRoute(fastify: FastifyInstance) {
     // first makes this request the single, unambiguous approver before any
     // balance side effect is attempted — the loser is rejected here with no
     // side effects at all, so there is nothing left to roll back.
-    const { data: claimedRows, error: claimErr } = await fastify.supabase
-      .from('comp_off_requests')
-      .update({
-        status:      'approved',
-        reviewed_by: req.userId,
-        reviewed_at: now,
-        notes:       parsed.data.notes ?? null,
-      })
-      .eq('id', id)
-      .eq('tenant_id', req.tenantId)
-      .eq('status', 'pending')
-      .select('id')
+    //
+    // SYSTEM_AUDIT_2026-10-14 (migration 461): the claim itself now goes
+    // through an RPC that re-checks the period lock inside the SAME
+    // transaction as the status UPDATE — the isMonthLocked call above is
+    // only a fast-fail pre-check; this RPC is the authoritative, race-safe
+    // one (see migration 461's header for why a separate earlier check
+    // cannot close this race on its own).
+    const { error: claimErr } = await fastify.supabase.rpc('approve_comp_off_claim_atomic', {
+      p_tenant_id:   req.tenantId,
+      p_co_id:       id,
+      p_reviewer_id: req.userId,
+      p_reviewed_at: now,
+      p_notes:       parsed.data.notes ?? null,
+    })
 
     if (claimErr) {
+      const msg = claimErr.message ?? ''
+      if (msg.includes('PERIOD_LOCKED:')) {
+        return reply.code(409).send({ error: 'PERIOD_LOCKED', message: msg.replace(/^.*PERIOD_LOCKED:\s*/, '') })
+      }
+      if (msg.includes('CONFLICT:')) {
+        return conflictError(reply, 'ALREADY_ACTIONED', 'This request was already actioned by another request')
+      }
+      if (msg.includes('NO_LEAVE_TYPE_CONFIGURED:')) {
+        return reply.code(409).send({
+          error:   'NO_LEAVE_TYPE_CONFIGURED',
+          message: 'This comp-off request has no leave type to credit — it cannot be approved as-is. Regenerate it via a leave-type-specific comp-off generation before approving.',
+        })
+      }
+      if (msg.includes('NOT_FOUND:')) {
+        return reply.code(404).send({ error: 'NOT_FOUND', message: 'Comp off request not found' })
+      }
       return serverError(req, reply, claimErr, ErrorCode.UPDATE_FAILED, 'Failed to approve comp-off request')
-    }
-    if (!claimedRows?.length) {
-      return conflictError(reply, 'ALREADY_ACTIONED', 'This request was already actioned by another request')
     }
 
     // ── Credit balance via leave_accrual_ledger ──────────────────────────

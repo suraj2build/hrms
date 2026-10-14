@@ -324,15 +324,179 @@ checkpoint so completed work is never repeated. Batch log:
   real-HTTP, *and* live-browser evidence for an authorization-scope fix,
   not just mocked route tests — the bar the user has been holding this
   register to since checkpoint 2.
+- **Checkpoint 7** (this commit): continuation from `096e4a3b`, responding
+  to the user's two-part steering message after independently reviewing
+  checkpoint 6 rather than taking its conclusions on faith: (1) the
+  period-lock check racing lock-creation/payroll-finalization needs
+  transactional enforcement, not a sequential test; (2) manager-scope
+  ("exclude indirect reports") is not automatically the right policy for
+  every workflow and needs to be recorded per-workflow, not assumed.
+
+  **Period-lock race — confirmed real, not theoretical, by reading the
+  actual RPC bodies.** Checkpoint 6's leave.ts fix (and the pre-existing
+  canonical flow) only ever checked `attendance_period_locks` via a
+  separate JS query (`getLockedMonths`/`isMonthLocked`) *before* calling
+  the approval RPC — a real TOCTOU window: a period lock committed by
+  another session between that JS check and the RPC's own commit would go
+  undetected, and the approval would still commit its balance deduction/
+  status change. Confirmed by reading the actual SQL bodies, not assumed:
+  `approve_leave_request_atomic`, `reverse_leave_request_atomic` (427),
+  and `approve_regularisation_atomic` (042) never referenced
+  `attendance_period_locks` at all; the comp-off and overtime claim
+  mutations (plain UPDATEs in `comp-off.ts`/`ot-engine.ts`) had the exact
+  same gap. Migration 262's DB trigger does not backstop this either — it
+  deliberately allows LOCKED/PAYROLL_PROCESSING writes to
+  `attendance_daily` (only PAYROLL_FINALIZED is a hard floor), by design,
+  so it was never meant to catch this.
+
+  **Fix (migration 461):** fold the period-lock check into the SAME
+  transaction as each protected mutation — a fresh `SELECT ... FOR UPDATE`
+  / status-check / lock-check / mutate sequence inside one PL/pgSQL
+  function, not a separate earlier round trip. Under Postgres's default
+  READ COMMITTED isolation, each *statement* gets a fresh snapshot, so a
+  lock-check statement issued immediately before the mutation, in the same
+  transaction, is guaranteed to see any lock committed before that
+  statement began — closing the exact window a separate JS-side check
+  could miss, without needing `pg_advisory_xact_lock` coordination between
+  the lock-creation path and the approval path. Applied to:
+  `approve_leave_request_atomic`, `reverse_leave_request_atomic`,
+  `approve_regularisation_atomic` (bodies replaced, signatures unchanged —
+  no caller-side TS change needed), plus three NEW atomic RPCs for
+  mutations that previously had no single-transaction form at all:
+  `approve_legacy_leave_application_atomic` (`routes/attendance/leave.ts`'s
+  approve, replacing a 3-round-trip validate→deduct→update sequence),
+  `approve_comp_off_claim_atomic` (`comp-off.ts`), and
+  `approve_overtime_claim_atomic` (`ot-engine.ts`/`overtime.ts`). The
+  pre-existing JS-side `getLockedMonths`/`isMonthLocked` pre-checks are
+  KEPT, reframed in code comments as a fast-fail UX optimization only —
+  they are no longer the enforcement boundary.
+
+  **Proof the race is actually closed — not a sequential test**, per the
+  user's explicit rejection of "insert a locked row, then call approve" as
+  insufficient: `scripts/db/verify-period-lock-no-race.mjs` uses two raw
+  `pg` connections with explicit transaction control to construct the
+  literal scenario — connection A takes the `FOR UPDATE` row lock (the
+  exact point the RPC reaches before its lock-check), connection B
+  concurrently inserts and COMMITS a period lock for that month while A's
+  transaction is still open and has not yet looked at
+  `attendance_period_locks`, then A's lock-check statement runs as a fresh
+  statement in its still-open transaction. **Result: A's check correctly
+  sees the lock B committed mid-flight (PASS)** — this is the
+  determinism the user asked for, not a timing-dependent guess. Parts 2-3
+  then confirm the real compiled RPC refuses a locked month (409-class
+  exception, persisted read-back shows status unchanged) and succeeds
+  once reopened (persisted read-back shows the balance deduction). Part 4
+  runs 15 trials of a real RPC approve racing a real lock-insert via
+  `Promise.all` (genuine DB/HTTP-timing concurrency, no artificial stagger)
+  — **15/15 self-consistent** (every trial lands in exactly
+  approved-with-balance-deducted or refused-with-nothing-mutated, never a
+  partial state). Script is committed for reuse.
+
+  **End-to-end confirmation through the real HTTP+API layer** (not just
+  the raw RPC): real `POST /attendance/leave/apply` → `POST .../approve`
+  against the live compiled API server confirmed the leave.ts refactor
+  works (201, then 200 "Approved successfully", persisted
+  `status: 'approved'`); a second smoke test confirmed `POST
+  /attendance/comp-off/:id/approve` (200, `status: 'approved'`,
+  `days_credited: 1`) and `POST /overtime/requests/:id/approve` (200,
+  `status: 'APPROVED'`, `approved_minutes: 90`) against the live API,
+  each independently persisted-read-back-confirmed in Postgres.
+
+  **Second gap found while doing this comparison, not assumed away**:
+  comparing `leave.ts`'s `/attendance/leave/:id/cancel` against canonical
+  `reverseApprovedLeaveRequest` (the user's explicit instruction —
+  "document differences before recommending retirement; do not remove it
+  silently") surfaced two further real gaps, neither previously fixed:
+  **F1** — no period-lock check at all (not even a JS pre-check, unlike
+  approve); **F2** — no elapsed-range guard, unlike canonical's
+  `req.from_date < todayLocal` block that prevents over-crediting balance/
+  corrupting already-elapsed attendance for a leave that has already
+  started. Both fixed this round: F1 via a new
+  `cancel_legacy_leave_application_atomic` RPC (migration 461 — status
+  check + period-lock check + status UPDATE + ledger reversal + balance
+  restore, one transaction, mirroring the approve-side consolidation); F2
+  via a JS-side tenant-local "today" comparison before the RPC is ever
+  called (mirrors canonical; this check reads an already-fetched date
+  against "now," not a race-sensitive mutation precondition, so it does
+  not need to be inside the RPC's transaction the way the lock check
+  does). Verified against real Postgres
+  (`scripts/db/verify-cancel-legacy-atomic.mjs`, 3 parts: locked month
+  blocks cancel with no partial mutation; unlock → succeeds with balance
+  restored + ledger row written; a retried cancel on the now-cancelled
+  row is rejected with no double-credit) and with 4 new mocked route
+  tests (F2's early-return, F1's RPC-surfaced 409, the happy path calling
+  the RPC and reporting `days_restored`, and the pre-existing non-approved
+  status check unaffected by the refactor).
+
+  **Prevalidation vs. transactional-atomicity, tested as two distinct
+  invariants per the user's explicit instruction** (they are not the same
+  claim and conflating them was the risk): added one new test to
+  `regularisation-bulk-scope.test.ts`, alongside the already-existing
+  prevalidation test (an unauthorized item in the batch → zero items
+  mutate, proven by the service mock never being invoked). The new test
+  mocks the service call to throw for one AUTHORIZED mid-batch item and
+  asserts the other two authorized items still process independently and
+  report correctly (`{approved: 2, failed: 1, total: 3}`, each item's
+  outcome keyed by id) — proving a runtime failure on one item of an
+  all-authorized batch does not abort or silently drop the rest, which
+  prevalidation alone does not establish.
+
+  **Fresh-install migration verification**: migration 461 (as extended
+  this round with the cancel RPC) applied cleanly, zero errors, against a
+  freshly-bootstrapped Postgres 16 database running the complete
+  migration history (000→461, 457 files) — 480 tables, all 5 target
+  functions (`fn_months_in_range`,
+  `approve_legacy_leave_application_atomic`,
+  `approve_comp_off_claim_atomic`, `approve_overtime_claim_atomic`,
+  `cancel_legacy_leave_application_atomic`) present. Throwaway database
+  dropped after verification.
+
+  **Test suite**: 604/604 passed, 70/70 files (up from checkpoint 6's
+  599/599 — 1 new atomicity test, 4 new cancel-handler tests), 0
+  regressions; `tsc --noEmit` clean on `apps/api`.
+
+  **Manager scope recorded per workflow (the user's second instruction
+  — "Direct-report exclusion is not automatically correct for every
+  operational read or approval"), so this is a documented policy, not an
+  implicit default applied uniformly:**
+
+  | Workflow class | Intended scope | Why | Where enforced |
+  |---|---|---|---|
+  | Attendance/overtime **history** (read-only team visibility — e.g. admin OT list-by-employee, team attendance views) | **Full subordinate tree, any depth** | Deliberate "broad view, narrow act" design — a manager-of-managers legitimately needs operational visibility into their whole org for planning/oversight, even though they can't personally action a grandchild's item | `getDirectReportIds` (`lib/manager-scope.ts`) |
+  | **Compensation** visibility (`context-data.ts`'s `payroll-summary`, `manager-compensation.ts`) | **Immediate direct reports only** | Explicit product policy (Program 5 · P5.3) — compensation is sensitive enough that even a manager-of-managers should not see a grandchild report's CTC, unlike operational attendance data | `getImmediateReportIds` |
+  | Approval **ACTION** authority (leave approve/reject/cancel-approval, regularisation approve/reject, overtime approve, comp-off approve) | **Immediate manager only, always** | `validateApprover`/`authorizeOtTarget`/`authorizeCompOffTarget` have always been one-level `isDirectReport` checks — a multi-level approval chain is a separate, explicitly-configured feature, never an implicit fallback to "anyone above in the tree" | `isDirectReport` / the approver-chain validators |
+  | Approval **queue/count** (pending lists, the `/approvals/pending-count` badge, the Approved tab behind cancel-approval) | **Must match action authority exactly — immediate only** | A queue that shows items the viewer cannot act on is misleading UX and was checkpoint 6's actual bug (full-tree queues feeding one-level action authority) | `getImmediateReportIds` (fixed checkpoint 6) |
+  | **Bulk**-approve/reject ownership guards (regularisation bulk endpoints) | **Must match action authority exactly — immediate only** | Same reasoning as queue/count: the guard's own stated intent ("every request in the batch must belong to a direct report") only makes sense at the same level the per-item approve call itself authorizes | `getImmediateReportIds` (fixed checkpoint 6) |
+
+  The pattern that falls out of this table: **"broad view, narrow act"** —
+  read-only operational visibility legitimately stays on the full tree by
+  design (attendance/overtime history), while anything that is or directly
+  feeds an actionable decision (approval action, its queue, its bulk
+  guard) must match the one-level action-authority boundary exactly;
+  compensation is the one visibility case that is *narrower* than the
+  default operational-visibility tree, by explicit product policy rather
+  than by the action-authority rule. This table is the audit's answer to
+  "is direct-report exclusion correct here" for every workflow currently
+  touched by this register — it is not exhaustive of every module in the
+  codebase (e.g. compensation's policy pre-dates this round and is cited,
+  not re-derived here).
+
+  **Not yet done, explicitly carried forward**: the broader retirement
+  decision for `leave.ts`'s legacy pathway (still open, not assumed —
+  F1/F2 close its remaining safety gaps relative to canonical, but it is
+  still feature-incomplete: no multi-level approval chain, no PEND-94
+  computation); the remaining ~60 unopened `routes/attendance` files and
+  `routes/approvals/governance-evolution.ts`/`workflows.ts` (next planned
+  batch, below, unchanged in scope from checkpoint 6's plan).
 - **Next planned batches** (not yet started — listed so a future session
   picks up here, not from zero): continue item 2's batch — the remaining
-  ~60 unopened `routes/attendance` files (tier 1 next: `leave.ts`,
-  `leave-employee.ts`, `leave-entitlement.ts`, `leave-accrual.ts`,
+  ~60 unopened `routes/attendance` files (tier 1 next: `leave-employee.ts`,
+  `leave-entitlement.ts`, `leave-accrual.ts`,
   `leave-accrual-lifecycle.ts`, `leave-reconciliation.ts`,
   `leave-collision.ts`, `leave-duration.ts`, `leave-policy-resolve.ts`,
-  `regularisation.ts`, `regularisation-policy.ts`; tier 2: punch/
+  `regularisation-policy.ts`; tier 2: punch/
   corrections/overtime's non-scope sections/recompute/retroactive/
-  period-locks; tier 3: rosters/shifts/holidays/wo-credit) and
+  period-locks' remaining non-lock-creation logic; tier 3: rosters/shifts/holidays/wo-credit) and
   `routes/approvals/governance-evolution.ts` + `workflows.ts`. Then item 3 —
   Compensation,
   Payroll, statutory calculations, reimbursements, loans/advances, F&F and
@@ -373,7 +537,7 @@ started.
 | **Owner admin** (`routes/owner`, `pages/owner`) | Partially tested | Screenshot-signing independent re-validation fixed this round (read side, incl. pre-existing invalid records); 5 tests. Owner route nav links spot-checked (nested `/owner/*` routes resolve correctly). Platform-admin authorization on other `/owner/*` endpoints (activate/suspend/cancel/hard-delete) not re-audited this round — last verified in the tenant-licensing work recorded in CLAUDE.md. |
 | **Attendance** (`routes/attendance`, `pages/attendance`) | Partially tested | Nav links fixed: `EmployeeShifts.tsx` dead `<a href="/shift-master">` → `<Link to="/admin/shift-master">`; `MusterRoll.tsx`'s `/admin/payroll/readiness` → `/admin/payroll-readiness`. **Admin attendance-processing gap closed for real, on the actually-reachable pages this time** (checkpoint 3; checkpoints 1–2 fixed the correct behavior on `AdminDashboard.tsx`, which turned out to be 100% dead code — see the checkpoint 3 writeup above). The backend (`apps/api/src/routes/attendance/process.ts`) already correctly authorizes `hr_admin`/`super_admin` and needed no fix. Fixed the real live call sites: `pages/admin/ControlCenter.tsx` (the "Process now" banner button and the "Process Attendance" quick action, both previously → `/admin/attendance/center`, confirmed to have no trigger button) and `components/operational/CommandPalette.tsx`'s global "Process Attendance" command (same dead-end target). All three now point at `/manager/team/attendance`, where `Attendance.tsx` unconditionally renders the real trigger button for `isAdmin` roles. **Proven end-to-end in a real Chromium browser** (`scripts/db/browser-test-attendance-processing.mjs`): real login → real dashboard click → real visible button → real `POST /attendance/process` → 200 → "Processing Complete" banner visible on screen, for both `super_admin` and `hr_admin`; `employee` never sees the control AND is refused 403 when a direct API call is made using that role's own real captured session token. API-level correctness (processing idempotency, anomaly reconciliation) last verified in the Round 2026-10-11 de-emphasis work and the earlier UAT scenario matrix (W/WO/H/X/P/L-series), not re-run this round. |
 | **Payroll** (`routes/payroll`, `pages/payroll`) | Partially tested | Nav links fixed: 3 call sites (`WorkflowRecommendations.tsx`, `OperationalInboxV2.tsx`, `PayrollContextPanel.tsx`) hardcoded `/admin/payroll/blockers` with no `:runId` — none of their data sources carry a `run_id` (`PayrollContextPanel`'s blockers are month-aggregated, not run-scoped), so each now falls back to the runs list `/admin/payroll`, matching the pattern `PayrollOperationsCenter.tsx` and `navigation.config.ts` already use correctly. `AdminDashboard.tsx`'s "Compliance" quick action pointed at the real `/admin/payroll/statutory-dashboard` ("Compliance Cockpit") instead of the non-existent `/admin/compliance`. Approval/finalization/reversal correctness, F&F, leave encashment — extensively tested in prior rounds (G12, F&F concurrency, accounting-ledger fixes); not re-run this round. |
-| **Leave** (`routes/attendance/leave-requests.ts`, `lib/leave-request-service.ts`, `lib/approval-service.ts`, `routes/attendance/leave.ts`; `pages/leave`, `pages/ess` leave) | Partially tested | **Checkpoint 6**: `leave-requests.ts` + both service files read in full. Found + fixed a real authorization-scope defect: the Approved-tab list behind the cancel-approval action (`GET /leave-requests?status=APPROVED`, manager, no `employee_id`) and the `/approvals/pending-count` badge both scoped via the full subordinate tree while the actual cancel/approve/reject action is immediate-manager-only — narrowed both to the new `getImmediateReportIds` helper. **Upgraded to real-Postgres + real-HTTP + live-browser evidence** (see the batch-log entry above): a genuine 3-level hierarchy proves the manager-of-managers sees zero pending items and is refused 403 on direct action, the real immediate manager sees and can act on them, HR sees everything — screenshotted live in the browser. Also read `routes/attendance/leave.ts` in full: confirmed live/reachable over real HTTP (it is registered, not dead code — an earlier conclusion in this same checkpoint was wrong and corrected per the user's explicit catch), and found + fixed a real gap there too — its legacy approve handler had no hard period-lock block, unlike the canonical flow; fixed and proved 409 against a real locked-period row in Postgres. Everything else in `leave-requests.ts`/the two service files (overlap-check fail-closed, period-lock recheck on approve/reverse, per-calendar-year balance bucketing, the elapsed-range reversal guard, the multi-level approval gate, self-approval guards, idempotency-key handling) was read and found already correct — carries forward from prior rounds' PEND-94/PEND-103/PEND-105/ISSUE-144/etc. fixes, not newly defective, but also not independently re-verified against real Postgres this round. The other ~15 `routes/attendance/leave-*.ts` files (accrual, entitlement, duration, reconciliation, collision, policy-resolve, jobs, scheduler-status) are **not yet opened**. Raise-leave-on-behalf, standalone encashment — previously tested (G12, prior rounds), not re-run this round. **Open product decision, not yet resolved**: whether to formally retire `leave.ts`'s legacy `leave_applications` pathway now that its one safety-critical gap is closed, or keep it as a (still feature-incomplete relative to canonical) fallback. |
+| **Leave** (`routes/attendance/leave-requests.ts`, `lib/leave-request-service.ts`, `lib/approval-service.ts`, `routes/attendance/leave.ts`; `pages/leave`, `pages/ess` leave) | Partially tested | **Checkpoint 6**: `leave-requests.ts` + both service files read in full. Found + fixed a real authorization-scope defect: the Approved-tab list behind the cancel-approval action (`GET /leave-requests?status=APPROVED`, manager, no `employee_id`) and the `/approvals/pending-count` badge both scoped via the full subordinate tree while the actual cancel/approve/reject action is immediate-manager-only — narrowed both to the new `getImmediateReportIds` helper. **Upgraded to real-Postgres + real-HTTP + live-browser evidence** (see the batch-log entry above): a genuine 3-level hierarchy proves the manager-of-managers sees zero pending items and is refused 403 on direct action, the real immediate manager sees and can act on them, HR sees everything — screenshotted live in the browser. Also read `routes/attendance/leave.ts` in full: confirmed live/reachable over real HTTP (it is registered, not dead code — an earlier conclusion in this same checkpoint was wrong and corrected per the user's explicit catch), and found + fixed a real gap there too — its legacy approve handler had no hard period-lock block, unlike the canonical flow; fixed and proved 409 against a real locked-period row in Postgres. Everything else in `leave-requests.ts`/the two service files (overlap-check fail-closed, per-calendar-year balance bucketing, the elapsed-range reversal guard, the multi-level approval gate, self-approval guards, idempotency-key handling) was read and found already correct — carries forward from prior rounds' PEND-94/PEND-103/PEND-105/ISSUE-144/etc. fixes, not newly defective, but also not independently re-verified against real Postgres this round. The other ~15 `routes/attendance/leave-*.ts` files (accrual, entitlement, duration, reconciliation, collision, policy-resolve, jobs, scheduler-status) are **not yet opened**. Raise-leave-on-behalf, standalone encashment — previously tested (G12, prior rounds), not re-run this round. **Checkpoint 6's "period-lock recheck on approve/reverse was already correct" claim above was wrong and is corrected here, checkpoint 7**: reading the actual RPC bodies (not assumed) showed `approve_leave_request_atomic`/`reverse_leave_request_atomic`/`approve_regularisation_atomic` never referenced `attendance_period_locks` at all — the only enforcement was a separate, earlier JS-side check, a real TOCTOU gap against concurrent lock-creation/payroll-finalization. **Fixed, checkpoint 7**: migration 461 folds the lock-check into the same transaction as each mutation (all three canonical RPCs, plus new atomic RPCs for leave.ts's legacy approve, comp-off's claim, and overtime's claim); proved via a genuine two-connection overlapping-transaction test (`scripts/db/verify-period-lock-no-race.mjs`), not a sequential one. **Also checkpoint 7**: comparing `leave.ts`'s cancel handler against canonical surfaced and fixed two more real gaps — F1 (no period-lock check at all) and F2 (no elapsed-range guard) — via a new `cancel_legacy_leave_application_atomic` RPC plus a JS-side "already started" check; see the checkpoint 7 batch-log entry above for full detail and evidence breakdown. **Open product decision, not yet resolved**: whether to formally retire `leave.ts`'s legacy `leave_applications` pathway now that its safety-critical gaps (period-lock on approve AND cancel, elapsed-range on cancel) are closed, or keep it as a (still feature-incomplete relative to canonical) fallback. |
 | **Employees / People Directory** (`routes/employees`, `pages/employees`) | **Source review complete — see verification breakdown below, not "fully tested"** | **Checkpoints 2+4+5: all ~30 route files read against the item-2 checklist** (tenant scoping, object/team-level authorization, FK cross-tenant validation, CAS/optimistic concurrency, storage-path privacy, approval/reversal correctness). This status means the *source* has been read end-to-end — it does NOT mean every file has browser or real-Postgres evidence; see the explicit per-type breakdown immediately below the table-closing note. Two real defects found and fixed: (1) `PUT /employees/:id` could set `status: 'separated'` without revoking auth access — checkpoint 2 (3 tests). (2) `context-data.ts`'s attendance/overtime/**payroll-summary** endpoints were gated on role only (`MANAGER_ROLES`), not on team membership — checkpoint 4 fixed attendance/overtime using `getDirectReportIds` (full subordinate tree, matching `team-assets.ts`/`team-helpdesk.ts`/`team-regularisation-context.ts`'s established operational-visibility policy); checkpoint 5 then corrected `payroll-summary` specifically, after the user flagged that team membership alone doesn't establish the right *compensation* policy — `manager-compensation.ts` (Program 5 · P5.3, the one other place in this codebase defining manager-visible compensation) deliberately scopes to **immediate direct reports only**, narrower than the subordinate-tree check. Reusing the broader check for payroll-summary would have let a manager-of-managers see a grandchild report's CTC — now fixed to mirror the direct-only policy exactly. 16 tests total, including the direct-vs-grandchild distinction, reassignment (both the former manager losing access and the new manager gaining it, read live off `employees.manager_id`, not cached), cross-tenant requests, and a manager role with no linked employee record. Every other file in the module (`index.ts`, `user-account.ts`, `personal-info.ts`, `identity.ts`, `bank-statutory.ts`, `contracts.ts`, `employee-documents.ts`, `addresses.ts`, `education.ts`, `emergency-contacts.ts`, `family.ts`, `exit-interview.ts`, `important-dates.ts`, `nominations.ts`, `passport-visa.ts`, `previous-employment.ts`, `shift-history.ts`, `full-create.ts`, `full-profile.ts`, `job-history.ts`, `manager.ts`, `access-cards.ts`, `onboarding-status.ts`, `options.ts`, `org-context.ts`, `trust.ts`, `separation.ts`, `separation-workflow.ts`'s non-F&F sections) was read and found already correctly tenant-scoped, FK-cross-tenant-checked, CAS-versioned and storage-path-validated. Much of it carries explicit comments from prior audit rounds ("Fresh audit finding", "P6.0d — ownership guard") — **those comments are supporting context for where to look, not proof of current correctness**; this round read the live code behind each comment rather than trusting the comment's claim, which is exactly how the `context-data.ts` gap (no such comment existed there) and the payroll-summary scope-width issue (the existing fix's own comment claimed a pattern match that wasn't quite right) were actually found. **F&F reliance, stated explicitly, not implied**: `separation-workflow.ts`'s F&F sections (~lines 416–972) were **not re-reviewed this round** — F&F's current correctness rests on the prior documented rounds (G12, F&F concurrency, accounting-ledger fixes per CLAUDE.md), which is prior evidence, not fresh verification. `probation-confirmations.ts` likewise relies on its own dedicated test file from a prior round, not a fresh read this round. |
 | **Approvals** (`routes/approvals`, `routes/attendance/overtime.ts`+`comp-off.ts`'s approval queues, `routes/attendance/regularisation.ts`'s bulk guards, `pages/attendance/ApprovalInbox.tsx`) | Partially tested | `Settings.tsx`'s Governance Matrix link fixed (`/admin/approvals/governance` → `/admin/approvals/governance-matrix`). `OperationalInbox.tsx`'s stale `/approvals/inbox` → `/admin/approvals/inbox` fixed (prior turn, this audit). **Checkpoint 6**: found + fixed the overtime/comp-off half of the same scope-mismatch defect described in the Leave row above — `GET /overtime/requests` and `GET /attendance/comp-off`'s manager branches narrowed from the full subordinate tree to `getImmediateReportIds`, matching `authorizeOtTarget`/`authorizeCompOffTarget`'s real one-level authority; traced into `ApprovalInbox.tsx` to confirm these two files are its embedded Overtime/Comp-off tabs, not a separate unused list — **confirmed live in the real browser**: a manager-of-managers' Approval Inbox genuinely shows "No pending approvals" while the real immediate manager's shows the actual pending items with working Approve/Reject (3 screenshots, real login, real tenant). Also found + fixed `regularisation.ts`'s `bulk-approve`/`bulk-reject` ownership guard, which used the same too-broad helper despite its own comment promising immediate-report-only scope — narrowed, with a mixed-batch test proving zero items are touched when any one id is unauthorized. `routes/approvals/governance-evolution.ts` and `workflows.ts` (the dedicated approvals namespace, as opposed to the per-domain approve/reject actions checked here) are **not yet opened** — still relies on the prior UAT-round verification recorded in CLAUDE.md/STATUS.md. |
 | **Masters / Org structure** (`routes/masters`, `pages/masters`) | Partially tested | `OrgGovernancePanel.tsx`'s 6 stale `/masters/*` nav calls fixed → `/admin/masters/*` (prior turn, this audit). No further audit this round. |

@@ -577,7 +577,8 @@ export default async function overtimeRoutes(fastify: FastifyInstance) {
     )
 
     if (!result.ok) {
-      return reply.code(400).send({ error: 'APPROVAL_FAILED', message: result.error })
+      const code = result.code === 'PERIOD_LOCKED' ? 409 : 400
+      return reply.code(code).send({ error: result.code ?? 'APPROVAL_FAILED', message: result.error })
     }
 
     // Audit (F5) — OT approvals affect pay and were previously unlogged.

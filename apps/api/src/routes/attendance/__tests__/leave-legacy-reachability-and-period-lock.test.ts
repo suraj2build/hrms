@@ -47,12 +47,48 @@ const EMPLOYEE_ID = 'emp-001'
 interface Fixture {
   lockedMonths: string[]       // period_month values with a non-OPEN state
   leaveApplication: { employee_id: string; tenant_id: string; from_date: string; to_date: string; status: string; leave_type_id: string; session: string } | null
+  // cancel-path only (F1/F2 fix below): what cancel_legacy_leave_application_atomic should do
+  cancelRpcError?: string | null
 }
 
 function buildSupabase(fx: Fixture) {
   return {
-    rpc: vi.fn().mockResolvedValue({ data: true, error: null }),
+    rpc: vi.fn((fnName: string) => {
+      if (fnName === 'cancel_legacy_leave_application_atomic') {
+        if (fx.cancelRpcError) {
+          return Promise.resolve({ data: null, error: { message: fx.cancelRpcError } })
+        }
+        return Promise.resolve({ data: { id: APP_ID, status: 'cancelled' }, error: null })
+      }
+      return Promise.resolve({ data: true, error: null })
+    }),
     from(table: string) {
+      if (table === 'tenants') {
+        const chain: any = {
+          select: () => chain, eq: () => chain,
+          maybeSingle: () => Promise.resolve({ data: { timezone: 'UTC' }, error: null }),
+        }
+        return chain
+      }
+      if (table === 'leave_accrual_ledger') {
+        const chain: any = {
+          select: () => chain, eq: () => chain,
+          // A pre-existing consumption row — daysToRestore resolves to 1,
+          // so computeWorkingLeaveDays (which would need far more mocking)
+          // is never reached on the cancel path under test here.
+          maybeSingle: () => Promise.resolve({ data: { days: -1 }, error: null }),
+        }
+        return chain
+      }
+      if (table === 'attendance_daily') {
+        const chain: any = {
+          delete: () => chain,
+          eq:     () => chain,
+          in:     () => chain,
+          then:   (resolve: (v: unknown) => void) => resolve({ error: null }),
+        }
+        return chain
+      }
       if (table === 'profiles') {
         const chain: any = {
           select: () => chain, eq: () => chain,
@@ -183,5 +219,67 @@ describe('routes/attendance/leave.ts — period-lock fix (new)', () => {
     // heavily-dependent pipeline in this minimal mock — the point of this
     // assertion is only that PERIOD_LOCKED is not the reason.)
     expect(res.statusCode).not.toBe(409)
+  })
+})
+
+describe('routes/attendance/leave.ts — cancel handler: F1 period-lock + F2 elapsed-range fix (new)', () => {
+  // SYSTEM_AUDIT_2026-10-14 continued audit: comparing POST /attendance/leave/:id/cancel
+  // against canonical reverseApprovedLeaveRequest surfaced two real gaps this legacy
+  // path had with NO equivalent protection at all (not even a JS pre-check, unlike
+  // approve's getLockedMonths fast-fail): F1 — no period-lock check before mutating
+  // balance/ledger/attendance_daily; F2 — no guard against reversing a leave that has
+  // already started (over-credits balance, corrupts already-elapsed attendance).
+  // Both are fixed: F1 via migration 461's cancel_legacy_leave_application_atomic
+  // (status + period-lock check + mutation, one transaction); F2 via a JS-side
+  // tenant-local "today" comparison before calling that RPC at all.
+
+  it('F2 — refuses to cancel a leave that has already started, before the RPC is ever called', async () => {
+    const fx: Fixture = {
+      lockedMonths: [],
+      leaveApplication: { employee_id: EMPLOYEE_ID, tenant_id: TENANT_ID, from_date: '2015-01-10', to_date: '2015-01-10', status: 'approved', leave_type_id: 'lt-1', session: 'full_day' },
+    }
+    const app = await buildApp(fx)
+    const res = await app.inject({ method: 'POST', url: `/attendance/leave/${APP_ID}/cancel`, headers: HEADERS, payload: {} })
+    expect(res.statusCode).toBe(409)
+    const body = JSON.parse(res.body)
+    expect(body.error).toBe('ALREADY_STARTED')
+  })
+
+  it('F1 — refuses to cancel once the affected month is locked, surfaced by the atomic RPC', async () => {
+    const fx: Fixture = {
+      lockedMonths: [],
+      leaveApplication: { employee_id: EMPLOYEE_ID, tenant_id: TENANT_ID, from_date: '2099-03-10', to_date: '2099-03-10', status: 'approved', leave_type_id: 'lt-1', session: 'full_day' },
+      cancelRpcError: 'CONFLICT: PERIOD_LOCKED: Cannot cancel — the pay period 2099-03 is locked. Reopen the period before cancelling this approved leave.',
+    }
+    const app = await buildApp(fx)
+    const res = await app.inject({ method: 'POST', url: `/attendance/leave/${APP_ID}/cancel`, headers: HEADERS, payload: {} })
+    expect(res.statusCode).toBe(409)
+    const body = JSON.parse(res.body)
+    expect(body.error).toBe('PERIOD_LOCKED')
+    expect(body.message).toContain('2099-03')
+  })
+
+  it('succeeds for a future-dated, open-period approved leave — calls the atomic RPC and restores days', async () => {
+    const fx: Fixture = {
+      lockedMonths: [],
+      leaveApplication: { employee_id: EMPLOYEE_ID, tenant_id: TENANT_ID, from_date: '2099-03-10', to_date: '2099-03-10', status: 'approved', leave_type_id: 'lt-1', session: 'full_day' },
+    }
+    const app = await buildApp(fx)
+    const res = await app.inject({ method: 'POST', url: `/attendance/leave/${APP_ID}/cancel`, headers: HEADERS, payload: {} })
+    expect(res.statusCode).toBe(200)
+    const body = JSON.parse(res.body)
+    expect(body.days_restored).toBe(1)
+  })
+
+  it('a non-approved application is rejected by the pre-RPC status check (unchanged pre-existing behavior)', async () => {
+    const fx: Fixture = {
+      lockedMonths: [],
+      leaveApplication: { employee_id: EMPLOYEE_ID, tenant_id: TENANT_ID, from_date: '2099-03-10', to_date: '2099-03-10', status: 'pending', leave_type_id: 'lt-1', session: 'full_day' },
+    }
+    const app = await buildApp(fx)
+    const res = await app.inject({ method: 'POST', url: `/attendance/leave/${APP_ID}/cancel`, headers: HEADERS, payload: {} })
+    expect(res.statusCode).toBe(409)
+    const body = JSON.parse(res.body)
+    expect(body.error).toBe('INVALID_STATE')
   })
 })

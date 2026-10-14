@@ -50,7 +50,16 @@ interface Fixture {
 
 function buildSupabase(fx: Fixture) {
   return {
-    rpc: vi.fn().mockResolvedValue({ data: null, error: null }),
+    rpc: vi.fn((fnName: string, params: any) => {
+      if (fnName === 'approve_comp_off_claim_atomic') {
+        const row = fx.coRequests[params.p_co_id]
+        if (!row || row.tenant_id !== TENANT_ID) return Promise.resolve({ data: null, error: { message: 'NOT_FOUND: Comp off request not found' } })
+        if (row.status !== 'pending') return Promise.resolve({ data: null, error: { message: `CONFLICT: Request is already ${row.status}` } })
+        row.status = 'approved'
+        return Promise.resolve({ data: { id: params.p_co_id, status: 'approved' }, error: null })
+      }
+      return Promise.resolve({ data: null, error: null })
+    }),
     from(table: string) {
       if (table === 'profiles') {
         const chain: any = {

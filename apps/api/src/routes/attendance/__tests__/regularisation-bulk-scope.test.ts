@@ -39,6 +39,7 @@ const CROSS_TENANT_EMP_ID = 'emp-other-tenant'
 
 const REG_DIRECT       = 'ec98fe8b-8623-494b-ab04-2e154a38d3b1'
 const REG_DIRECT_2     = 'a1a1a1a1-1111-1111-1111-111111111111'
+const REG_DIRECT_3     = 'c3c3c3c3-3333-3333-3333-333333333333'
 const REG_GRANDCHILD   = 'd6d1f12d-cc77-44b3-af0c-bccc24f4a098'
 const REG_CROSS_TENANT = 'b2b2b2b2-2222-2222-2222-222222222222'
 
@@ -61,6 +62,7 @@ function baseFixture(): Fixture {
     regs: {
       [REG_DIRECT]:       { employeeId: DIRECT_REPORT_ID,   tenantId: TENANT_ID },
       [REG_DIRECT_2]:     { employeeId: DIRECT_REPORT_2_ID, tenantId: TENANT_ID },
+      [REG_DIRECT_3]:     { employeeId: DIRECT_REPORT_ID,   tenantId: TENANT_ID },
       [REG_GRANDCHILD]:   { employeeId: GRANDCHILD_ID,      tenantId: TENANT_ID },
       [REG_CROSS_TENANT]: { employeeId: CROSS_TENANT_EMP_ID, tenantId: OTHER_TENANT_ID },
     },
@@ -171,6 +173,42 @@ describe('POST /attendance/regularisation/bulk-approve — ownership guard scope
     })
     expect(res.statusCode).toBe(200)
     expect(approveMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('TRANSACTIONAL ATOMICITY (distinct from prevalidation above): a runtime failure on one AUTHORIZED item does not abort the rest of the batch or silently drop it — each item\'s outcome is independently reported', async () => {
+    // All three ids pass the ownership guard (unlike the prevalidation tests
+    // above, where an UNAUTHORIZED id blocks the whole batch before any
+    // item is touched). Here every id IS authorized; the middle one's own
+    // approveRegularisation() call throws at runtime (e.g. a transient DB
+    // error), simulating a failure INSIDE an otherwise-valid batch. The
+    // guarantee under test is different from prevalidation: no partial
+    // corruption (item 1's success is not undone by item 2's failure) and
+    // no silent loss (item 3 still gets processed and reported, not
+    // abandoned because item 2 blew up) — not "all-or-nothing in one DB
+    // transaction", which this bulk endpoint has never claimed to be (its
+    // own response shape, {results, summary}, is explicitly a per-item
+    // report, and each item's own approveRegularisation() call is already
+    // independently atomic via approve_regularisation_atomic).
+    approveMock.mockImplementation(async (_supabase: unknown, opts: { regularisationId: string }) => {
+      if (opts.regularisationId === REG_DIRECT_2) throw new Error('simulated transient DB failure')
+      return { ok: true, value: { id: opts.regularisationId, status: 'approved', employee_id: DIRECT_REPORT_ID, date: '2026-01-05', requested_check_in: null, requested_check_out: null } }
+    })
+    const app = await buildApp(baseFixture())
+    const res = await app.inject({
+      method: 'POST', url: '/attendance/regularisation/bulk-approve', headers: HEADERS,
+      payload: { ids: [REG_DIRECT, REG_DIRECT_2, REG_DIRECT_3] },
+    })
+    expect(res.statusCode).toBe(200)   // the batch endpoint itself never fails outright
+    const body = JSON.parse(res.body)
+    expect(approveMock).toHaveBeenCalledTimes(3)   // all three were attempted — item 2's failure did not stop item 3
+    const byId = new Map<string, { id: string; ok: boolean; error?: string }>(
+      body.results.map((r: any) => [r.id, r]),
+    )
+    expect(byId.get(REG_DIRECT)!.ok).toBe(true)
+    expect(byId.get(REG_DIRECT_2)!.ok).toBe(false)
+    expect(byId.get(REG_DIRECT_2)!.error).toContain('simulated transient DB failure')
+    expect(byId.get(REG_DIRECT_3)!.ok).toBe(true)   // not abandoned because REG_DIRECT_2 failed
+    expect(body.summary).toEqual({ approved: 2, failed: 1, total: 3 })
   })
 
   it('REASSIGNMENT: once the grandchild\'s request\'s owner is promoted to a direct report, the batch gate allows it', async () => {

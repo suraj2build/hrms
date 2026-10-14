@@ -241,6 +241,8 @@ export interface OtRequestResult {
   ok:    boolean
   data?: { id: string; status: string; approved_minutes: number | null }
   error?: string
+  /** Set on a structured failure the caller should map to a specific HTTP status (e.g. 'PERIOD_LOCKED' -> 409). */
+  code?: string
 }
 
 /**
@@ -362,28 +364,32 @@ export async function approveOtRequest(
   const approved_minutes = minutesOverride ?? req.raw_ot_minutes
   const now = new Date().toISOString()
 
-  // .eq('status', 'PENDING') + row-count check (fresh audit finding): without
-  // this, two concurrent approve calls for the same request could both pass
-  // the precheck above and both write — lower-impact than a balance-affecting
-  // approval since this is a plain overwrite (last writer wins, no double
-  // credit), but the same missing-guard pattern already fixed elsewhere in
-  // this session's leave/encashment approval races.
-  const { data, error } = await supabase
-    .from('overtime_requests')
-    .update({
-      status:           'APPROVED',
-      approved_minutes,
-      approved_by:      approverId,
-      approved_at:      now,
-    })
-    .eq('id', requestId)
-    .eq('tenant_id', tenantId)
-    .eq('status', 'PENDING')
-    .select('id, status, approved_minutes')
-    .maybeSingle()
+  // SYSTEM_AUDIT_2026-10-14 (migration 461): the claim now goes through an
+  // RPC that re-checks the period lock inside the SAME transaction as the
+  // status UPDATE (FOR UPDATE + a fresh period-lock read + the UPDATE, one
+  // transaction) — overtime.ts's assertOtPeriodOpen's isMonthLocked call is
+  // only a fast-fail pre-check now, not the sole enforcement; a separate,
+  // earlier JS-side check cannot close the TOCTOU race against a
+  // concurrently-created lock (see migration 461's header). This also keeps
+  // the pre-existing .eq('status','PENDING') double-approval guard, now
+  // enforced under the RPC's own FOR UPDATE row lock rather than a bare
+  // WHERE-folded UPDATE.
+  const { data: rpcData, error } = await supabase.rpc('approve_overtime_claim_atomic', {
+    p_tenant_id:        tenantId,
+    p_ot_id:            requestId,
+    p_approver_id:      approverId,
+    p_approved_at:      now,
+    p_approved_minutes: minutesOverride ?? null,
+  })
 
-  if (error) return { ok: false, error: 'Failed to approve OT request' }
-  if (!data) return { ok: false, error: 'This request was already actioned by another request' }
+  if (error) {
+    const msg = error.message ?? ''
+    if (msg.includes('PERIOD_LOCKED:')) return { ok: false, error: msg.replace(/^.*PERIOD_LOCKED:\s*/, ''), code: 'PERIOD_LOCKED' }
+    if (msg.includes('CONFLICT:'))      return { ok: false, error: 'This request was already actioned by another request' }
+    if (msg.includes('NOT_FOUND:'))     return { ok: false, error: 'OT request not found' }
+    return { ok: false, error: 'Failed to approve OT request' }
+  }
+  const data = { id: requestId, status: 'APPROVED', approved_minutes: (rpcData as any)?.approved_minutes ?? approved_minutes }
 
   // Sync to attendance_daily
   const { error: syncErr } = await supabase
