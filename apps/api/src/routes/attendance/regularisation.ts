@@ -20,7 +20,7 @@ import { eventBus } from '../../lib/event-bus.js'
 import { writeLedgerEntry, dateToMonth } from '../../lib/ledger-writer.js'
 import { orchestrateWorkforceEvent } from '../../lib/workforce-orchestrator.js'
 import {
-  isHrAdmin, resolveCallerEmployeeId, getDirectReportIds,
+  isHrAdmin, resolveCallerEmployeeId, getImmediateReportIds,
 } from '../../lib/manager-scope.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
@@ -328,10 +328,20 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
     }
 
     // Direct-report ownership guard — HR admins bypass; managers are scoped.
+    // SYSTEM_AUDIT_2026-10-14: this comment has always said "direct report"
+    // (one level), but the check below used getDirectReportIds — the full
+    // subordinate tree — so it let a manager-of-managers past this gate for
+    // a grandchild's request. approveRegularisation() itself still correctly
+    // refuses it downstream (validateApprover is immediate-manager-only), so
+    // this was never a security hole, but it produced a confusing partial
+    // result: the pre-check says "authorized", the per-item call then fails
+    // with an unrelated-looking FORBIDDEN instead of being rejected cleanly
+    // here. Use the one-level helper so this gate matches what the batch can
+    // actually do.
     if (!isHrAdmin(req.userRole)) {
       const myEmpId = await resolveCallerEmployeeId(fastify.supabase, req.userId, req.tenantId)
       if (!myEmpId) return reply.code(403).send({ error: 'FORBIDDEN', message: 'No employee record linked to your profile' })
-      const reportIds = await getDirectReportIds(fastify.supabase, req.tenantId, myEmpId)
+      const reportIds = await getImmediateReportIds(fastify.supabase, req.tenantId, myEmpId)
       const reportSet = new Set(reportIds)
 
       const { data: regs } = await fastify.supabase
@@ -449,10 +459,13 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
     }
 
     // Direct-report ownership guard — HR admins bypass; managers are scoped.
+    // SYSTEM_AUDIT_2026-10-14: same fix as bulk-approve above — use the
+    // one-level helper so this gate matches what rejectRegularisation()'s
+    // own validateApprover check (immediate-manager-only) will actually allow.
     if (!isHrAdmin(req.userRole)) {
       const myEmpId = await resolveCallerEmployeeId(fastify.supabase, req.userId, req.tenantId)
       if (!myEmpId) return reply.code(403).send({ error: 'FORBIDDEN', message: 'No employee record linked to your profile' })
-      const reportIds = await getDirectReportIds(fastify.supabase, req.tenantId, myEmpId)
+      const reportIds = await getImmediateReportIds(fastify.supabase, req.tenantId, myEmpId)
       const reportSet = new Set(reportIds)
 
       const { data: regs } = await fastify.supabase

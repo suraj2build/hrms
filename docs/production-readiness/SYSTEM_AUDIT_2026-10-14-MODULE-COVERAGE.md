@@ -246,6 +246,25 @@ checkpoint so completed work is never repeated. Batch log:
   suite re-run (80 tests across 8 files, 0 regressions) + `tsc --noEmit`
   clean on `apps/api`.
 
+  **Same checkpoint, one more file**: read `routes/attendance/
+  regularisation.ts` in full (all 9 routes). Found the same defect class a
+  third time: `bulk-approve`/`bulk-reject`'s ownership guard — whose own
+  comment says "every request in the batch must belong to a direct
+  report" (P6.5) — used `getDirectReportIds` (the full tree), so a batch
+  containing a grandchild's request passed the guard, then failed later
+  per-item with an unrelated-looking FORBIDDEN from `approveRegularisation`/
+  `rejectRegularisation`'s own `validateApprover` check. Not a security
+  hole (the per-item call still correctly refused it) but a real
+  correctness bug relative to the guard's own stated intent, and a
+  confusing partial-batch-failure UX. Fixed both call sites to
+  `getImmediateReportIds`; 3 new route tests (`regularisation-bulk-scope.
+  test.ts`) proving a grandchild-only batch now 403s cleanly at the gate
+  (never reaching the mocked approve/reject call) and a direct-report-only
+  batch still succeeds. `GET /attendance/regularisation/team` was already
+  correctly immediate-only (`.eq('manager_id', ...)` directly, no helper
+  needed) — no fix there. Full suite re-run: 561/561 passed, 67/67 files,
+  0 regressions; `tsc --noEmit` clean.
+
   **Verification honestly scoped**: all of the above is source review +
   mocked/route-level tests. No real-Postgres or browser verification was
   run this batch for Leave/Approvals — the pending-count/Approved-tab/
