@@ -9,6 +9,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { serverError, notFound, ErrorCode } from '../../lib/api-errors.js'
+import { isValidFeedbackScreenshotPath } from '../../lib/feedback-screenshot-path.js'
 
 const patchSchema = z.object({
   status:     z.enum(['new', 'triaged', 'resolved', 'dismissed']).optional(),
@@ -72,8 +73,7 @@ export default async function ownerErrorReportRoutes(fastify: FastifyInstance) {
     // any such stray cross-tenant path would actually get read and leaked,
     // so it is the right place to refuse it independently of whether the
     // write path happened to validate it, now or in the past.
-    const expectedPrefix = `${report.tenant_id}/feedback/`
-    if (!report.screenshot_path.startsWith(expectedPrefix) || report.screenshot_path.includes('..')) {
+    if (!isValidFeedbackScreenshotPath(report.screenshot_path, report.tenant_id)) {
       fastify.log.warn(
         { error_report_id: id, tenant_id: report.tenant_id, screenshot_path: report.screenshot_path },
         'owner error-report screenshot: stored path is outside the reporting tenant\'s feedback folder — refusing to sign',

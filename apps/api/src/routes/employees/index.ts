@@ -499,7 +499,7 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
     // Validate: employee exists and belongs to this tenant before touching it
     const { data: existing, error: findError } = await fastify.supabase
       .from('employees')
-      .select('id')
+      .select('id, status')
       .eq('id', id)
       .eq('tenant_id', request.tenantId)
       .single()
@@ -614,6 +614,21 @@ export default async function employeeRoutes(fastify: FastifyInstance) {
       onBehalfOf:  id,   // admin updating the employee's own record
       newData:     safeUpdates as Record<string, unknown>,
     })
+
+    // Fresh audit finding: DELETE /employees/:id (soft-delete) revokes auth
+    // access on separation, but this generic endpoint can ALSO transition
+    // status to 'separated' (EmployeeProfile.tsx's Overview tab edits status
+    // via this same PUT, not only via the dedicated Separation Workflow) and
+    // previously never revoked anything — an employee separated through the
+    // Overview tab kept a live login indefinitely. Only fire on an actual
+    // transition INTO 'separated', not a no-op resubmission of an already-
+    // separated record.
+    if (safeUpdates.status === 'separated' && existing.status !== 'separated') {
+      const revoked = await revokeEmployeeAuth(fastify.supabase, id, request.tenantId, fastify.log)
+      if (!revoked) {
+        fastify.log.error({ employeeId: id, tenantId: request.tenantId }, 'employees/:id PUT: auth revocation did not fully succeed after status->separated — employee may retain live access')
+      }
+    }
 
     return reply.send(data)
   })

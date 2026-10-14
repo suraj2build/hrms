@@ -28,33 +28,72 @@ import Fastify from 'fastify'
 import setupRoute from '../setup.js'
 
 function buildApp(opts: {
-  userCreatedAt: string
+  userCreatedAt?: string | null
   userMetadataFullName?: string
+  userNotFound?: boolean
   existingProfile?: { id: string; tenant_id: string; role: string } | null
   existingTenant?: Record<string, unknown> | null
+  // Simulates a second concurrent /setup call winning the profiles-insert
+  // race (PK conflict, Postgres error code 23505) against this call.
+  profileInsertConflict?: { winnerProfile: { id: string; tenant_id: string; role: string }; winnerTenant: Record<string, unknown> }
 }) {
   const app = Fastify()
   const profilesQueried: string[] = []
+  const tenantsDeleted: string[] = []
+  let profileReadCount = 0
   const supabase = {
     auth: {
       admin: {
-        getUserById: vi.fn().mockResolvedValue({
-          data: { user: { id: 'user-1', created_at: opts.userCreatedAt, user_metadata: { full_name: opts.userMetadataFullName } } },
-          error: null,
-        }),
+        getUserById: vi.fn().mockResolvedValue(
+          opts.userNotFound
+            ? { data: { user: null }, error: null }
+            : { data: { user: { id: 'user-1', created_at: opts.userCreatedAt, user_metadata: { full_name: opts.userMetadataFullName } } }, error: null },
+        ),
       },
     },
     from(table: string) {
       if (table === 'profiles') {
         return {
-          select: () => ({ eq: (_col: string, val: string) => ({ maybeSingle: () => { profilesQueried.push(val); return Promise.resolve({ data: opts.existingProfile ?? null, error: null }) } }) }),
-          insert: (row: any) => ({ select: () => ({ single: () => Promise.resolve({ data: { ...row, id: row.id }, error: null }) }) }),
+          select: () => ({
+            eq: (_col: string, val: string) => ({
+              maybeSingle: () => {
+                profilesQueried.push(val)
+                profileReadCount += 1
+                // First read (pre-insert idempotency check) sees opts.existingProfile.
+                // Second read (post-conflict re-fetch) sees the race's winner, if any.
+                const data = profileReadCount === 1
+                  ? (opts.existingProfile ?? null)
+                  : (opts.profileInsertConflict?.winnerProfile ?? opts.existingProfile ?? null)
+                return Promise.resolve({ data, error: null })
+              },
+            }),
+          }),
+          insert: (row: any) => ({
+            select: () => ({
+              single: () => {
+                if (opts.profileInsertConflict) {
+                  return Promise.resolve({ data: null, error: { code: '23505', message: 'duplicate key value violates unique constraint' } })
+                }
+                return Promise.resolve({ data: { ...row, id: row.id }, error: null })
+              },
+            }),
+          }),
         }
       }
       if (table === 'tenants') {
         return {
-          select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: opts.existingTenant ?? null, error: null }) }) }),
+          select: () => ({
+            eq: (_col: string, val: string) => ({
+              maybeSingle: () => {
+                const data = opts.profileInsertConflict && val === opts.profileInsertConflict.winnerTenant.id
+                  ? opts.profileInsertConflict.winnerTenant
+                  : (opts.existingTenant ?? null)
+                return Promise.resolve({ data, error: null })
+              },
+            }),
+          }),
           insert: () => ({ select: () => ({ single: () => Promise.resolve({ data: { id: 'tenant-new' }, error: null }) }) }),
+          delete: () => ({ eq: (_col: string, val: string) => { tenantsDeleted.push(val); return Promise.resolve({ data: null, error: null }) } }),
         }
       }
       throw new Error(`unexpected table ${table}`)
@@ -62,7 +101,7 @@ function buildApp(opts: {
   }
   app.decorate('supabase', supabase as any)
   app.register(setupRoute)
-  return { app, profilesQueried }
+  return { app, profilesQueried, tenantsDeleted }
 }
 
 describe('POST /setup — ownership guard', () => {
@@ -155,5 +194,70 @@ describe('POST /setup — ownership guard', () => {
 
     expect(res.statusCode).toBe(403)
     expect(res.json().error).toBe('SETUP_VERIFICATION_FAILED')
+  })
+
+  it('a legitimate interrupted retry — WITHIN the fresh window, profile already created by the first call the client never saw a response for — succeeds with no metadata needed', async () => {
+    const { app } = buildApp({
+      userCreatedAt: new Date(Date.now() - 2 * 60 * 1000).toISOString(), // 2 minutes ago — fresh
+      userMetadataFullName: undefined, // freshness alone is the proof here
+      existingProfile: { id: 'user-1', tenant_id: 'tenant-1', role: 'super_admin' },
+      existingTenant: { id: 'tenant-1', name: 'Acme', slug: 'acme-1234' },
+    })
+
+    const res = await app.inject({
+      method: 'POST', url: '/setup',
+      payload: { user_id: '11111111-1111-1111-1111-111111111111', full_name: 'Someone', company_name: 'Whatever' },
+    })
+
+    expect(res.statusCode).toBe(200)
+    expect(res.json().profile).toMatchObject({ id: 'user-1', tenant_id: 'tenant-1' })
+  })
+
+  it('USER_NOT_FOUND: no Supabase auth user for this id — refused before any ownership check or data read', async () => {
+    const { app, profilesQueried } = buildApp({ userNotFound: true })
+
+    const res = await app.inject({
+      method: 'POST', url: '/setup',
+      payload: { user_id: '11111111-1111-1111-1111-111111111111', full_name: 'Someone', company_name: 'Whatever' },
+    })
+
+    expect(res.statusCode).toBe(400)
+    expect(res.json().error).toBe('USER_NOT_FOUND')
+    expect(profilesQueried).toHaveLength(0)
+  })
+
+  it('VALIDATION_ERROR: malformed body (bad UUID) is rejected before the Supabase auth lookup even runs', async () => {
+    const { app } = buildApp({ userCreatedAt: new Date().toISOString() })
+
+    const res = await app.inject({
+      method: 'POST', url: '/setup',
+      payload: { user_id: 'not-a-uuid', full_name: 'Someone', company_name: 'Whatever' },
+    })
+
+    expect(res.statusCode).toBe(400)
+    expect(res.json().error).toBe('VALIDATION_ERROR')
+  })
+
+  it('CONCURRENCY: two fresh CREATE calls race on the same user_id — the loser rolls back its own tenant row and returns the winner\'s profile/tenant instead of erroring', async () => {
+    const { app, tenantsDeleted } = buildApp({
+      userCreatedAt: new Date().toISOString(), // fresh — both calls pass the ownership guard
+      existingProfile: null, // pre-insert idempotency check sees nothing yet — genuinely racing, not a stale retry
+      profileInsertConflict: {
+        winnerProfile: { id: 'user-1', tenant_id: 'tenant-winner', role: 'super_admin' },
+        winnerTenant:  { id: 'tenant-winner', name: 'Acme', slug: 'acme-5678' },
+      },
+    })
+
+    const res = await app.inject({
+      method: 'POST', url: '/setup',
+      payload: { user_id: '11111111-1111-1111-1111-111111111111', full_name: 'Someone', company_name: 'Acme' },
+    })
+
+    expect(res.statusCode).toBe(200)
+    expect(res.json().profile).toMatchObject({ id: 'user-1', tenant_id: 'tenant-winner' })
+    expect(res.json().tenant).toMatchObject({ id: 'tenant-winner' })
+    // This call's own just-inserted tenant ("tenant-new") must be cleaned up —
+    // the race's loser must not leave an orphaned tenant row with no profile.
+    expect(tenantsDeleted).toContain('tenant-new')
   })
 })

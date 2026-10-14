@@ -78,6 +78,50 @@ describe('GET /owner/error-reports/:id/screenshot — independent path validatio
     expect(createSignedUrlSpy).not.toHaveBeenCalled()
   })
 
+  it('REFUSES a backslash-separated traversal attempt stored in an older record', async () => {
+    const { app, createSignedUrlSpy } = buildApp({ screenshot_path: 'tenant-abc/feedback/..\\..\\secret.png', tenant_id: 'tenant-abc' })
+    await app.register(ownerErrorReportRoutes)
+    await app.ready()
+
+    const res = await app.inject({ method: 'GET', url: '/owner/error-reports/report-1/screenshot' })
+
+    expect(res.statusCode).toBe(422)
+    expect(createSignedUrlSpy).not.toHaveBeenCalled()
+  })
+
+  it('REFUSES a percent-encoded traversal sequence stored in an older record', async () => {
+    const { app, createSignedUrlSpy } = buildApp({ screenshot_path: 'tenant-abc/feedback/%2e%2e%2fsecret.png', tenant_id: 'tenant-abc' })
+    await app.register(ownerErrorReportRoutes)
+    await app.ready()
+
+    const res = await app.inject({ method: 'GET', url: '/owner/error-reports/report-1/screenshot' })
+
+    expect(res.statusCode).toBe(422)
+    expect(createSignedUrlSpy).not.toHaveBeenCalled()
+  })
+
+  it('REFUSES an empty filename (bare prefix, nothing after it)', async () => {
+    const { app, createSignedUrlSpy } = buildApp({ screenshot_path: 'tenant-abc/feedback/', tenant_id: 'tenant-abc' })
+    await app.register(ownerErrorReportRoutes)
+    await app.ready()
+
+    const res = await app.inject({ method: 'GET', url: '/owner/error-reports/report-1/screenshot' })
+
+    expect(res.statusCode).toBe(422)
+    expect(createSignedUrlSpy).not.toHaveBeenCalled()
+  })
+
+  it('REFUSES an unrelated storage object nested under a sub-directory, not the flat upload shape', async () => {
+    const { app, createSignedUrlSpy } = buildApp({ screenshot_path: 'tenant-abc/feedback/sub/dir/secret.png', tenant_id: 'tenant-abc' })
+    await app.register(ownerErrorReportRoutes)
+    await app.ready()
+
+    const res = await app.inject({ method: 'GET', url: '/owner/error-reports/report-1/screenshot' })
+
+    expect(res.statusCode).toBe(422)
+    expect(createSignedUrlSpy).not.toHaveBeenCalled()
+  })
+
   it('a report with no screenshot_path returns 404, not a signing attempt', async () => {
     const { app, createSignedUrlSpy } = buildApp({ screenshot_path: null, tenant_id: 'tenant-abc' })
     await app.register(ownerErrorReportRoutes)

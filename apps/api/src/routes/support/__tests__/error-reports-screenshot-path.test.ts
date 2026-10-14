@@ -99,6 +99,66 @@ describe('POST /support/error-reports — screenshot_path validation', () => {
     expect(insertSpy).not.toHaveBeenCalled()
   })
 
+  it('rejects an empty filename (bare prefix, nothing after it)', async () => {
+    const { app, insertSpy } = buildApp()
+    await app.register(supportRoutes)
+    await app.ready()
+
+    const res = await app.inject({
+      method: 'POST', url: '/support/error-reports',
+      payload: { message: 'it broke', severity: 'feedback', screenshot_path: `${TENANT_ID}/feedback/` },
+    })
+
+    expect(res.statusCode).toBe(400)
+    expect(res.json().error).toBe('INVALID_SCREENSHOT_PATH')
+    expect(insertSpy).not.toHaveBeenCalled()
+  })
+
+  it('rejects a backslash-separated traversal attempt', async () => {
+    const { app, insertSpy } = buildApp()
+    await app.register(supportRoutes)
+    await app.ready()
+
+    const res = await app.inject({
+      method: 'POST', url: '/support/error-reports',
+      payload: { message: 'it broke', severity: 'feedback', screenshot_path: `${TENANT_ID}/feedback/..\\..\\secret.png` },
+    })
+
+    expect(res.statusCode).toBe(400)
+    expect(res.json().error).toBe('INVALID_SCREENSHOT_PATH')
+    expect(insertSpy).not.toHaveBeenCalled()
+  })
+
+  it('rejects a percent-encoded traversal sequence', async () => {
+    const { app, insertSpy } = buildApp()
+    await app.register(supportRoutes)
+    await app.ready()
+
+    const res = await app.inject({
+      method: 'POST', url: '/support/error-reports',
+      payload: { message: 'it broke', severity: 'feedback', screenshot_path: `${TENANT_ID}/feedback/%2e%2e%2fsecret.png` },
+    })
+
+    expect(res.statusCode).toBe(400)
+    expect(res.json().error).toBe('INVALID_SCREENSHOT_PATH')
+    expect(insertSpy).not.toHaveBeenCalled()
+  })
+
+  it('rejects an unrelated storage object outside the flat feedback-upload shape', async () => {
+    const { app, insertSpy } = buildApp()
+    await app.register(supportRoutes)
+    await app.ready()
+
+    const res = await app.inject({
+      method: 'POST', url: '/support/error-reports',
+      payload: { message: 'it broke', severity: 'feedback', screenshot_path: `${TENANT_ID}/feedback/sub/dir/secret.png` },
+    })
+
+    expect(res.statusCode).toBe(400)
+    expect(res.json().error).toBe('INVALID_SCREENSHOT_PATH')
+    expect(insertSpy).not.toHaveBeenCalled()
+  })
+
   it('a report with no screenshot at all is unaffected', async () => {
     const { app, insertSpy } = buildApp()
     await app.register(supportRoutes)
