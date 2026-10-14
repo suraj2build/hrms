@@ -27,7 +27,7 @@ import {
   rejectOtRequest,
 }                               from '../../lib/ot-engine.js'
 import {
-  isHrAdmin, resolveCallerEmployeeId, getDirectReportIds, isDirectReport,
+  isHrAdmin, resolveCallerEmployeeId, getImmediateReportIds, isDirectReport,
 }                               from '../../lib/manager-scope.js'
 import { isMonthLocked, monthOf } from '../../lib/period-lock.js'
 import { isSelfApproval } from '../../lib/approval-guards.js'
@@ -412,10 +412,18 @@ export default async function overtimeRoutes(fastify: FastifyInstance) {
       // HR admin sees everything; optional employee filter
       if (parsed.data.employee_id) q = q.eq('employee_id', parsed.data.employee_id)
     } else if (req.userRole === 'manager') {
-      // P6.0b — managers are scoped to their direct reports
+      // SYSTEM_AUDIT_2026-10-14: this list is the live data source for the
+      // manager approval queue (ManagerTeamOvertimeRequests.tsx, embedded in
+      // ApprovalInbox's Overtime tab) — approve/reject on any item it shows
+      // goes through authorizeOtTarget below, which only authorizes the
+      // employee's IMMEDIATE manager (isDirectReport, one level). Scoping
+      // this list to the full subordinate tree (getDirectReportIds) let a
+      // manager-of-managers see a grandchild's pending request with a
+      // clickable Approve button that always 403'd. Scope to immediate
+      // reports only, matching the action's real authority.
       const myEmpId = await resolveCallerEmployeeId(fastify.supabase, req.userId, req.tenantId)
       if (!myEmpId) return reply.send({ data: [] })
-      const reportIds = await getDirectReportIds(fastify.supabase, req.tenantId, myEmpId)
+      const reportIds = await getImmediateReportIds(fastify.supabase, req.tenantId, myEmpId)
       if (!reportIds.length) return reply.send({ data: [] })
       if (parsed.data.employee_id && !reportIds.includes(parsed.data.employee_id)) {
         return reply.send({ data: [] })

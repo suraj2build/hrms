@@ -192,11 +192,81 @@ checkpoint so completed work is never repeated. Batch log:
      rather than falling through to an unintended allow. 16 tests total in
      the file now (up from 6), covering both the attendance/overtime
      policy and the now-separate, narrower payroll-summary policy.
+- **Checkpoint 6** (this commit): started item 2's batch — Attendance,
+  Leave, comp-off and Approvals — per the user's explicit steering
+  ("Continue the Attendance/Leave/Approvals batch now... Keep progressing
+  through the existing audit plan without stopping at checkpoints").
+  **Fully read**: `routes/attendance/leave-requests.ts` (733 lines — every
+  handler), `lib/leave-request-service.ts` (full — create/get/list/cancel),
+  `lib/approval-service.ts` (full — leave + regularisation approve/reject/
+  reverse, the multi-level gate, the PEND-94 policy-mismatch/backdated/
+  self-approved computation, `getPendingApprovalsForManager`). **Partially
+  read, scope-check only** (the manager-visibility helper each file's
+  manager branch calls, not every handler in the file): `routes/attendance/
+  overtime.ts`, `routes/attendance/comp-off.ts`, plus the `GET /leave-
+  requests` and `GET /approvals/pending-count` manager-scope branches
+  cross-checked against them. **Not opened this batch**: every other file
+  in the 64-file `routes/attendance` directory (shifts, rosters, holidays,
+  wo-credit, punch, corrections, retroactive, period-locks, muster, and
+  the ~45 others) and both files in `routes/approvals`
+  (`governance-evolution.ts`, `workflows.ts`) — carried forward as
+  genuinely unexamined, not implied by this batch's "Leave/Approvals"
+  label.
+
+  **Found and fixed a real, confirmed defect — the same class checkpoint 5
+  found in `context-data.ts`'s `payroll-summary`, now in the approval
+  queues**: four manager-facing "pending work" surfaces scoped themselves
+  to the caller's FULL subordinate tree (`getDirectReportIds`, any depth)
+  while the matching approve/reject/cancel-approval action on the exact
+  same item authorizes only the employee's IMMEDIATE manager
+  (`validateApprover` for leave/regularisation, `authorizeOtTarget` /
+  `authorizeCompOffTarget` for overtime/comp-off — all one-level
+  `isDirectReport` checks). Traced end-to-end into the web app
+  (`ApprovalInbox.tsx` embeds `ManagerTeamOvertimeRequests.tsx` and
+  `ManagerTeamCompOff.tsx` directly as its Overtime/Comp-off tabs) to
+  confirm this is not theoretical: a manager-of-managers would see a
+  grandchild report's pending item with a clickable Approve button in
+  their own Approvals inbox, and clicking it would always 403. Fixed four
+  call sites — `GET /overtime/requests` (manager branch),
+  `GET /attendance/comp-off` (manager branch), `GET /approvals/pending-
+  count` (the sidebar/header badge, all four tables), and `GET /leave-
+  requests?status=APPROVED` with no `employee_id` (the Approved tab behind
+  cancel-approval) — by adding a new shared helper, `getImmediateReportIds`
+  (`lib/manager-scope.ts`), the one-level counterpart to the existing
+  `getDirectReportIds`/`isDirectReport`, and pointing all four at it instead
+  of the deep-tree helper. Read-only/historical team visibility (attendance,
+  overtime list-by-employee-filter in the admin OT screen, `GET
+  /overtime/requests/:id` and the equivalent leave single-record read) is
+  unaffected by design — that deliberately stays on the full tree, per the
+  same "broad view, narrow act" distinction checkpoint 5 established for
+  compensation. 2 new route-level tests (`leave-requests-approvals-scope.
+  test.ts`, three-level hierarchy, proves pending-count and the Approved
+  tab both exclude a grandchild) + 3 new unit tests for the new helper
+  (`manager-scope-immediate-reports.test.ts`) + full existing attendance
+  suite re-run (80 tests across 8 files, 0 regressions) + `tsc --noEmit`
+  clean on `apps/api`.
+
+  **Verification honestly scoped**: all of the above is source review +
+  mocked/route-level tests. No real-Postgres or browser verification was
+  run this batch for Leave/Approvals — the pending-count/Approved-tab/
+  overtime/comp-off fix is a pure authorization-scope correction provable
+  from the route logic and its callers, not a balance/financial defect, so
+  mocked tests following this codebase's established CAS/concurrency test
+  patterns are the right tier; it does not meet the bar this register uses
+  elsewhere for "Tested" (which reserves that word for items with real-
+  Postgres or browser evidence). Labelled **Partially tested** below for
+  that reason, not **Tested**.
 - **Next planned batches** (not yet started — listed so a future session
-  picks up here, not from zero): item 2 of the execution order — Attendance,
-  shifts, rosters, holidays, Leave, comp-off and Approvals (`routes/
-  attendance`, `routes/employees` leave sub-routes if any remain,
-  `ess` leave endpoints, `routes/approvals`). Then item 3 — Compensation,
+  picks up here, not from zero): continue item 2's batch — the remaining
+  ~60 unopened `routes/attendance` files (tier 1 next: `leave.ts`,
+  `leave-employee.ts`, `leave-entitlement.ts`, `leave-accrual.ts`,
+  `leave-accrual-lifecycle.ts`, `leave-reconciliation.ts`,
+  `leave-collision.ts`, `leave-duration.ts`, `leave-policy-resolve.ts`,
+  `regularisation.ts`, `regularisation-policy.ts`; tier 2: punch/
+  corrections/overtime's non-scope sections/recompute/retroactive/
+  period-locks; tier 3: rosters/shifts/holidays/wo-credit) and
+  `routes/approvals/governance-evolution.ts` + `workflows.ts`. Then item 3 —
+  Compensation,
   Payroll, statutory calculations, reimbursements, loans/advances, F&F and
   accounting (much of this has prior-round coverage per CLAUDE.md, but
   has not been re-verified against this round's full item-2 checklist).
@@ -235,9 +305,9 @@ started.
 | **Owner admin** (`routes/owner`, `pages/owner`) | Partially tested | Screenshot-signing independent re-validation fixed this round (read side, incl. pre-existing invalid records); 5 tests. Owner route nav links spot-checked (nested `/owner/*` routes resolve correctly). Platform-admin authorization on other `/owner/*` endpoints (activate/suspend/cancel/hard-delete) not re-audited this round — last verified in the tenant-licensing work recorded in CLAUDE.md. |
 | **Attendance** (`routes/attendance`, `pages/attendance`) | Partially tested | Nav links fixed: `EmployeeShifts.tsx` dead `<a href="/shift-master">` → `<Link to="/admin/shift-master">`; `MusterRoll.tsx`'s `/admin/payroll/readiness` → `/admin/payroll-readiness`. **Admin attendance-processing gap closed for real, on the actually-reachable pages this time** (checkpoint 3; checkpoints 1–2 fixed the correct behavior on `AdminDashboard.tsx`, which turned out to be 100% dead code — see the checkpoint 3 writeup above). The backend (`apps/api/src/routes/attendance/process.ts`) already correctly authorizes `hr_admin`/`super_admin` and needed no fix. Fixed the real live call sites: `pages/admin/ControlCenter.tsx` (the "Process now" banner button and the "Process Attendance" quick action, both previously → `/admin/attendance/center`, confirmed to have no trigger button) and `components/operational/CommandPalette.tsx`'s global "Process Attendance" command (same dead-end target). All three now point at `/manager/team/attendance`, where `Attendance.tsx` unconditionally renders the real trigger button for `isAdmin` roles. **Proven end-to-end in a real Chromium browser** (`scripts/db/browser-test-attendance-processing.mjs`): real login → real dashboard click → real visible button → real `POST /attendance/process` → 200 → "Processing Complete" banner visible on screen, for both `super_admin` and `hr_admin`; `employee` never sees the control AND is refused 403 when a direct API call is made using that role's own real captured session token. API-level correctness (processing idempotency, anomaly reconciliation) last verified in the Round 2026-10-11 de-emphasis work and the earlier UAT scenario matrix (W/WO/H/X/P/L-series), not re-run this round. |
 | **Payroll** (`routes/payroll`, `pages/payroll`) | Partially tested | Nav links fixed: 3 call sites (`WorkflowRecommendations.tsx`, `OperationalInboxV2.tsx`, `PayrollContextPanel.tsx`) hardcoded `/admin/payroll/blockers` with no `:runId` — none of their data sources carry a `run_id` (`PayrollContextPanel`'s blockers are month-aggregated, not run-scoped), so each now falls back to the runs list `/admin/payroll`, matching the pattern `PayrollOperationsCenter.tsx` and `navigation.config.ts` already use correctly. `AdminDashboard.tsx`'s "Compliance" quick action pointed at the real `/admin/payroll/statutory-dashboard` ("Compliance Cockpit") instead of the non-existent `/admin/compliance`. Approval/finalization/reversal correctness, F&F, leave encashment — extensively tested in prior rounds (G12, F&F concurrency, accounting-ledger fixes); not re-run this round. |
-| **Leave** (`routes/employees` leave endpoints, `pages/leave`, `pages/ess` leave) | Not examined this round | Raise-leave-on-behalf, cancellation, encashment all previously tested (G12, prior rounds). Settings.tsx's "Leave Types & Balances" and "Leave Accrual Jobs" nav links fixed this round; `RightRail.tsx`'s leave-types link fixed. No new API-level leave audit performed this round. |
+| **Leave** (`routes/attendance/leave-requests.ts`, `lib/leave-request-service.ts`, `lib/approval-service.ts`; `pages/leave`, `pages/ess` leave) | Partially tested | **Checkpoint 6**: `leave-requests.ts` + both service files read in full. Found + fixed a real authorization-scope defect: the Approved-tab list behind the cancel-approval action (`GET /leave-requests?status=APPROVED`, manager, no `employee_id`) and the `/approvals/pending-count` badge both scoped via the full subordinate tree while the actual cancel/approve/reject action is immediate-manager-only — narrowed both to the new `getImmediateReportIds` helper; 2 new route tests + 3 new helper unit tests. Everything else in `leave-requests.ts`/the two service files (overlap-check fail-closed, period-lock recheck on approve/reverse, per-calendar-year balance bucketing, the elapsed-range reversal guard, the multi-level approval gate, self-approval guards, idempotency-key handling) was read and found already correct — carries forward from prior rounds' PEND-94/PEND-103/PEND-105/ISSUE-144/etc. fixes, not newly defective, but also not independently re-verified against real Postgres this round. The other ~15 `routes/attendance/leave-*.ts` files (accrual, entitlement, duration, reconciliation, collision, policy-resolve, jobs, scheduler-status) are **not yet opened**. Raise-leave-on-behalf, standalone encashment — previously tested (G12, prior rounds), not re-run this round. |
 | **Employees / People Directory** (`routes/employees`, `pages/employees`) | **Source review complete — see verification breakdown below, not "fully tested"** | **Checkpoints 2+4+5: all ~30 route files read against the item-2 checklist** (tenant scoping, object/team-level authorization, FK cross-tenant validation, CAS/optimistic concurrency, storage-path privacy, approval/reversal correctness). This status means the *source* has been read end-to-end — it does NOT mean every file has browser or real-Postgres evidence; see the explicit per-type breakdown immediately below the table-closing note. Two real defects found and fixed: (1) `PUT /employees/:id` could set `status: 'separated'` without revoking auth access — checkpoint 2 (3 tests). (2) `context-data.ts`'s attendance/overtime/**payroll-summary** endpoints were gated on role only (`MANAGER_ROLES`), not on team membership — checkpoint 4 fixed attendance/overtime using `getDirectReportIds` (full subordinate tree, matching `team-assets.ts`/`team-helpdesk.ts`/`team-regularisation-context.ts`'s established operational-visibility policy); checkpoint 5 then corrected `payroll-summary` specifically, after the user flagged that team membership alone doesn't establish the right *compensation* policy — `manager-compensation.ts` (Program 5 · P5.3, the one other place in this codebase defining manager-visible compensation) deliberately scopes to **immediate direct reports only**, narrower than the subordinate-tree check. Reusing the broader check for payroll-summary would have let a manager-of-managers see a grandchild report's CTC — now fixed to mirror the direct-only policy exactly. 16 tests total, including the direct-vs-grandchild distinction, reassignment (both the former manager losing access and the new manager gaining it, read live off `employees.manager_id`, not cached), cross-tenant requests, and a manager role with no linked employee record. Every other file in the module (`index.ts`, `user-account.ts`, `personal-info.ts`, `identity.ts`, `bank-statutory.ts`, `contracts.ts`, `employee-documents.ts`, `addresses.ts`, `education.ts`, `emergency-contacts.ts`, `family.ts`, `exit-interview.ts`, `important-dates.ts`, `nominations.ts`, `passport-visa.ts`, `previous-employment.ts`, `shift-history.ts`, `full-create.ts`, `full-profile.ts`, `job-history.ts`, `manager.ts`, `access-cards.ts`, `onboarding-status.ts`, `options.ts`, `org-context.ts`, `trust.ts`, `separation.ts`, `separation-workflow.ts`'s non-F&F sections) was read and found already correctly tenant-scoped, FK-cross-tenant-checked, CAS-versioned and storage-path-validated. Much of it carries explicit comments from prior audit rounds ("Fresh audit finding", "P6.0d — ownership guard") — **those comments are supporting context for where to look, not proof of current correctness**; this round read the live code behind each comment rather than trusting the comment's claim, which is exactly how the `context-data.ts` gap (no such comment existed there) and the payroll-summary scope-width issue (the existing fix's own comment claimed a pattern match that wasn't quite right) were actually found. **F&F reliance, stated explicitly, not implied**: `separation-workflow.ts`'s F&F sections (~lines 416–972) were **not re-reviewed this round** — F&F's current correctness rests on the prior documented rounds (G12, F&F concurrency, accounting-ledger fixes per CLAUDE.md), which is prior evidence, not fresh verification. `probation-confirmations.ts` likewise relies on its own dedicated test file from a prior round, not a fresh read this round. |
-| **Approvals** (`routes/approvals`, `pages/approvals`) | Partially tested | `Settings.tsx`'s Governance Matrix link fixed (`/admin/approvals/governance` → `/admin/approvals/governance-matrix`). `OperationalInbox.tsx`'s stale `/approvals/inbox` → `/admin/approvals/inbox` fixed (prior turn, this audit). Underlying approval-hierarchy/on-behalf logic last verified in the UAT round recorded in CLAUDE.md/STATUS.md. |
+| **Approvals** (`routes/approvals`, `routes/attendance/overtime.ts`+`comp-off.ts`'s approval queues, `pages/attendance/ApprovalInbox.tsx`) | Partially tested | `Settings.tsx`'s Governance Matrix link fixed (`/admin/approvals/governance` → `/admin/approvals/governance-matrix`). `OperationalInbox.tsx`'s stale `/approvals/inbox` → `/admin/approvals/inbox` fixed (prior turn, this audit). **Checkpoint 6**: found + fixed the overtime/comp-off half of the same scope-mismatch defect described in the Leave row above — `GET /overtime/requests` and `GET /attendance/comp-off`'s manager branches narrowed from the full subordinate tree to `getImmediateReportIds`, matching `authorizeOtTarget`/`authorizeCompOffTarget`'s real one-level authority; traced into `ApprovalInbox.tsx` to confirm these two files are its embedded Overtime/Comp-off tabs, not a separate unused list. `routes/approvals/governance-evolution.ts` and `workflows.ts` (the dedicated approvals namespace, as opposed to the per-domain approve/reject actions checked here) are **not yet opened** — still relies on the prior UAT-round verification recorded in CLAUDE.md/STATUS.md. |
 | **Masters / Org structure** (`routes/masters`, `pages/masters`) | Partially tested | `OrgGovernancePanel.tsx`'s 6 stale `/masters/*` nav calls fixed → `/admin/masters/*` (prior turn, this audit). No further audit this round. |
 | **Settings** (`pages/settings/Settings.tsx`) | Tested (nav only) | "Coming soon" badge on Session & Auth Policy now actually disables the card (was cosmetic-only — fully clickable to a dead route). Data Explorer, Leave Accrual Jobs, Governance Matrix links fixed. Rest of Settings (webhooks, integrations, AI provider config, billing) not independently re-audited. |
 | **Dashboard** (`pages/dashboard/AdminDashboard.tsx`) | Partially tested | 3 stale nav targets fixed (`/admin/compliance`, `/admin/attendance/process` ×2, `/admin/leave/types`). **Known gap, disclosed not fixed:** the "Process Attendance" / "Process now" actions now land on `/admin/operational-health` (a real, registered admin page) but that page is read-only observability — it shows processing status/last-run/anomaly funnel, it does **not** have a button to trigger a new processing run. The only UI with that trigger (`POST /attendance/process`) is `Attendance.tsx`, registered solely at the manager-facing route `/manager/team/attendance`. This is a genuine product gap (no admin-facing manual-trigger UI), not a renamed link — flagged for a product decision rather than silently invented. |

@@ -36,7 +36,7 @@ import { generateCompOffRequests } from '../../lib/comp-off-service.js'
 import { resolveWoEmployees } from '../../lib/wo-credit-reconciler.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import {
-  isHrAdmin, resolveCallerEmployeeId, getDirectReportIds, isDirectReport,
+  isHrAdmin, resolveCallerEmployeeId, getImmediateReportIds, isDirectReport,
 } from '../../lib/manager-scope.js'
 import { assertRangeOpen, isMonthLocked, monthOf, PeriodLockedError } from '../../lib/period-lock.js'
 import { isSelfApproval } from '../../lib/approval-guards.js'
@@ -222,10 +222,17 @@ export default async function compOffRoute(fastify: FastifyInstance) {
     if (isHrAdmin(req.userRole)) {
       // HR admin sees the whole tenant
     } else if (req.userRole === 'manager') {
-      // P6.0c — managers see only their direct reports' requests
+      // SYSTEM_AUDIT_2026-10-14: this list feeds the manager approval queue
+      // (ManagerTeamCompOff.tsx, embedded in ApprovalInbox's Comp-off tab) —
+      // approve/reject goes through authorizeCompOffTarget below, which only
+      // authorizes the employee's IMMEDIATE manager (isDirectReport, one
+      // level). The full subordinate tree (getDirectReportIds) let a
+      // manager-of-managers see a grandchild's pending request with a
+      // clickable Approve button that always 403'd. Scope to immediate
+      // reports only, matching the action's real authority.
       const myEmpId = await resolveCallerEmployeeId(fastify.supabase, req.userId, req.tenantId)
       if (!myEmpId) return reply.send({ data: [] })
-      const reportIds = await getDirectReportIds(fastify.supabase, req.tenantId, myEmpId)
+      const reportIds = await getImmediateReportIds(fastify.supabase, req.tenantId, myEmpId)
       if (!reportIds.length) return reply.send({ data: [] })
       q = q.in('employee_id', reportIds)
     } else {

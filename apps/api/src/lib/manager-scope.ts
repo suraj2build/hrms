@@ -112,3 +112,35 @@ export async function isDirectReport(
   if (error) throw error
   return !!data
 }
+
+/**
+ * Immediate (one-level) direct-report employee ids only — unlike
+ * getDirectReportIds above, this does NOT walk the subordinate tree.
+ *
+ * SYSTEM_AUDIT_2026-10-14: several manager-facing approval-queue endpoints
+ * (overtime, comp-off, the leave/approvals pending-count badge) were listing
+ * or counting pending items via getDirectReportIds' full subordinate tree,
+ * while the matching approve/reject action on the exact same item
+ * (authorizeOtTarget / authorizeCompOffTarget / validateApprover — all
+ * isDirectReport-based, one level only) only ever authorizes the employee's
+ * IMMEDIATE manager. A manager-of-managers could see a grandchild's pending
+ * request in the queue (with a clickable Approve button) and get a 403 when
+ * actually clicking it. Any list/count that doubles as an action queue must
+ * scope with this helper, not getDirectReportIds, so what's shown always
+ * matches what can actually be acted on. Pure read-only/historical team
+ * visibility (attendance, overtime history, assets, helpdesk, etc.) is
+ * unaffected — that deliberately stays on the full tree.
+ */
+export async function getImmediateReportIds(
+  supabase:          SupabaseClient,
+  tenantId:          string,
+  managerEmployeeId: string,
+): Promise<string[]> {
+  const { data, error } = await supabase
+    .from('employees')
+    .select('id')
+    .eq('manager_id', managerEmployeeId)
+    .eq('tenant_id', tenantId)
+  if (error) throw error
+  return (data ?? []).map((e: { id: string }) => e.id)
+}

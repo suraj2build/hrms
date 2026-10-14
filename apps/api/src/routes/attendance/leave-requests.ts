@@ -29,7 +29,7 @@ import {
   reverseApprovedLeaveRequest,
   getPendingApprovalsForManager,
 }                               from '../../lib/approval-service.js'
-import { getDirectReportIds, isDirectReport, isHrAdmin } from '../../lib/manager-scope.js'
+import { getDirectReportIds, getImmediateReportIds, isDirectReport, isHrAdmin } from '../../lib/manager-scope.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
@@ -260,11 +260,16 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
         }
         // employeeId stays as the validated direct-report id
       } else if (isManager && !employeeId && parsed.data.status === 'APPROVED') {
-        // Approved-leave tab: a manager with no specific employee_id wants their
-        // whole reporting line's approved leave (the cancel-approval action this
-        // tab exists for is itself scoped to direct reports elsewhere), not just
-        // their own — mirrors GET /approvals/pending's team-wide scope for PENDING.
-        reportScope = await getDirectReportIds(fastify.supabase, req.tenantId, myEmployeeId)
+        // Approved-leave tab (ApprovalInbox.tsx's Approved sub-tab): each row
+        // renders a "cancel approval" action, which goes through
+        // reverseApprovedLeaveRequest -> validateApprover — immediate manager
+        // only, never the full subordinate tree. This previously used
+        // getDirectReportIds (the deep tree), which would surface a
+        // grandchild's approved leave with a clickable cancel button that
+        // always 403'd (SYSTEM_AUDIT_2026-10-14 — same class of defect fixed
+        // for /approvals/pending-count and the overtime/comp-off queues).
+        // Scope to immediate reports only, matching the action's real authority.
+        reportScope = await getImmediateReportIds(fastify.supabase, req.tenantId, myEmployeeId)
       } else {
         // Plain employee (or manager not supplying a param, any other status) → scope to self
         employeeId = myEmployeeId
@@ -695,12 +700,22 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
     const isHrAdmin = (HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)
 
     // Manager scope: resolve direct-report employee ids (empty => count nothing).
+    // SYSTEM_AUDIT_2026-10-14: this badge is meant to tell the manager how many
+    // items await THEIR action, but every underlying approve/reject action across
+    // all four tables (leave: validateApprover; regularisation: validateApprover;
+    // overtime: authorizeOtTarget; comp-off: authorizeCompOffTarget) authorizes
+    // only the employee's IMMEDIATE manager — never the full subordinate tree.
+    // Counting via getDirectReportIds (the deep tree) let a manager-of-managers
+    // see a nonzero badge for items several levels down that would always 403
+    // if acted on — and that /approvals/pending (the list behind this badge,
+    // scoped via getPendingApprovalsForManager's own immediate-only query)
+    // doesn't even show. Scope to immediate reports only, matching real authority.
     let reportIds: string[] | null = null
     if (!isHrAdmin) {
       const { data: profile } = await fastify.supabase
         .from('profiles').select('employee_id').eq('id', req.userId).eq('tenant_id', tenantId).maybeSingle()
       const myEmpId = (profile as { employee_id: string | null } | null)?.employee_id
-      reportIds = myEmpId ? await getDirectReportIds(fastify.supabase, tenantId, myEmpId) : []
+      reportIds = myEmpId ? await getImmediateReportIds(fastify.supabase, tenantId, myEmpId) : []
     }
 
     const countPending = async (table: string, statusVal: string): Promise<number> => {
