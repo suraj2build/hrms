@@ -1735,7 +1735,7 @@ the repository, not estimated.
 
 | Module (route namespace) | Total files | Examined (this audit) | Remaining | Open defects | Blocked verification |
 |---|---|---|---|---|---|
-| attendance | 64 | 33 | 31 | 2 disclosed (retroactive.ts dedup; engine-accrual scope gap — see §cp14 continuation below). 5 found-and-FIXED-same-batch (roster-api.ts pagination ×2, roster-calendar.ts rotation-members pagination, leave-reconciliation.ts breakdown-aggregation, writeLedgerEntry idempotency, regularisation-policy.ts SLA-breach-reject chain orphaning — don't count as open) | engine-accrual/legacy-policy "two independent systems, no mutual-exclusivity check" risk is disclosed but NOT confirmed as a live double-credit (see below) |
+| attendance | 64 | 35 | 29 | 2 disclosed (retroactive.ts dedup; engine-accrual scope gap — see §cp14 continuation below). 5 found-and-FIXED-same-batch (roster-api.ts pagination ×2, roster-calendar.ts rotation-members pagination, leave-reconciliation.ts breakdown-aggregation, writeLedgerEntry idempotency, regularisation-policy.ts SLA-breach-reject chain orphaning — don't count as open) | engine-accrual/legacy-policy "two independent systems, no mutual-exclusivity check" risk is disclosed but NOT confirmed as a live double-credit (see below) |
 | employees | 31 | 31 | 0 | 0 | separation-workflow.ts F&F section (~lines 416-972) relies on prior-round evidence, not re-read this audit |
 | payroll (incl. statutory/) | 52 | 0 | 52 | — | approval/finalization/F&F/encashment-adjacent correctness relies on PRIOR rounds (G12 etc.), not re-verified by this audit's own checkpoints |
 | masters | 29 | 0 | 29 | — | nav-link fixes only; no file-level authz review this audit |
@@ -1789,7 +1789,7 @@ the repository, not estimated.
 | uploads | 1 | 0 | 1 | — | — |
 | whatsapp | 1 | 0 | 1 | — | — |
 | workforce | 1 | 0 | 1 | — | — |
-| **TOTAL (54 rows, 53 namespaces + setup.ts)** | **289** | **71** | **218** | **3 open-disclosed (retroactive.ts dedup; engine-accrual scope gap; see §cp14 continuation) — none else currently open; every other defect found this audit was fixed in the same checkpoint it was found** | **global: hosted Supabase/RLS/storage behavior is never verified anywhere in this tracker — see "Explicitly still blocked" below; PT/TDS/F&F/asset/careers/tenant-licensing rows above rely on evidence from rounds OUTSIDE this specific audit, real but not re-verified here** |
+| **TOTAL (54 rows, 53 namespaces + setup.ts)** | **289** | **73** | **216** | **3 open-disclosed (retroactive.ts dedup; engine-accrual scope gap; see §cp14 continuation) — none else currently open; every other defect found this audit was fixed in the same checkpoint it was found** | **global: hosted Supabase/RLS/storage behavior is never verified anywhere in this tracker — see "Explicitly still blocked" below; PT/TDS/F&F/asset/careers/tenant-licensing rows above rely on evidence from rounds OUTSIDE this specific audit, real but not re-verified here** |
 
 **Checkpoint 14 continuation, second leg**: 4 more files examined —
 `manager-dashboard.ts`, `payroll-summary.ts`, `context.ts` (no defects;
@@ -1809,6 +1809,16 @@ called over real HTTP — the request rejects with the SLA message AND the
 chain closes (`final_approved=false`, `closed_at` set), not orphaned.
 **Updated: attendance 33/64 examined (31 remaining); overall 71/289
 examined, 218 remaining.**
+
+**Checkpoint 14 continuation, third leg**: 2 more files examined —
+`ingest.ts` (public device-auth ingestion endpoint; tenant correctly
+derived server-side from the device row, not client-supplied; proper
+dedup upsert) and `fetch.ts` (per-employee attendance fetch; already
+correctly uses `fetchAllRows` for both `attendance_daily` and
+`attendance_logs` over a caller-supplied, unbounded date range, with
+proper self/manager/HR ownership scoping). No defects found in either.
+**Updated: attendance 35/64 examined (29 remaining); overall 73/289
+examined, 216 remaining.**
 
 **Reduction this batch (checkpoint 14, tier 2 batch 1)**: attendance moved
 from 0/64 examined (nothing in `attendance` had been counted under this
@@ -1918,10 +1928,9 @@ building the reproduction above, not yet fully resolved):
 (35 remaining). **Overall: 67 of 289 files examined, 222 remaining (77%
 remaining)** — down from 235 remaining at the top of this batch.
 
-**Next planned batch**: continue tier 2 of `attendance` (35 files
-remaining there) — manager-dashboard.ts, payroll-summary.ts,
-regularisation-policy.ts, context.ts, api-sources.ts,
-ingest.ts, fetch.ts, upload.ts/upload-health.ts, queue-actions.ts,
+**Next planned batch**: continue tier 2 of `attendance` (29 files
+remaining there, per the final count after this checkpoint's three legs
+above) — api-sources.ts, upload.ts/upload-health.ts, queue-actions.ts,
 status.ts, last-run.ts, run-details.ts, run-export.ts, sample-csv.ts,
 who-is-in.ts, work-sessions.ts, debug-raw.ts, audit.ts, force-unlock.ts,
 reconciliation.ts/reconciliation-validate.ts, and the intelligence/
