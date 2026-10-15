@@ -1462,6 +1462,103 @@ checkpoint so completed work is never repeated. Batch log:
   654 — 10 new: 6 + 4), 0 regressions. `tsc --noEmit` clean on both
   `apps/api` and `apps/web`.
 
+- **Checkpoint 13 addendum** (same commit, follow-up to the user's
+  qualification before this review could be treated as closed): four
+  specific follow-ups, all closed with evidence, not restated claims.
+
+  **1. Cap invariant extended to policy changes and excluded→counted
+  transitions — a real gap check, not restated reasoning.** Enumerated
+  every writer of `leave_encashment_requests.status` across the codebase
+  (grepped, not assumed): the atomic insert (pending), `processEncashment`
+  (pending→approved), the route-level reject (pending→rejected),
+  `assign_leave_encashment_to_payroll_run_atomic`/
+  `fn_finalize_leave_encashments_for_run` (approved→paid, both counted,
+  no membership change), `fn_revert_leave_encashments_for_rollback`
+  (paid→approved, same), `reverse_leave_encashment_atomic`
+  (approved/paid→reversed, guarded by `v_req.status NOT IN
+  ('approved','paid')` raising `CONFLICT` for anything else — so a
+  rejected or already-reversed row can never be "re-reversed" back into a
+  counted status). **No writer anywhere transitions a row OUT of
+  `rejected`/`reversed`** — confirmed by reading every one, not inferred.
+  **Cap-policy changes** (`leave_accrual_rules.max_encashable_per_year`/
+  `encashable`) can't desync the invariant because the enforcement was
+  never a stored "remaining allowance" counter — `request_leave_encashment_
+  atomic` re-sums live rows and reads the rule fresh on every call, so a
+  policy edit is picked up immediately and correctly for every subsequent
+  request, with nothing cached to go stale. **Real-Postgres proof**, new
+  "Part 5" in `scripts/db/verify-encashment-cap-atomic.mjs`: a request
+  succeeds under a newly-lowered cap; a second request that would have
+  been refused under that same lowered cap succeeds once the cap is
+  raised again (3+4=7, > the old cap of 5, <= the new cap of 10) — proving
+  the check reads the rule live, not a value captured once; a request
+  rejected then reversed is refused with `CONFLICT` (not resurrected); a
+  request approved, reversed, then reversed AGAIN is refused with
+  `CONFLICT`, and `leave_balance_ledger` has exactly ONE reversal row for
+  it, not two (no double-credit). Building this surfaced and fixed a bug
+  in the test's OWN setup, not the product: the script's reused tenant/
+  employee from Part 2 had no `employee_leave_balance` row, so the
+  reversal function's explainability-log `INSERT...SELECT` silently
+  matched zero rows — fixed by seeding a balance row at the top of Part 5,
+  matching what a real approval would already have created.
+
+  **2. `submittedByHint` — verified tenant-scoped and not client-
+  overridable, by tracing the data flow, not asserting it.** All 4 call
+  sites (`approveLeaveRequest`/`rejectLeaveRequest`/`approveRegularisation`/
+  `rejectRegularisation` in `approval-service.ts`) pass a value read
+  directly off a DB row fetched with `.eq('tenant_id', tenantId)` —
+  `getLeaveRequest()` for leave (`leave-request-service.ts:577-594`) and a
+  direct `attendance_regularisation` select for regularisation — and that
+  `tenantId` is itself `req.tenantId`, set exclusively by the auth plugin
+  from the authenticated session, never read from the request body or any
+  route parameter. Checked every one of the 4 HTTP route handlers
+  (`leave-requests.ts`, `regularisation.ts`) for a client-suppliable
+  `requested_by`/`submitted_by`/`submittedByHint`-shaped body field that
+  could flow into this value: none exists — the approve/reject request
+  bodies accept only unrelated fields (e.g. a rejection `reason`). No new
+  defect found; this closes the verification as a clean result, not a
+  fix.
+
+  **3. Gateway fix preserved and versioned; affected-evidence search
+  completed with a definitive negative result.** The corrected gateway
+  (the `JSONB_NULL_COLUMNS` fix from the main checkpoint 13 entry above)
+  is now committed at `scripts/db/local-test-gateway.mjs` — previously it
+  existed only at `/tmp/supabase-gateway.mjs`, recreated from scratch each
+  session with no history; the committed file's header carries its own
+  fix-history note so a future diff explains itself. **Earlier-evidence
+  search**: grepped every real call site of `claimIdempotency` codebase-
+  wide (the only function whose bug-triggering `response: null` insert the
+  gateway bug affects — `checkIdempotency`/`storeIdempotency` never hit
+  it, since `storeIdempotency` always writes a real response object) — 5
+  sites total: `leave-accrual.ts` (encashment, new this round),
+  `leave-entitlement.ts` ×3 (monthly/yearly/carry-forward accrual jobs —
+  confirmed via grep to have NO caller anywhere in the codebase, not even
+  the scheduler, so never exercised with a header at all), `integrations/
+  index.ts` (PAN verify), `imports/index.ts` (import job creation). Then
+  grepped every frontend page that ever sends an `Idempotency-Key` header
+  (36 files) and mapped each to its target endpoint: none target PAN-
+  verify, import-creation, or any of the 3 entitlement routes — the
+  routes those pages DO target (`/succession/calibration`, `/payroll/
+  runs`, `/payroll/arrears/batches`, reimbursement/advance/comp-off/
+  regularisation approvals, etc.) use the separate, unaffected
+  `checkIdempotency`/`storeIdempotency` pair, confirmed via the same
+  grep that found only 5 `claimIdempotency` call sites total. Finally,
+  grepped every script under `scripts/` for an `Idempotency-Key` header:
+  exactly 2 files ever send one — `verify-encashment-cap-atomic.mjs`
+  (Part 1 uses a raw `pg.Client` INSERT with an explicit `'null'::jsonb`
+  cast, deliberately routing around the gateway's REST layer entirely per
+  its own code comment — never exercised the broken path) and this
+  round's own new `verify-encashment-idempotency-hash.mjs` (which is what
+  found the bug, before it was used to support any claim). **Conclusion,
+  not an assumption: zero prior checkpoints' reported evidence relied on
+  the broken path.** Re-ran `verify-approval-chain-bypass.mjs` and
+  `verify-encashment-cap-atomic.mjs` after the gateway fix regardless, to
+  confirm it introduced no regression of its own — both unchanged, all
+  parts/steps still pass; no other committed script needed re-running.
+
+  **4. Test suite re-confirmed after the Part 5 additions**: 78/78 files,
+  664/664 tests (unchanged — Part 5 is a `.mjs` script, not a vitest
+  file). `tsc --noEmit` clean on both apps.
+
 - **Next planned batches** (not yet started — listed so a future session
   picks up here, not from zero): continue item 2's batch — tier 2 of the
   remaining ~49 unopened `routes/attendance` files (punch/corrections/

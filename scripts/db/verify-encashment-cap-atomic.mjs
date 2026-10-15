@@ -273,6 +273,86 @@ async function main() {
     allOk = allOk && secondRefusedBeforeReversal && balanceCreditedBackExactly && capFreedByReversal && reconciledTotalCorrect && ledgerRecorded
   }
 
+  // ── PART 5 (checkpoint 13): cap-policy changes + excluded→counted transitions ──
+  console.log('\n=== PART 5: a cap-policy change never desyncs the invariant (always re-summed live, never cached), and no writer anywhere resurrects a rejected/reversed row ===')
+  {
+    const year = 2105
+    const hrActorId = await seedHrActor(tenantId)
+    // reverse_leave_encashment_atomic's explainability-log write
+    // (leave_balance_ledger) is an INSERT...SELECT FROM employee_leave_balance
+    // — it silently matches zero rows (not an error) if no balance row
+    // exists for this tuple yet. Part 2's tenant/employee (reused here)
+    // never needed one (cap enforcement is COUNT-based, not balance-based),
+    // so seed one explicitly to faithfully exercise the reversal's full
+    // write path, matching what a real approve (processEncashment's
+    // checked_deduct_leave_balance) would have already created.
+    await pool.query(
+      `INSERT INTO employee_leave_balance (tenant_id, employee_id, leave_type_id, year, balance) VALUES ($1,$2,$3,$4,$5)
+       ON CONFLICT (tenant_id, employee_id, leave_type_id, year) DO NOTHING`,
+      [tenantId, empId, leaveTypeId, year, 20],
+    )
+    // Lower the cap AFTER requests already exist under the old, higher cap —
+    // proves the check is always re-derived from the CURRENT rule value at
+    // request time, never a stored "remaining allowance" counter that a
+    // policy change could leave stale.
+    await pool.query(`UPDATE leave_accrual_rules SET max_encashable_per_year = 5 WHERE tenant_id=$1 AND leave_type_id=$2`, [tenantId, leaveTypeId])
+    const { rows: [r1] } = await pool.query(`SELECT request_leave_encashment_atomic($1,$2,$3,$4,$5,$6) AS result`, [tenantId, empId, leaveTypeId, year, 3, 'under new lower cap'])
+    const firstOk = r1.result?.status === 'pending'
+    console.log('a request under the NEW lower cap (3/5) succeeds:', firstOk ? 'PASS' : 'FAIL', r1.result)
+
+    // Raise the cap mid-stream — a request that would have been refused
+    // under the OLD (lower, just-set) cap must now be correctly accepted,
+    // proving the check reads the rule fresh on every call, not a value
+    // captured once.
+    await pool.query(`UPDATE leave_accrual_rules SET max_encashable_per_year = 10 WHERE tenant_id=$1 AND leave_type_id=$2`, [tenantId, leaveTypeId])
+    const { rows: [r2] } = await pool.query(`SELECT request_leave_encashment_atomic($1,$2,$3,$4,$5,$6) AS result`, [tenantId, empId, leaveTypeId, year, 4, 'only fits after the cap was raised'])
+    const secondOk = r2.result?.status === 'pending' // 3+4=7, fits the new cap of 10 but not the old 5
+    console.log('a request that only fits AFTER the cap is raised (3+4=7 > old cap 5, <= new cap 10) succeeds — the check reads the rule live, not a cached value:', secondOk ? 'PASS' : 'FAIL', r2.result)
+
+    const { rows: [sumRow] } = await pool.query(
+      `SELECT COALESCE(SUM(days),0) AS total FROM leave_encashment_requests WHERE tenant_id=$1 AND employee_id=$2 AND leave_type_id=$3 AND year=$4 AND status NOT IN ('rejected','reversed')`,
+      [tenantId, empId, leaveTypeId, year],
+    )
+    const sumMatchesExpected = Number(sumRow.total) === 7
+    console.log('reconciled live total after both policy changes (expect 7 — both requests persisted, no drift from either policy edit):', sumRow.total, sumMatchesExpected ? 'PASS' : 'FAIL')
+
+    // Reject the second request, then try to reverse it — reverse requires
+    // ('approved','paid'); a 'rejected' row must be refused, not silently
+    // resurrected into a counted status via the reversal path.
+    const secondId = r2.result.id
+    await pool.query(`UPDATE leave_encashment_requests SET status='rejected' WHERE id=$1`, [secondId])
+    let reverseOfRejectedRefused = false
+    try {
+      await pool.query(`SELECT reverse_leave_encashment_atomic($1,$2,$3,$4)`, [tenantId, secondId, hrActorId, 'should be refused — not approved/paid'])
+    } catch (err) {
+      reverseOfRejectedRefused = /CONFLICT/.test(err.message)
+    }
+    console.log('reversing an already-REJECTED request is refused (no excluded→counted resurrection via the reversal path):', reverseOfRejectedRefused ? 'PASS' : 'FAIL')
+
+    // Approve, then reverse, then attempt to reverse AGAIN — the same guard
+    // must refuse a double-reversal (which would otherwise double-credit
+    // the balance and could, if it also "un-reversed" the row, bring an
+    // excluded request back into the counted set).
+    const { rows: [r3] } = await pool.query(`SELECT request_leave_encashment_atomic($1,$2,$3,$4,$5,$6) AS result`, [tenantId, empId, leaveTypeId, year, 1, 'to be approved, reversed, then double-reversed'])
+    const thirdId = r3.result.id
+    await pool.query(`UPDATE leave_encashment_requests SET status='approved', approved_by=$2, approved_at=now() WHERE id=$1`, [thirdId, hrActorId])
+    await pool.query(`SELECT reverse_leave_encashment_atomic($1,$2,$3,$4)`, [tenantId, thirdId, hrActorId, 'first reversal'])
+    let doubleReversalRefused = false
+    try {
+      await pool.query(`SELECT reverse_leave_encashment_atomic($1,$2,$3,$4)`, [tenantId, thirdId, hrActorId, 'second reversal — must be refused'])
+    } catch (err) {
+      doubleReversalRefused = /CONFLICT/.test(err.message)
+    }
+    const { rows: [reversalCountRow] } = await pool.query(
+      `SELECT count(*) AS n FROM leave_balance_ledger WHERE tenant_id=$1 AND employee_id=$2 AND leave_type_id=$3 AND year=$4 AND txn_type='reversal' AND encashment_id=$5`,
+      [tenantId, empId, leaveTypeId, year, thirdId],
+    )
+    const exactlyOneReversalLedgerRow = Number(reversalCountRow.n) === 1
+    console.log('a double-reversal attempt on the same request is refused, not silently re-credited (exactly one reversal ledger row, not two):', doubleReversalRefused && exactlyOneReversalLedgerRow ? 'PASS' : 'FAIL', reversalCountRow)
+
+    allOk = allOk && firstOk && secondOk && sumMatchesExpected && reverseOfRejectedRefused && doubleReversalRefused && exactlyOneReversalLedgerRow
+  }
+
   console.log(allOk ? '\nALL PARTS PASS' : '\nFAIL')
   await pool.end()
   process.exit(allOk ? 0 : 1)
