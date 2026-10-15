@@ -279,6 +279,33 @@ export default async function leaveAccrualRoutes(fastify: FastifyInstance) {
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
 
+    // SYSTEM_AUDIT_2026-10-14 checkpoint 10+1 — this is the one write
+    // endpoint in this file that submits money-affecting state (a request
+    // against the leave_accrual_rules.max_encashable_per_year cap) with no
+    // Idempotency-Key handling, unlike the sibling /leave/accrual/run a
+    // few lines above. The annual-cap check below reads a SUM then
+    // inserts — no DB constraint enforces the cap (confirmed: migration
+    // 072's index on leave_encashment_requests is non-unique) and
+    // processEncashment() at approval time only re-checks leave BALANCE
+    // sufficiency, never this cap again — so a double-click or a client
+    // retry after a timeout could submit two requests that each read the
+    // same pre-insert sum, each pass the cap check, and both later get
+    // approved independently, exceeding the configured annual cap with
+    // nothing to catch it. An idempotency key closes the common
+    // double-click/retry case the same way /leave/accrual/run already
+    // does. A fully concurrency-proof fix (re-checking the cap atomically
+    // under a row/advisory lock at insert AND at approval time) is a
+    // larger lift than this specific gap warrants — not attempted,
+    // disclosed rather than silently left implicit.
+    const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    if (iKey) {
+      const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, 'leave-encashment-request')
+      if (cached) {
+        reply.header('Idempotency-Replayed', 'true')
+        return reply.code(cached.status_code).send(cached.response)
+      }
+    }
+
     // Resolve employee_id
     const { data: prof } = await fastify.supabase
       .from('profiles')
@@ -339,7 +366,10 @@ export default async function leaveAccrualRoutes(fastify: FastifyInstance) {
       .single()
 
     if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to submit encashment request')
-    return reply.code(201).send({ data })
+
+    const responseBody = { data }
+    if (iKey) await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'leave-encashment-request', 201, responseBody)
+    return reply.code(201).send(responseBody)
   })
 
   // ── GET /leave/encashment/my ──────────────────────────────────────────────

@@ -18,6 +18,7 @@ import {
 import { resolveEmployeeOrgContext, getLocalDate } from '../../lib/org-context.js'
 import { fetchTenantTz } from '../../lib/attendance-engine.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { getDirectReportIds } from '../../lib/manager-scope.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
@@ -50,6 +51,33 @@ export default async function leaveCollisionRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
     if (!emp) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
+
+    // SYSTEM_AUDIT_2026-10-14 checkpoint 10+1 — ownership check, mirroring
+    // the sibling leave-duration.ts's POST /leave/duration/preview. Tenant
+    // scoping alone isn't enough: any authenticated employee could
+    // otherwise preview a co-worker's holiday/weekly-off collision analysis
+    // (and, indirectly, their site/roster assignment) by passing their
+    // employee_id — LeaveApply.tsx calls this endpoint with the identical
+    // employee_id as the already-guarded /leave/duration/preview call.
+    const isHrAdmin = (HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)
+    if (!isHrAdmin) {
+      const { data: callerProfile } = await fastify.supabase
+        .from('profiles')
+        .select('employee_id')
+        .eq('id', req.userId)
+        .eq('tenant_id', req.tenantId)
+        .maybeSingle()
+      const myEmployeeId = (callerProfile as { employee_id: string | null } | null)?.employee_id
+      const isSelf = !!myEmployeeId && myEmployeeId === employee_id
+      let isManagerOfTarget = false
+      if (!isSelf && req.userRole === 'manager' && myEmployeeId) {
+        const reportIds = await getDirectReportIds(fastify.supabase, req.tenantId, myEmployeeId)
+        isManagerOfTarget = reportIds.includes(employee_id)
+      }
+      if (!isSelf && !isManagerOfTarget) {
+        return reply.code(403).send({ error: 'FORBIDDEN', message: 'You can only preview your own leave collision' })
+      }
+    }
 
     // Resolve collision policy
     const policy = await resolveCollisionPolicy(fastify.supabase, req.tenantId, leave_type_id)

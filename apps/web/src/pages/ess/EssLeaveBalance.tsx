@@ -9,7 +9,7 @@
  * Tokens only — no raw hex / bg-gray-*.
  */
 
-import { useMemo, useState }                    from 'react'
+import { useMemo, useRef, useState }            from 'react'
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { toast }                                from 'sonner'
 import {
@@ -534,13 +534,21 @@ export function EssLeaveBalance() {
   const [encashDays, setEncashDays] = useState('')
   const [encashNotes, setEncashNotes] = useState('')
 
+  // SYSTEM_AUDIT_2026-10-14 checkpoint 10+1 — a double-click or a client
+  // retry after a timeout could previously submit two encashment requests
+  // that each pass the annual-cap check (read-then-insert, no idempotency
+  // protection) and both later get approved, exceeding the configured
+  // cap. Mirrors LeaveApply.tsx's stable per-form-mount UUID pattern.
+  const encashmentIdempotencyKey = useRef(crypto.randomUUID())
+
   const requestEncashmentMutation = useMutation({
     mutationFn: () => api.post('/leave/encashment/request', {
       leave_type_id: encashLeaveTypeId,
       days:          Number(encashDays),
       notes:         encashNotes.trim() || undefined,
-    }),
+    }, { headers: { 'Idempotency-Key': encashmentIdempotencyKey.current } }),
     onSuccess: () => {
+      encashmentIdempotencyKey.current = crypto.randomUUID()
       toast.success('Encashment request submitted')
       queryClient.invalidateQueries({ queryKey: ['ess-encashment-my'] })
       setEncashDialogOpen(false)

@@ -22,7 +22,8 @@ import {
   listLeaveRequests,
   cancelLeaveRequest,
 }                               from '../../lib/leave-request-service.js'
-import { MANAGER_ROLES }       from '../../lib/rbac.js'
+import { MANAGER_ROLES, HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { getDirectReportIds }  from '../../lib/manager-scope.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
@@ -225,6 +226,30 @@ export default async function leaveEmployeeRoutes(fastify: FastifyInstance) {
 
     const { employee_id, limit, offset } = parsed.data
 
+    // SYSTEM_AUDIT_2026-10-14 checkpoint 10+1 — the MANAGER_ROLES check
+    // above stops a plain employee, but still let a plain `manager` (not
+    // HR) pass ANY employee_id tenant-wide — or omit it and get every
+    // tenant request — with no team-membership check, unlike the
+    // same-service Approved-tab list checkpoint 6 already scoped via
+    // getImmediateReportIds, and context-data.ts's checkpoint-4 fix of the
+    // same MANAGER_ROLES-as-blanket-bypass pattern. This route's own
+    // caller (EmployeeResolutionWorkspace.tsx) is HR-only, but the route
+    // itself has no such restriction, so a plain manager calling it
+    // directly could read a non-report's leave reason/rejection_reason.
+    const isHrAdmin = (HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)
+    let employeeIds: string[] | undefined
+    if (!isHrAdmin) {
+      const { employeeId: myEmployeeId } = await resolveEmployeeId(fastify, req.userId, req.tenantId)
+      if (!myEmployeeId) {
+        return reply.code(403).send({ error: 'FORBIDDEN', message: 'No employee record linked to your profile' })
+      }
+      const reportIds = await getDirectReportIds(fastify.supabase, req.tenantId, myEmployeeId)
+      if (employee_id && !reportIds.includes(employee_id)) {
+        return reply.code(403).send({ error: 'FORBIDDEN', message: 'You can only view requests from your reporting line' })
+      }
+      employeeIds = reportIds
+    }
+
     // Normalise status to uppercase to match the DB enum
     const VALID_STATUSES = ['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED'] as const
     type LeaveStatus = typeof VALID_STATUSES[number]
@@ -234,7 +259,8 @@ export default async function leaveEmployeeRoutes(fastify: FastifyInstance) {
       : undefined
 
     const result = await listLeaveRequests(fastify.supabase, req.tenantId, {
-      employeeId: employee_id,
+      employeeId:  employee_id,
+      employeeIds: !isHrAdmin ? employeeIds : undefined,
       status,
       limit,
       offset,

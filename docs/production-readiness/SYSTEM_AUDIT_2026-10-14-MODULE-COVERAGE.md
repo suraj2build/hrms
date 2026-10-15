@@ -884,16 +884,186 @@ checkpoint so completed work is never repeated. Batch log:
   9's count (the 2 finalize tests were rewritten in place against the new
   RPC, not added to); 0 regressions. `tsc --noEmit` clean on both
   `apps/api` and `apps/web`.
+- **Checkpoint 11** (this commit; tagged `checkpoint 10+1` in the code's
+  own inline comments, since this round's work is a direct, same-session
+  continuation of checkpoint 10's "continue the remaining module audit
+  without waiting for another instruction" closing instruction — promoted
+  to its own numbered entry here for the register's sequential history):
+  closes tier 1 of the "Next planned batches" list below — the remaining
+  11 unopened `routes/attendance/leave-*.ts`/`regularisation-policy.ts`
+  files, plus `routes/approvals/governance-evolution.ts` and
+  `workflows.ts` (the dedicated approvals namespace, never opened before
+  this round). Two independent background audit agents read all 13 files
+  in full against the item-2 checklist (tenant scoping, object/team
+  authorization, FK cross-tenant validation, CAS/concurrency, period-lock
+  interaction, pagination, numeric/date edge cases, retry/idempotency,
+  error-response hygiene) and reported back with file:line citations and
+  concrete failure scenarios; **4 real defects were independently verified
+  by direct code reads (not taken on the subagents' word) and fixed, each
+  with new mocked tests**:
+
+  1. **`lib/approval-orchestrator.ts`'s `gateApprove`/`gateReject` — a
+  multi-level approval chain could be silently bypassed by deleting its
+  config mid-chain.** Flagged by the approvals-namespace agent while
+  tracing `workflows.ts`'s config-mutation endpoints (its own 6-item
+  checklist was otherwise clean) against the question the audit brief
+  asked it to check: can a malformed/malicious governance config break or
+  bypass a live approval? Verified directly by reading `gateApprove`
+  itself: when a workflow_type's active config is deleted/deactivated (or
+  no level applies to the entity's amount any more), the function
+  returned `{kind:'finalize', authorized:false}` (the legacy single-step
+  path) **before ever checking whether an `approval_instances` row was
+  already open mid-chain** for that entity. Concrete scenario: a 2-level
+  leave chain (direct_manager → hr_admin); the manager approves, advancing
+  the instance to `current_level=2` (still `PENDING`, awaiting hr_admin);
+  an admin then deletes both config levels (routine cleanup, or a
+  careless/compromised admin); the SAME manager calls approve again — now
+  sees zero config, falls to legacy, and finalizes the request through
+  `validateApprover` (which the manager satisfies on their own) —
+  **silently skipping the still-pending hr_admin level**, with the stale
+  `approval_instances` row left open forever. **Fixed**: both early-return
+  sites in `gateApprove` AND `gateReject` now check
+  `getWorkflowInstance(...).final_approved === null` first; if an open
+  instance exists, the action fails CLOSED with `CONFLICT` ("has an
+  approval chain in progress... restore the configuration or ask an
+  administrator to resolve the pending approval") instead of silently
+  bypassing — consistent with the existing out-of-range-`cfg` guard a few
+  lines below, which already used the same fail-closed philosophy for a
+  narrower case. 6 new mocked tests
+  (`lib/__tests__/approval-orchestrator-config-deletion.test.ts`): the
+  tenant-never-configured-a-chain case and the chain-already-closed case
+  are proven UNCHANGED (no regression), and the open-instance case is
+  proven to now return `CONFLICT` for both `gateApprove` and `gateReject`,
+  including the amount-threshold variant (`applicable.length === 0`).
+
+  2. **Three routes let a manager (or, in one case, any employee) view
+  another employee's leave data with no team-membership check** — the
+  same defect class checkpoint 6 already fixed for `leave-requests.ts`'s
+  Approved-tab list and checkpoint 4 fixed for `context-data.ts`,
+  recurring in files that hadn't been opened yet:
+     - `leave-collision.ts`'s `GET /leave/collision/preview` had **zero**
+       object-level authorization — only tenant-membership of
+       `employee_id` was checked, so any authenticated employee could pass
+       a colleague's id and get back their holiday/weekly-off collision
+       analysis. A structural gap against the sibling endpoint in the same
+       directory, `leave-duration.ts`'s `POST /leave/duration/preview`,
+       which both are called with the identical `employee_id` from the
+       same `LeaveApply.tsx` screen — one was guarded, the other wasn't.
+     - `leave-employee.ts`'s `GET /leave/requests` (the
+       `EmployeeResolutionWorkspace.tsx` alias) was gated only on
+       `MANAGER_ROLES.includes(role)` — a plain `manager` (not HR) could
+       pass ANY `employee_id` tenant-wide, or omit it and get every tenant
+       leave request including `reason`/`rejection_reason` text.
+       `listLeaveRequests` already supported an `employeeIds` array filter
+       "to scope to a manager's reporting line" — this route just never
+       used it.
+     - `leave-policy-resolve.ts`'s both GET endpoints used
+       `!MANAGER_ROLES.includes(role)` to gate the ownership check, which
+       skips it for EVERY manager-tier role, not just HR — a manager with
+       zero reporting relationship to an employee could resolve that
+       employee's full leave policy (accrual rate, eligibility, minimum
+       service) plus name/code/joining_date, tenant-wide.
+
+     **Fixed**: all three now apply the established self/HR/
+     `getDirectReportIds`-scoped-manager pattern that `leave-duration.ts`
+     already uses correctly (full subordinate tree for read-only
+     visibility, matching that file's own precedent and its explicit
+     comment on why tenant-scoping alone isn't enough). 19 new mocked
+     tests across 3 files (`leave-collision-preview-scope.test.ts` ×5,
+     `leave-employee-requests-scope.test.ts` ×7,
+     `leave-policy-resolve-scope.test.ts` ×7) proving: self always
+     allowed; HR always allowed, tenant-wide; a manager allowed only for
+     their own report tree (direct report → 200, non-report → 403, omitted
+     `employee_id` → scoped to the tree, not tenant-wide); a manager role
+     with no linked employee record → 403, not a silent fallthrough.
+
+  3. **`governance-evolution.ts`'s matrix create/update — a UNIQUE
+  constraint conflict was misclassified as a 500, plus a missing
+  cross-tenant FK check the same file already applies to two sibling
+  fields.** `approval_matrices` has `UNIQUE(tenant_id, name, entity_type)`
+  (migration 089); `POST`/`PUT /approvals/governance/matrices` both sent
+  that conflict straight to `serverError`/500 instead of the clean 409
+  `conflictError` this repo's own `lib/workflow-service.ts:102` already
+  uses for the identical `error.code === '23505'` case — a real
+  misclassification per this repo's own established pattern, not a data
+  leak (the message was already a safe hardcoded string). Separately,
+  `escalation_employee_id` (inside each stage) was only checked as a
+  well-formed UUID — never re-validated as belonging to this tenant's
+  `profiles`, unlike `delegate_id` (this same file, `POST /delegations`)
+  and `granted_to` (`POST /overrides`), both of which this file already
+  fixed with the identical pattern and an explanatory comment. Severity
+  is capped by a fact independently confirmed by reading
+  `docs/approval-mechanism-audit.md` and grepping for
+  `stages.escalation_employee_id`: nothing currently reads that field for
+  real SLA escalation, so the real-world impact is "stores/echoes a
+  foreign tenant's UUID," not a cross-tenant action or data read — still a
+  real, fixable inconsistency against the file's own standard. **Fixed**:
+  both routes now check `error.code === '23505'` → `conflictError`
+  (`MATRIX_ALREADY_EXISTS`), and both re-validate every
+  `escalation_employee_id` against `profiles` scoped to `req.tenantId`
+  before insert/update. 6 new mocked tests
+  (`approvals/__tests__/governance-matrices-conflict-fk.test.ts`): 23505 →
+  409 on both POST and PUT; a genuine non-23505 DB error still correctly
+  falls through to 500 (unaffected); a foreign-tenant
+  `escalation_employee_id` → 400 `INVALID_REFERENCE`; a genuine same-
+  tenant id → 201; no `escalation_employee_id` at all → unaffected.
+
+  4. **`leave-accrual.ts`'s `POST /leave/encashment/request` — the
+  annual-encashment-cap check is a read-then-insert with no idempotency
+  protection**, unlike the sibling `/leave/accrual/run` route a few lines
+  above in the SAME file, which already uses
+  `checkIdempotency`/`storeIdempotency`. No DB constraint enforces the cap
+  (confirmed: migration 072's index on `leave_encashment_requests` is
+  non-unique), and `processEncashment` at approval time only re-checks
+  leave BALANCE sufficiency, never this cap again — so a double-click or a
+  client retry after a timeout could submit two requests that each read
+  the same pre-insert sum, each pass the cap check, and both later get
+  approved independently, exceeding `max_encashable_per_year` with
+  nothing in the system ever catching it. **Fixed, both ends**: the API
+  route now accepts and honors an `Idempotency-Key` header exactly like
+  `/leave/accrual/run` (a retried submission replays the cached response,
+  no second insert); and — since a backend-only fix is inert if nothing
+  ever sends the header — `EssLeaveBalance.tsx` (the actual caller of this
+  endpoint, confirmed via grep: it previously sent NO idempotency key at
+  all) now generates and sends one, mirroring `LeaveApply.tsx`'s existing
+  stable-per-form-mount-UUID pattern exactly. **Explicitly NOT attempted,
+  disclosed rather than silently left implicit**: a fully concurrency-
+  proof fix (re-checking the cap atomically under a row/advisory lock at
+  insert AND at approval time, closing the case where two truly
+  independent requests use two different idempotency keys) is a larger
+  lift than this specific gap warrants — the idempotency-key fix closes
+  the common double-click/client-retry case, the actual failure mode a
+  real user would hit, not the full theoretical race. 3 new mocked tests
+  (`leave-encashment-request-idempotency.test.ts`): a retried submission
+  with the SAME key replays (exactly one insert across two calls); two
+  DIFFERENT keys both insert (two genuinely separate requests, unaffected);
+  no key at all still succeeds (backward compatible, optional).
+
+  **Lower-severity findings read and explicitly NOT fixed, disclosed
+  rather than silently dropped** (both agents' own judgment, independently
+  consistent with this round's "proportionate fix" standard): a double-
+  submit race in `leave-accrual-lifecycle.ts`'s `POST /leave/lifecycle/
+  release` can insert two audit-trail rows for the same release
+  (cosmetic duplicate-audit-row, not a double-credit of leave balance —
+  the underlying field it clears is idempotent either way); two
+  concurrent first-ever page loads for `regularisation-policy.ts`'s `GET
+  /attendance/regularisation/policy` can both miss a `maybeSingle()` check
+  and both attempt a plain insert, with the loser surfacing an avoidable
+  (but sanitized, non-leaking) 500 on first load.
+
+  **Test suite**: 76/76 files, 641/641 tests passed (up from checkpoint
+  10's 70/70 files, 607/607 tests — 34 new tests: 6 orchestrator + 19
+  leave-scope + 6 governance + 3 encashment-idempotency), 0 regressions.
+  `tsc --noEmit` clean on both `apps/api` and `apps/web`. All fixes are
+  mocked-route-test-verified this round; none of the four has real-
+  Postgres or live-browser evidence yet — disclosed, not implied, matching
+  this register's established per-evidence-type discipline.
 - **Next planned batches** (not yet started — listed so a future session
-  picks up here, not from zero): continue item 2's batch — the remaining
-  ~60 unopened `routes/attendance` files (tier 1 next: `leave-employee.ts`,
-  `leave-entitlement.ts`, `leave-accrual.ts`,
-  `leave-accrual-lifecycle.ts`, `leave-reconciliation.ts`,
-  `leave-collision.ts`, `leave-duration.ts`, `leave-policy-resolve.ts`,
-  `regularisation-policy.ts`; tier 2: punch/
-  corrections/overtime's non-scope sections/recompute/retroactive/
-  period-locks' remaining non-lock-creation logic; tier 3: rosters/shifts/holidays/wo-credit) and
-  `routes/approvals/governance-evolution.ts` + `workflows.ts`. Then item 3 —
+  picks up here, not from zero): continue item 2's batch — tier 2 of the
+  remaining ~49 unopened `routes/attendance` files (punch/corrections/
+  overtime's non-scope sections/recompute/retroactive/period-locks'
+  remaining non-lock-creation logic); tier 3 (rosters/shifts/holidays/
+  wo-credit). Then item 3 —
   Compensation,
   Payroll, statutory calculations, reimbursements, loans/advances, F&F and
   accounting (much of this has prior-round coverage per CLAUDE.md, but
