@@ -122,6 +122,25 @@ export default async function periodLocksRoutes(fastify: FastifyInstance) {
           .eq('tenant_id', req.tenantId)
           .in('id', regIds)
 
+        // SYSTEM_AUDIT_2026-10-14 checkpoint 13 batch — this raw UPDATE bypasses
+        // gateReject entirely, unlike every genuine reject in regularisation.ts.
+        // If any of these regs had an OPEN multi-level approval_instances row
+        // (e.g. advanced to level 2, awaiting HR), the above left it orphaned:
+        // current_level/final_approved unchanged, final_approved still NULL —
+        // the entity now reads 'rejected' but its chain metadata still claims
+        // "awaiting approval," which would keep surfacing in an approver's
+        // pending-approvals view for a request that can no longer be acted on.
+        // Close any such instance the same way recordAndAdvance's own close
+        // branch does (final_approved + closed_at), so system-forced rejection
+        // leaves no stale open chain behind.
+        await fastify.supabase
+          .from('approval_instances')
+          .update({ final_approved: false, closed_at: new Date().toISOString() })
+          .eq('tenant_id', req.tenantId)
+          .eq('entity_type', 'attendance_regularisation')
+          .in('entity_id', regIds)
+          .is('final_approved', null)
+
         // 3. For each unique employee+date, update attendance_daily status to 'absent' (LOP)
         const uniquePairs = Array.from(
           new Map(pendingRegs.map((r: any) => [`${r.employee_id}|${r.date}`, r])).values()

@@ -38,6 +38,7 @@ import { isMonthLocked, monthOf }       from '../../lib/period-lock.js'
 import { HR_ADMIN_ROLES, MANAGER_ROLES } from '../../lib/rbac.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
 import { isSelfApproval } from '../../lib/approval-guards.js'
+import { gateApprove, gateReject } from '../../lib/approval-orchestrator.js'
 
 const dateRe      = /^\d{4}-\d{2}-\d{2}$/
 const ALLOW_ROLES = MANAGER_ROLES
@@ -517,11 +518,12 @@ export default async function attendanceCorrectionsRoute(fastify: FastifyInstanc
     id:  string,
   ): Promise<
     | { ok: true; status: 'processing'; approved_at: string }
+    | { ok: true; status: 'advanced'; nextLevel: number; totalLevels: number }
     | { ok: false; code: number; error: string; message: string }
   > {
     const { data: correction, error: fetchErr } = await fastify.supabase
       .from('attendance_corrections')
-      .select('id, status, employee_id, date, corrected_in, corrected_out')
+      .select('id, status, employee_id, date, corrected_in, corrected_out, submitted_by')
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
@@ -532,7 +534,7 @@ export default async function attendanceCorrectionsRoute(fastify: FastifyInstanc
 
     const c = correction as {
       id: string; status: CorrectionStatus; employee_id: string; date: string
-      corrected_in: string | null; corrected_out: string | null
+      corrected_in: string | null; corrected_out: string | null; submitted_by: string | null
     }
 
     if (c.status === 'processing') {
@@ -556,9 +558,50 @@ export default async function attendanceCorrectionsRoute(fastify: FastifyInstanc
       }
     }
 
-    const authResult = await authoriseApprover(req.userId, req.userRole, req.tenantId, c.employee_id)
-    if (!authResult.ok) {
-      return { ok: false, code: authResult.code, error: authResult.error, message: authResult.message }
+    // SYSTEM_AUDIT_2026-10-14 checkpoint 13 batch — 'attendance_correction' is
+    // a registered entity type (ENTITY_WORKFLOW_MAP → workflow_type
+    // 'correction') with a real, reachable admin UI to configure a
+    // multi-level chain for it (Settings → Approval Workflows → Corrections
+    // tab, apps/web/src/pages/settings/ApprovalWorkflows.tsx), but this route
+    // never engaged the orchestrator at all — authoriseApprover's single-step
+    // manager-or-HR check finalized every correction immediately regardless
+    // of any configured chain, silently skipping every stage past the first.
+    // With no chain configured this returns {kind:'finalize',authorized:false}
+    // and authoriseApprover below runs exactly as before this fix.
+    const gate = await gateApprove(fastify.supabase, {
+      tenantId:         req.tenantId,
+      entityType:       'attendance_correction',
+      entityId:         id,
+      actorId:          req.userId,
+      actorRole:        req.userRole,
+      targetEmployeeId: c.employee_id,
+      submittedByHint:  c.submitted_by,
+    })
+    if (gate.kind === 'error') {
+      const code = gate.error.type === 'FORBIDDEN' ? 403 : gate.error.type === 'NOT_FOUND' ? 404 : 409
+      return { ok: false, code, error: gate.error.type, message: gate.error.message }
+    }
+    if (gate.kind === 'advanced') {
+      // Intermediate level recorded in approval_actions; the correction stays
+      // 'pending' for the next level — no recompute, no event, no status
+      // change, exactly like leave/regularisation's own intermediate step.
+      auditLog(req.tenantId, id, 'UPDATE', req.userId, {
+        event:       'correction.approval_advanced',
+        employee_id: c.employee_id,
+        date:        c.date,
+        level:       gate.level,
+        next_level:  gate.nextLevel,
+        total_levels: gate.totalLevels,
+      })
+      return { ok: true, status: 'advanced', nextLevel: gate.nextLevel, totalLevels: gate.totalLevels }
+    }
+    // gate.kind === 'finalize' — run the legacy manager-or-HR check only when
+    // the per-level gate did not already authorize this actor (no-chain path).
+    if (!gate.authorized) {
+      const authResult = await authoriseApprover(req.userId, req.userRole, req.tenantId, c.employee_id)
+      if (!authResult.ok) {
+        return { ok: false, code: authResult.code, error: authResult.error, message: authResult.message }
+      }
     }
 
     // ── Atomically advance to 'processing' ───────────────────────────────
@@ -654,6 +697,12 @@ export default async function attendanceCorrectionsRoute(fastify: FastifyInstanc
     const result = await approveOneCorrection(req, id)
     if (!result.ok) {
       return reply.code(result.code).send({ error: result.error, message: result.message })
+    }
+    if (result.status === 'advanced') {
+      return reply.send({
+        data: { id, status: 'pending' },
+        message: `Approved at your level — advancing to level ${result.nextLevel} of ${result.totalLevels}.`,
+      })
     }
     return reply.send({ data: { id, status: result.status, approved_at: result.approved_at } })
   })
@@ -869,7 +918,7 @@ export default async function attendanceCorrectionsRoute(fastify: FastifyInstanc
 
     const { data: correction, error: fetchErr } = await fastify.supabase
       .from('attendance_corrections')
-      .select('id, status, employee_id, date')
+      .select('id, status, employee_id, date, submitted_by')
       .eq('id', id)
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
@@ -878,15 +927,40 @@ export default async function attendanceCorrectionsRoute(fastify: FastifyInstanc
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Correction request not found' })
     }
 
-    const c = correction as { id: string; status: CorrectionStatus; employee_id: string; date: string }
+    const c = correction as { id: string; status: CorrectionStatus; employee_id: string; date: string; submitted_by: string | null }
 
     if (c.status !== 'pending') {
       return reply.code(409).send({ error: 'CONFLICT', message: `Correction is already ${c.status}` })
     }
 
-    const authResult = await authoriseApprover(req.userId, req.userRole, req.tenantId, c.employee_id)
-    if (!authResult.ok) {
-      return reply.code(authResult.code).send({ error: authResult.error, message: authResult.message })
+    // SYSTEM_AUDIT_2026-10-14 checkpoint 13 batch — same orchestrator wiring
+    // as approveOneCorrection() above; gateReject always finalizes (any level
+    // may reject), so there's no 'advanced' branch to handle here, only
+    // error-vs-legacy.
+    const gate = await gateReject(fastify.supabase, {
+      tenantId:         req.tenantId,
+      entityType:       'attendance_correction',
+      entityId:         id,
+      actorId:          req.userId,
+      actorRole:        req.userRole,
+      targetEmployeeId: c.employee_id,
+      submittedByHint:  c.submitted_by,
+    })
+    if (gate.kind === 'error') {
+      const code = gate.error.type === 'FORBIDDEN' ? 403 : gate.error.type === 'NOT_FOUND' ? 404 : 409
+      return reply.code(code).send({ error: gate.error.type, message: gate.error.message })
+    }
+    // gateReject's own doc comment guarantees it never returns 'advanced' (any
+    // level may reject, and a reject always finalizes) — GateDecision's type
+    // is shared with gateApprove, which can, so this narrows what TS can't infer.
+    if (gate.kind !== 'finalize') {
+      return serverError(req, reply, new Error(`gateReject returned unexpected kind: ${gate.kind}`), ErrorCode.COMPUTE_FAILED, 'Failed to reject correction')
+    }
+    if (!gate.authorized) {
+      const authResult = await authoriseApprover(req.userId, req.userRole, req.tenantId, c.employee_id)
+      if (!authResult.ok) {
+        return reply.code(authResult.code).send({ error: authResult.error, message: authResult.message })
+      }
     }
 
     // Fold the 'pending' precondition into the UPDATE's own WHERE clause: the

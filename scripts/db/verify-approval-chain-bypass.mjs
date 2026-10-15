@@ -325,6 +325,98 @@ async function main() {
   console.log('full recovery — chain completes normally end to end:', fullyRecovered ? 'PASS' : 'FAIL')
   allOk = allOk && fullyRecovered
 
+  // ══════════════════════════════════════════════════════════════════════
+  // PART C (checkpoint 13 batch sweep) — attendance_correction never
+  // engaged the orchestrator at all: 'attendance_correction' is a
+  // registered entity type (ENTITY_WORKFLOW_MAP → workflow_type
+  // 'correction') with a real admin UI to configure a multi-level chain
+  // for it (Settings → Approval Workflows → Corrections tab), but
+  // corrections.ts's approve/reject routes called only the single-step
+  // authoriseApprover() helper — a configured chain was 100% ignored, not
+  // merely bypassable on a missing-identity edge case. Fixed by wiring
+  // gateApprove/gateReject the same way every sibling entity already does.
+  // ══════════════════════════════════════════════════════════════════════
+  console.log('\n=== PART C: attendance_correction — a configured 2-level chain now genuinely engages (previously 100% ignored) ===')
+
+  const corrLevel1Id = uuid(), corrLevel2Id = uuid()
+  await pool.query(
+    `INSERT INTO approval_workflow_config (id, tenant_id, workflow_type, level, approver_type, label, is_active)
+     VALUES ($1,$2,'correction',1,'direct_manager','Direct Manager',true)`,
+    [corrLevel1Id, tenantId],
+  )
+  await pool.query(
+    `INSERT INTO approval_workflow_config (id, tenant_id, workflow_type, level, approver_type, label, is_active)
+     VALUES ($1,$2,'correction',2,'hr_admin','HR Admin',true)`,
+    [corrLevel2Id, tenantId],
+  )
+  console.log('seeded a REAL 2-level chain for workflow_type=correction: direct_manager -> hr_admin')
+
+  const corrId1 = uuid()
+  await pool.query(
+    `INSERT INTO attendance_corrections (id, tenant_id, employee_id, date, corrected_in, corrected_out, reason, status, submitted_by)
+     VALUES ($1,$2,$3,'2101-05-10', '2101-05-10T09:00:00Z', '2101-05-10T18:00:00Z', 'Forgot to punch', 'pending', $4)`,
+    [corrId1, tenantId, empId, noProfileEmpUserId],
+  )
+
+  // ── Step 11: manager approves level 1 — must ADVANCE, not finalize ──────
+  const step11Res = await fetch(`${API_BASE}/attendance/corrections/${corrId1}/approve`, {
+    method: 'POST', headers: { authorization: `Bearer ${managerToken}`, 'content-type': 'application/json' }, body: JSON.stringify({}),
+  })
+  const step11Body = await step11Res.json()
+  console.log('manager approve (level 1) response:', step11Res.status, step11Body)
+
+  const { rows: [afterStep11] } = await pool.query(`SELECT status FROM attendance_corrections WHERE id=$1`, [corrId1])
+  const { rows: [instanceAfterStep11] } = await pool.query(
+    `SELECT current_level, total_levels, final_approved FROM approval_instances WHERE tenant_id=$1 AND entity_type='attendance_correction' AND entity_id=$2`,
+    [tenantId, corrId1],
+  )
+  console.log('persisted after step 11 — correction.status:', afterStep11.status, '| approval_instances:', instanceAfterStep11)
+  const step11Correct = step11Res.status === 200 && afterStep11.status === 'pending' &&
+    instanceAfterStep11 && instanceAfterStep11.current_level === 2 && instanceAfterStep11.final_approved === null
+  console.log('BEFORE this fix, this single manager approval would have silently finalized the correction (authoriseApprover alone). Now it correctly only ADVANCES — correction stays pending, a real approval_instances row opened at level 2:', step11Correct ? 'PASS' : 'FAIL')
+  allOk = allOk && step11Correct
+
+  // ── Step 12: HR (level 2) finalizes for real ────────────────────────────
+  const step12Res = await fetch(`${API_BASE}/attendance/corrections/${corrId1}/approve`, {
+    method: 'POST', headers: { authorization: `Bearer ${hrToken}`, 'content-type': 'application/json' }, body: JSON.stringify({}),
+  })
+  const step12Body = await step12Res.json()
+  console.log('HR approve (level 2) response:', step12Res.status, step12Body)
+
+  const { rows: [afterStep12] } = await pool.query(`SELECT status, approved_by FROM attendance_corrections WHERE id=$1`, [corrId1])
+  const { rows: [instanceAfterStep12] } = await pool.query(
+    `SELECT current_level, final_approved FROM approval_instances WHERE tenant_id=$1 AND entity_type='attendance_correction' AND entity_id=$2`,
+    [tenantId, corrId1],
+  )
+  console.log('persisted after step 12 — correction.status:', afterStep12.status, 'approved_by:', afterStep12.approved_by, '| approval_instances:', instanceAfterStep12)
+  const step12Correct = step12Res.status === 200 && afterStep12.status === 'processing' &&
+    afterStep12.approved_by === hrUserId && instanceAfterStep12.final_approved === true
+  console.log('HR (the real level-2 approver) genuinely finalizes the chain — correction moves to processing, approval_instances closed approved:', step12Correct ? 'PASS' : 'FAIL')
+  allOk = allOk && step12Correct
+
+  // ── Step 13: reject at level 1 finalizes immediately (any level may reject) ──
+  const corrId2 = uuid()
+  await pool.query(
+    `INSERT INTO attendance_corrections (id, tenant_id, employee_id, date, corrected_in, corrected_out, reason, status, submitted_by)
+     VALUES ($1,$2,$3,'2101-05-11', '2101-05-11T09:00:00Z', '2101-05-11T18:00:00Z', 'Forgot to punch', 'pending', $4)`,
+    [corrId2, tenantId, empId, noProfileEmpUserId],
+  )
+  const rejectRes = await fetch(`${API_BASE}/attendance/corrections/${corrId2}/reject`, {
+    method: 'POST', headers: { authorization: `Bearer ${managerToken}`, 'content-type': 'application/json' }, body: JSON.stringify({ rejection_reason: 'Not a genuine missed punch' }),
+  })
+  const rejectBody = await rejectRes.json()
+  console.log('manager rejects at level 1:', rejectRes.status, rejectBody)
+  const { rows: [afterReject] } = await pool.query(`SELECT status FROM attendance_corrections WHERE id=$1`, [corrId2])
+  const { rows: [instanceAfterReject] } = await pool.query(
+    `SELECT current_level, final_approved FROM approval_instances WHERE tenant_id=$1 AND entity_type='attendance_correction' AND entity_id=$2`,
+    [tenantId, corrId2],
+  )
+  console.log('persisted after reject — correction.status:', afterReject.status, '| approval_instances:', instanceAfterReject)
+  const rejectCorrect = rejectRes.status === 200 && afterReject.status === 'rejected' &&
+    instanceAfterReject && instanceAfterReject.current_level === 1 && instanceAfterReject.final_approved === false
+  console.log('reject at ANY level finalizes immediately (not gated behind reaching the final level) — correction rejected, chain closed as rejected at level 1, never advanced:', rejectCorrect ? 'PASS' : 'FAIL')
+  allOk = allOk && rejectCorrect
+
   console.log(allOk ? '\nALL STEPS PASS' : '\nFAIL')
   await pool.end()
   process.exit(allOk ? 0 : 1)

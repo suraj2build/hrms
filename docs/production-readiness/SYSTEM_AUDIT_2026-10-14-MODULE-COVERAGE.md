@@ -1559,24 +1559,150 @@ checkpoint so completed work is never repeated. Batch log:
   664/664 tests (unchanged — Part 5 is a `.mjs` script, not a vitest
   file). `tsc --noEmit` clean on both apps.
 
-- **Next planned batches** (not yet started — listed so a future session
-  picks up here, not from zero): continue item 2's batch — tier 2 of the
-  remaining ~49 unopened `routes/attendance` files (punch/corrections/
-  overtime's non-scope sections/recompute/retroactive/period-locks'
-  remaining non-lock-creation logic); tier 3 (rosters/shifts/holidays/
-  wo-credit). Then item 3 —
-  Compensation,
-  Payroll, statutory calculations, reimbursements, loans/advances, F&F and
-  accounting (much of this has prior-round coverage per CLAUDE.md, but
-  has not been re-verified against this round's full item-2 checklist).
-  Then items 4-6 per the user's stated execution order: Masters/
-  organization/positions/onboarding/recruitment/assets/documents; ESS/
-  manager/admin/owner portals + dashboards/reports/imports/notifications/
-  support/integrations; shared infrastructure and cross-module
-  interactions. Also recommended, not yet done: delete the confirmed-100%-dead
-  `AdminDashboard.tsx` / `Dashboard.tsx` (zero route registrations,
-  verified above) — flagging rather than deleting this round since the
-  session's own destructive-action guard declined the delete.
+- **Checkpoint 14 — tier 2, batch 1** (this commit): the user's standing
+  instruction is to continue the sweep without pausing between
+  checkpoints; this is the first tier-2 batch, covering `punch.ts`,
+  `corrections.ts`, `overtime.ts` (re-examined, not just its approval-queue
+  scope), `recompute.ts`, `retroactive.ts`, `period-locks.ts` — the exact
+  6 files this register's own prior entry named as the next batch.
+
+  **1. `corrections.ts` — a configured multi-level approval chain was
+  100% ignored, not just bypassable on an edge case. SEVERE, now fixed.**
+  `attendance_correction` is a registered entity type
+  (`ENTITY_WORKFLOW_MAP` → workflow_type `'correction'`) with a real,
+  reachable admin UI to configure a chain for it — Settings → Approval
+  Workflows → a labeled "Corrections" tab
+  (`apps/web/src/pages/settings/ApprovalWorkflows.tsx` line 95), backed by
+  a real, accepting API (`routes/approvals/workflows.ts`'s
+  `WORKFLOW_TYPES` enum includes `'correction'`). But
+  `corrections.ts`'s `approveOneCorrection`/reject handler never called
+  `gateApprove`/`gateReject` at all — every correction finalized in ONE
+  step via the route's own bespoke `authoriseApprover` (manager-or-HR),
+  silently skipping every stage past the first for ANY tenant that
+  configured a chain through that real UI. This is a stronger version of
+  the bug class checkpoints 11-13 already closed elsewhere: not a
+  fallback triggered by a missing identity or a deleted config, but total
+  non-engagement of the orchestrator for this entity type — and the
+  route had **zero existing tests** before this fix, which is plausibly
+  why it went unnoticed. Fixed: wired `gateApprove`/`gateReject`
+  identically to the established leave/regularisation/overtime pattern,
+  including the `submittedByHint` authorized-path identity
+  (`attendance_corrections.submitted_by`, set at submission time to the
+  real submitting user's own profile id — confirmed by reading the
+  `POST /attendance/corrections` handler, not assumed). `attendance_
+  corrections.status` has no separate "approval_level" column the way
+  leave does, so an intermediate `{kind:'advanced'}` decision now simply
+  leaves `status` at `'pending'` (unchanged) rather than CAS-advancing it
+  to `'processing'` — correctly deferring the recompute/event/
+  orchestration side effects until the chain is actually closed.
+  Genuinely unconfigured workflows are completely unaffected (confirmed
+  by test and by code: `config.length===0` still returns legacy
+  immediately, before ever reaching this route's own authorization
+  logic). **Mocked tests** (new,
+  `corrections-approval-chain.test.ts`, 5 tests): a 2-level chain
+  genuinely advances on the first approval (stays pending, not
+  processing) and only finalizes on the second; an unconfigured workflow
+  is unaffected; reject finalizes immediately at any level; a non-direct-
+  manager is still refused by the legacy check when no chain applies.
+  **Real-Postgres + real-HTTP proof** (`scripts/db/verify-approval-chain-
+  bypass.mjs`'s new "Part C", reusing Part A's seeded tenant/manager/HR):
+  a genuine 2-level chain seeded via raw SQL (equivalent to what the real
+  UI would write); the manager's real HTTP approval correctly only
+  ADVANCES (stays `'pending'`, a real `approval_instances` row opens at
+  level 2 — before this fix it would have silently finalized to
+  `'processing'` right here); HR's real HTTP approval at level 2
+  genuinely finalizes (`'processing'`, `approved_by` correctly HR's own
+  id, `approval_instances.final_approved=true`); a separate correction
+  rejected at level 1 finalizes immediately as `'rejected'` with the
+  chain closed at level 1 (never advanced) — matching `gateReject`'s
+  documented "any level may reject" semantics. All 4 new steps pass
+  alongside the unchanged original 11 from Parts A/B.
+
+  **2. `period-locks.ts`'s auto-LOP job orphans open approval chains —
+  real, now fixed.** The `/lock` route's fire-and-forget auto-reject of
+  every still-pending regularisation for the locked month does a raw
+  `UPDATE attendance_regularisation SET status='rejected'`, bypassing
+  `gateReject` entirely. If any of those regularisations had an OPEN
+  multi-level `approval_instances` row (advanced past level 1, genuinely
+  awaiting a later approver — proven reachable: `regularisation.ts`
+  already supports exactly this, confirmed throughout Parts A-C above),
+  that row was left orphaned: `current_level`/`final_approved` untouched,
+  `final_approved` still `NULL` — the entity reads `'rejected'` but its
+  own chain metadata still claims "awaiting approval," which would keep
+  surfacing a dead request in an approver's pending-approvals view.
+  Fixed: the same fire-and-forget block now also closes any such open
+  instance (`final_approved=false, closed_at=now()`), mirroring
+  `recordAndAdvance`'s own close semantics exactly. **Real-Postgres +
+  real-HTTP proof** (new `scripts/db/verify-period-lock-auto-lop-closes-
+  chain.mjs`): seeds a tenant/manager/HR/employee and a real 2-level
+  regularisation chain, advances a regularisation to level 2 via real
+  HTTP (leaving a genuinely open instance, confirmed by read-back before
+  proceeding), then HR locks the period via real HTTP
+  `POST /attendance/period-locks/:month/lock`; polls Postgres for the
+  fire-and-forget job to settle; confirms the regularisation reads
+  `'rejected'` with the auto-LOP message AND the `approval_instances` row
+  is now closed (`final_approved=false`, `closed_at` set) rather than
+  left open forever. Both assertions PASS.
+
+  **3. Files read and found already correct, no defect**: `punch.ts`
+  (tenant-scoped, admin-vs-self correctly gated, period-lock checked,
+  the DB-level unique constraint backstops the idempotency layer for the
+  exact same-timestamp race); `overtime.ts` (already correctly wired to
+  `gateApprove`/`gateReject` from an earlier round — confirmed the
+  `'advanced'` branch is handled properly and `'finalize'` correctly
+  falls through to the real OT engine call; missing only the optional
+  `submittedByHint` nicety, which is the same already-disclosed,
+  deliberate scope decision from the main checkpoint 13 entry above, not
+  a new gap, since the orchestrator's own fail-closed behavior protects
+  it regardless); `recompute.ts` (admin-only, tenant-scoped,
+  `fetchAllRows` used correctly per CLAUDE.md's universal pagination
+  rule, period-lock checked before either the single-employee or
+  background bulk path, background job status/error tracking correct).
+
+  **4. Disclosed, not fixed (low severity, read-only observability)**:
+  `retroactive.ts`'s `POST /attendance/retroactive/detect` has no
+  de-duplication — confirmed via `\d attendance_retroactive_impacts` that
+  no unique constraint exists — so calling `/detect` twice for an
+  overlapping date range inserts duplicate impact rows. This is a
+  data-quality nit in a read-only admin observability list (the kind of
+  module CLAUDE.md's "admin-load philosophy" section already discusses
+  de-emphasizing), not a security or financial-correctness defect; left
+  for a future round rather than scope-creeping this batch.
+
+  **Test suite, this checkpoint's final count**: 80/80 files (up from
+  78 — 1 new file, `corrections-approval-chain.test.ts`), 674/674 tests
+  passed (up from 669 — 5 new), 0 regressions. `tsc --noEmit` clean on
+  both `apps/api` and `apps/web`.
+
+- **Next planned batch** (not yet started): tier 2's remaining files —
+  the other ~43 unopened `routes/attendance` files beyond this batch's 6
+  (muster/muster-upload, roster-api/roster-calendar/roster-context,
+  wo-credit, wfh, leave-duration/leave-jobs/leave-reconciliation/leave-
+  scheduler-status/leave-accrual-lifecycle, manager-dashboard, payroll-
+  summary, and the intelligence/anomaly/forensics/confidence/risk cluster
+  — `anomalies.ts`, `anomaly-reconcile.ts`, `confidence.ts`, `forensics.ts`,
+  `health-index.ts`, `inference.ts`, `intelligence.ts`, `risk.ts`,
+  `timeline-intelligence.ts`, `workforce-optimization.ts`, `pipeline-
+  stats.ts`, `policy-conflicts.ts`, `simulate-policy.ts` — largely
+  already de-emphasized per CLAUDE.md's 2026-10-11 admin-load philosophy
+  decision, so a lighter pass there is appropriate, not full per-route
+  authorization re-derivation); regularisation-policy.ts; context.ts;
+  api-sources.ts; ingest.ts; fetch.ts; upload.ts/upload-health.ts;
+  queue-actions.ts; status.ts; last-run.ts; run-details.ts; run-export.ts;
+  sample-csv.ts; who-is-in.ts; work-sessions.ts; debug-raw.ts; audit.ts;
+  force-unlock.ts; reconciliation.ts/reconciliation-validate.ts. Then
+  item 3 — Compensation, Payroll, statutory calculations, reimbursements,
+  loans/advances, F&F and accounting (much of this has prior-round
+  coverage per CLAUDE.md, but has not been re-verified against this
+  round's full item-2 checklist). Then items 4-6 per the user's stated
+  execution order: Masters/organization/positions/onboarding/
+  recruitment/assets/documents; ESS/manager/admin/owner portals +
+  dashboards/reports/imports/notifications/support/integrations; shared
+  infrastructure and cross-module interactions. Also recommended, not yet
+  done: delete the confirmed-100%-dead `AdminDashboard.tsx` / `Dashboard.
+  tsx` (zero route registrations, verified in an earlier round) —
+  flagging rather than deleting since the session's own destructive-
+  action guard declined the delete.
 
 **Scale disclosure, stated up front so it isn't mistaken for completion:**
 the API has **289 route files** across **52 route namespaces**; the web
@@ -1710,6 +1836,27 @@ from earlier in this session):
   bootstrap.sql`, then the complete `000`→`466` history — 462 `.sql`
   files, 0 errors, 468 tables in `public` (`pg_tables`),
   `idempotency_keys.request_hash` present as `TEXT`, nullable.
+
+**Real stack + real HTTP + real Postgres, checkpoint 14** (tier 2 batch
+1; same local stack, restarted this round — `tsx watch` auto-reloaded the
+API on `corrections.ts`/`period-locks.ts`'s source changes):
+- `scripts/db/verify-approval-chain-bypass.mjs`'s new "Part C" is the
+  real-Postgres + real-HTTP proof for the `corrections.ts` fix — a real
+  2-level `correction` chain genuinely advances then finalizes across two
+  separate real HTTP approvals, and a separate correction rejected at
+  level 1 finalizes immediately without advancing. All 4 new steps pass;
+  the original 11 steps from Parts A/B re-run unchanged.
+- `scripts/db/verify-period-lock-auto-lop-closes-chain.mjs` (new) is the
+  real-Postgres + real-HTTP proof for the `period-locks.ts` fix — a
+  regularisation is advanced to a genuinely open level-2
+  `approval_instances` row via real HTTP, confirmed open by a Postgres
+  read-back BEFORE the lock call (not assumed), then HR locks the period
+  via real HTTP; after polling for the fire-and-forget auto-LOP job to
+  settle, both the regularisation's `'rejected'` status and the
+  previously-orphaned `approval_instances` row's new closed state
+  (`final_approved=false`, `closed_at` set) are confirmed from real
+  Postgres.
+- Both new scripts committed for re-use.
 
 ## Explicitly still blocked / out of scope (unchanged from the prior round)
 
