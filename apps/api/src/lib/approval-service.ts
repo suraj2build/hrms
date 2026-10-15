@@ -220,6 +220,13 @@ export async function approveLeaveRequest(
     actorId:          ctx.approverId,
     actorRole:        ctx.approverRole,
     targetEmployeeId: req.employee_id,
+    // SYSTEM_AUDIT_2026-10-14 checkpoint 13 — the authorized-path identity
+    // for a new approval_instances row: this request's own already-valid
+    // submitter (requested_by is NOT NULL on leave_requests), rather than
+    // making the orchestrator re-derive it from employee_id's CURRENT
+    // profiles link, which can go missing (profile unlinked/deleted) long
+    // after a request was validly submitted.
+    submittedByHint:  req.requested_by,
   })
   if (gate.kind === 'error') {
     return { ok: false, error: { type: gate.error.type, message: gate.error.message } }
@@ -679,6 +686,7 @@ export async function rejectLeaveRequest(
     actorRole:        ctx.approverRole,
     targetEmployeeId: req.employee_id,
     comments:         rejectionReason,
+    submittedByHint:  req.requested_by,
   })
   if (gate.kind === 'error') {
     return { ok: false, error: { type: gate.error.type, message: gate.error.message } }
@@ -787,7 +795,7 @@ export async function approveRegularisation(
   // 1. Fetch
   const { data: reg, error: fetchErr } = await supabase
     .from('attendance_regularisation')
-    .select('id, status, employee_id, date, requested_check_in, requested_check_out')
+    .select('id, status, employee_id, date, requested_check_in, requested_check_out, submitted_by')
     .eq('id', regularisationId)
     .eq('tenant_id', tenantId)
     .maybeSingle()
@@ -799,6 +807,7 @@ export async function approveRegularisation(
   const regRow = reg as {
     id: string; status: string; employee_id: string; date: string;
     requested_check_in: string | null; requested_check_out: string | null
+    submitted_by: string | null
   }
 
   // Status pre-check (Step 2)
@@ -844,6 +853,12 @@ export async function approveRegularisation(
     actorId:          ctx.approverId,
     actorRole:        ctx.approverRole,
     targetEmployeeId: regRow.employee_id,
+    // SYSTEM_AUDIT_2026-10-14 checkpoint 13 — authorized-path identity;
+    // attendance_regularisation.submitted_by is nullable (unlike leave_
+    // requests.requested_by), so this can itself be null — getOrCreate
+    // Instance falls back to the employee_id→profile lookup in that case,
+    // same as before this round.
+    submittedByHint:  regRow.submitted_by,
   })
   if (gate.kind === 'error') {
     return { ok: false, error: { type: gate.error.type, message: gate.error.message } }
@@ -937,7 +952,7 @@ export async function rejectRegularisation(
   // Fetch
   const { data: reg, error: fetchErr } = await supabase
     .from('attendance_regularisation')
-    .select('id, status, employee_id, date')
+    .select('id, status, employee_id, date, submitted_by')
     .eq('id', regularisationId)
     .eq('tenant_id', tenantId)
     .maybeSingle()
@@ -946,7 +961,7 @@ export async function rejectRegularisation(
     return { ok: false, error: { type: 'NOT_FOUND', message: 'Regularisation request not found' } }
   }
 
-  const regRow = reg as { id: string; status: string; employee_id: string; date: string }
+  const regRow = reg as { id: string; status: string; employee_id: string; date: string; submitted_by: string | null }
 
   // Status pre-check (Step 2)
   if (regRow.status !== 'pending') {
@@ -966,6 +981,7 @@ export async function rejectRegularisation(
     actorRole:        ctx.approverRole,
     targetEmployeeId: regRow.employee_id,
     comments:         rejectionReason,
+    submittedByHint:  regRow.submitted_by,
   })
   if (gate.kind === 'error') {
     return { ok: false, error: { type: gate.error.type, message: gate.error.message } }

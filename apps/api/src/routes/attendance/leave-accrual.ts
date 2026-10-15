@@ -39,7 +39,7 @@ import {
   processCarryForward,
   processEncashment,
 } from '../../lib/accrual-engine.js'
-import { checkIdempotency, storeIdempotency, claimIdempotency, releaseIdempotencyClaim } from '../../lib/idempotency.js'
+import { checkIdempotency, storeIdempotency, claimIdempotency, releaseIdempotencyClaim, hashIdempotencyPayload, getStoredRequestHash } from '../../lib/idempotency.js'
 import { notFound, serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
@@ -302,13 +302,28 @@ export default async function leaveAccrualRoutes(fastify: FastifyInstance) {
     // performs the re-sum + cap check + insert inside one transaction.
     const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
     const scope = 'leave-encashment-request'
+    // SYSTEM_AUDIT_2026-10-14 checkpoint 13 — "test same-key reuse with a
+    // different payload": checkIdempotency replays whatever was stored
+    // under a key with no comparison against the current body, so a key
+    // reused across two meaningfully different submissions would silently
+    // return the FIRST request's result for the second. requestHash is
+    // this route's fingerprint of the normalized request body; a mismatch
+    // against whatever hash is already stored under this key means the
+    // key is being reused for a different request, which must be refused
+    // rather than replayed or silently processed as a third, untracked
+    // request.
+    const requestHash = hashIdempotencyPayload(parsed.data)
     if (iKey) {
+      const storedHash = await getStoredRequestHash(fastify.supabase, req.tenantId, iKey, scope)
+      if (storedHash !== null && storedHash !== requestHash) {
+        return reply.code(409).send({ error: 'IDEMPOTENCY_KEY_REUSED', message: 'This Idempotency-Key was already used for a different request' })
+      }
       const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, scope)
       if (cached) {
         reply.header('Idempotency-Replayed', 'true')
         return reply.code(cached.status_code).send(cached.response)
       }
-      const claimed = await claimIdempotency(fastify.supabase, req.tenantId, iKey, scope)
+      const claimed = await claimIdempotency(fastify.supabase, req.tenantId, iKey, scope, requestHash)
       if (!claimed) {
         return reply.code(409).send({ error: 'DUPLICATE_REQUEST', message: 'An identical request is already being processed' })
       }
@@ -350,7 +365,7 @@ export default async function leaveAccrualRoutes(fastify: FastifyInstance) {
     }
 
     const responseBody = { data: rpcData }
-    if (iKey) await storeIdempotency(fastify.supabase, req.tenantId, iKey, scope, 201, responseBody)
+    if (iKey) await storeIdempotency(fastify.supabase, req.tenantId, iKey, scope, 201, responseBody, requestHash)
     return reply.code(201).send(responseBody)
   })
 

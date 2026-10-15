@@ -1265,6 +1265,203 @@ checkpoint so completed work is never repeated. Batch log:
     citing evidence for — A's and C's `approved_at` timestamps are
     BYTE-IDENTICAL to their first read, proving the retry touched only
     the one row it targeted.
+- **Checkpoint 13** (this commit): the user independently reviewed
+  checkpoint 12's real-Postgres approval-chain script and surfaced a
+  second, different bug it had exposed while being built: a missing
+  employee profile silently triggers the LEGACY single-step approval
+  fallback even when a multi-level workflow genuinely applies — the user
+  asked this be fixed to fail explicitly or resolve identity through an
+  authorized path, with both regression and persisted tests. The user also
+  asked the encashment lifecycle (approval/reversal/policy changes) be
+  confirmed cap-invariant under concurrency, with same-key-different-
+  payload and lost-HTTP-response-retry specifically tested, before
+  resuming the unopened-module sweep.
+
+  **1. `getOrCreateInstance` silent-legacy-fallback — fixed, fails closed
+  now.** By the point `gateApprove`/`gateReject` call `getOrCreateInstance`,
+  checkpoint 11's own earlier guards (`config.length===0`,
+  `applicable.length===0`, both checked with `openInstanceExists` to
+  distinguish "genuinely unconfigured" from "configured but instance
+  already open") have ALREADY run and returned — so a workflow is
+  PROVABLY configured and applicable by the time this function is reached.
+  Its old bare-`null` return on a failed `submitted_by` resolution was
+  indistinguishable, to both call sites, from "no workflow configured,"
+  so it fell straight to the legacy single-step path — skipping every
+  configured stage. Fixed (`lib/approval-orchestrator.ts`):
+  `getOrCreateInstance` now returns a discriminated
+  `{kind:'found'|'identity_unresolved'|'db_error', ...}` result; a new
+  `instanceFailureDecision` helper turns `identity_unresolved` into a
+  `409 CONFLICT` naming the actual problem ("no login profile is linked to
+  the requesting employee... Link a profile... before approving") and any
+  other `db_error` into a generic `DB_ERROR` — neither ever falls through
+  to `{kind:'finalize', authorized:false}` (the legacy path) once a
+  workflow is known to apply. **Authorized recovery path, not just a
+  refusal**: `GateInput` gained an optional `submittedByHint` — the
+  entity's OWN already-recorded submitter column
+  (`leave_requests.requested_by`, NOT NULL; `attendance_regularisation.
+  submitted_by`, nullable) — so callers that already loaded the row can
+  pass its valid-at-submission-time identity directly instead of making
+  `getOrCreateInstance` re-derive it from the target employee's CURRENT
+  `profiles` link, which can be absent even for a validly-submitted
+  request. Wired into all 4 existing call sites in `approval-service.ts`
+  (leave approve/reject, regularisation approve/reject); a caller that
+  omits the hint falls back to the employee→profile lookup, unchanged.
+  Genuinely unconfigured workflows are completely unaffected — the
+  earlier `config.length===0` guard still returns legacy, exactly as
+  before, confirmed by a dedicated test case. **Deliberately not wired
+  this round**: the 5 other known `gateApprove`/`gateReject` call sites
+  (`comp-off.ts`, `overtime.ts`, `payroll/loans.ts`,
+  `payroll/reimbursements.ts`, `payroll/advances.ts`) — the shared
+  orchestrator's fail-closed fix protects them regardless (they now
+  correctly error instead of silently bypassing); only the nicer
+  resolved-identity UX, not a safety gap, is deferred there.
+
+  **Mocked tests**
+  (`lib/__tests__/approval-orchestrator-identity-unresolved.test.ts`, new,
+  6 tests): identity-unresolved with an active config fails CLOSED with
+  `CONFLICT` for both `gateApprove` and `gateReject`; a supplied
+  `submittedByHint` resolves the instance WITHOUT ever querying the
+  employee→profile lookup (proven by a `'THROW'` sentinel on that lookup
+  path); a null/absent hint falls back to the lookup unchanged; a
+  genuinely unconfigured workflow stays legacy even with a hint provided;
+  a non-identity DB error during instance creation also fails closed, not
+  legacy. **Real-Postgres + real-HTTP proof**
+  (`scripts/db/verify-approval-chain-bypass.mjs`, extended with a new
+  "Part B," steps 8–11, reusing Part A's seeded tenant/manager/HR and
+  restored 2-level config): seeds a second employee with deliberately NO
+  `profiles` row and a pending regularisation for them; the manager's real
+  HTTP approve attempt is refused `409` with the exact "no login profile
+  is linked" message, and a real Postgres read-back confirms the
+  regularisation is still `pending`, `approved_by` is still `null`, and —
+  critically — no `approval_instances` row was EVER created (the function
+  fails before `createWorkflowInstance` is reached, not after). The
+  authorized recovery path is then proven, not just asserted: a profile is
+  linked to the employee, the SAME manager retries the SAME call, and it
+  now succeeds, genuinely engaging the 2-level chain (advances to level 2,
+  read back from Postgres as `current_level=2, submitted_by=<newly-linked
+  profile id>` — proving the fallback resolution genuinely engaged, not
+  that it merely stopped erroring); HR then finalizes level 2 for real.
+  All 4 new steps pass alongside the unchanged original 7 from Part A.
+
+  **2. Encashment cap invariant under concurrency — approval/reversal/
+  policy-change review, same-key-different-payload, and lost-response
+  retry.** Traced every writer in the encashment lifecycle
+  (`processEncashment` in `accrual-engine.ts`; migration 447's
+  `assign_leave_encashment_to_payroll_run_atomic`,
+  `fn_finalize_leave_encashments_for_run`,
+  `fn_revert_leave_encashments_for_rollback`; migration 446/448's
+  `reverse_leave_encashment_atomic`) against the cap invariant (`SUM(days)
+  WHERE status NOT IN ('rejected','reversed') <= max_encashable_per_year`
+  for a given `tenant/employee/leave_type/year`, enforced transactionally
+  at insert time by migration 465's `request_leave_encashment_atomic`,
+  proven under real concurrency in checkpoint 12). **Conclusion: the
+  invariant is preserved continuously, not just at insert time** — every
+  writer after the atomic insert either (a) never changes a row's `days`
+  value at all (approve, assign-to-run, finalize), or (b) only ever
+  REMOVES a row from the counted set (reversal → `'reversed'`), never adds
+  to it or resurrects a removed row. No writer in this set can increase
+  the counted sum once a row exists, so a request that passed the cap
+  check at insert time cannot later be pushed over the cap by anything
+  downstream — this closes the "approval/reversal/policy changes preserve
+  the invariant" half of the user's ask via code review; it is a logical
+  argument about the writer set, not a new concurrency test, since
+  checkpoint 12's Part 4 (approve → reverse → re-request) already
+  exercises the one state transition (reversal) that changes set
+  membership at all, under real Postgres.
+
+  **Same-key-different-payload and lost-response-retry — a real,
+  previously undetected gap, now fixed.** `lib/idempotency.ts`'s
+  `checkIdempotency` replayed whatever was stored under a
+  `(tenant_id, key)` pair with NO comparison against the current request
+  body — a client that reused an Idempotency-Key across two meaningfully
+  different submissions would silently get back the FIRST request's
+  result describing a DIFFERENT request, with the second one dropped,
+  never inserted, never reported as refused. Fixed, backward-compatibly:
+  migration 466 adds an optional, nullable `idempotency_keys.request_hash`
+  column; `hashIdempotencyPayload()` (new) fingerprints a recursively
+  key-sorted canonicalization of the parsed request body (so key-ordering
+  differences across clients still hash identically); `getStoredRequestHash()`
+  (new) reads back whatever hash is stored for a key;
+  `claimIdempotency`/`storeIdempotency` each gained an OPTIONAL trailing
+  `requestHash` parameter (every existing call site across the codebase
+  that omits it is unaffected — `checkIdempotency`'s own signature and
+  return type are completely unchanged, so none of its ~136 existing call
+  sites needed touching). Wired into `POST /leave/encashment/request`
+  (`routes/attendance/leave-accrual.ts`): the route now calls
+  `getStoredRequestHash` BEFORE `checkIdempotency`, and a mismatch is
+  refused with a new `409 IDEMPOTENCY_KEY_REUSED` rather than replayed or
+  silently reprocessed as an untracked third request; the genuine retry
+  case (same key, same payload, simulating a client that committed but
+  never saw the HTTP response) is unaffected and still replays the cached
+  result.
+
+  **Mocked tests**
+  (`routes/attendance/__tests__/leave-encashment-request-hash-mismatch.
+  test.ts`, new, 4 tests): same-key-different-payload → `409
+  IDEMPOTENCY_KEY_REUSED`, no second RPC call, first result not replayed;
+  same payload with different JSON key ORDERING is still recognized as
+  the same request (hash is computed from the parsed/normalized body, not
+  raw bytes) and replays normally; a genuine retry after a fully-committed
+  request (simulating a lost HTTP response) replays the exact cached
+  result with no second RPC call; a pre-existing row with no stored hash
+  at all (a hash-naive legacy row) is unaffected, still replays as before.
+
+  **Real-Postgres + real-HTTP proof, with an honestly-disclosed test-infra
+  bug found and fixed along the way**
+  (`scripts/db/verify-encashment-idempotency-hash.mjs`, new): seeds a real
+  tenant/employee/encashable leave type, then drives the real compiled API
+  over real HTTP. First attempt at running this script against the
+  existing local gateway shim (`/tmp/supabase-gateway.mjs` — sandbox-only
+  test infrastructure, **not part of the repo**, built in prior rounds to
+  stand in for the unreachable real `postgrest` binary) returned `409
+  DUPLICATE_REQUEST` on the very FIRST request, every time, whenever an
+  Idempotency-Key header was sent — meaning `claimIdempotency`'s real
+  INSERT (via the real `supabase-js` client, not a mock) was failing on
+  every call through this gateway, silently, via its own documented
+  fail-safe ("any other insert failure... fail safe by not claiming").
+  Root-caused with a direct `curl` reproduction against the gateway's REST
+  endpoint: the shim's generic insert/update handler forwarded a JS `null`
+  (the value `claimIdempotency` deliberately sends for the NOT-NULL jsonb
+  `response` column while a claim is in-flight) as a bare SQL NULL
+  parameter, violating the NOT NULL constraint — where real PostgREST
+  distinguishes an explicit JSON `null` sent for a jsonb column (stored as
+  the jsonb null literal) from a true SQL NULL. **This means the
+  encashment route's real HTTP behavior with an Idempotency-Key header had
+  never actually been exercised successfully end-to-end before this
+  round** — checkpoint 12's own real-Postgres script called the RPC
+  directly via raw `pg.Client` queries (deliberately routing around this
+  exact gateway limitation per its own code comment), and the mocked route
+  tests mock `supabase` entirely, so neither could have caught it. Fixed
+  the test shim itself (a `JSONB_NULL_COLUMNS` table/column allow-list,
+  currently just `idempotency_keys.response`, explicitly commented as a
+  test-infra fix, not a product change) rather than working around it in
+  the test — re-ran `verify-approval-chain-bypass.mjs` and
+  `verify-encashment-cap-atomic.mjs` afterward to confirm zero regression
+  from the shim change (both: ALL PARTS/STEPS PASS, unchanged results).
+  With the shim fixed, all 3 steps of the new script pass against real
+  Postgres: (1) first submission persists exactly once; (2) the SAME key
+  with a DIFFERENT payload (2 days vs. the original 3) is refused `409
+  IDEMPOTENCY_KEY_REUSED`, is NOT the first response replayed, and leaves
+  exactly 1 row persisted, not 2; (3) retrying the SAME key with the SAME
+  payload (simulating a client that never saw the first response) returns
+  the byte-identical cached response with `Idempotency-Replayed: true` and
+  still exactly 1 row persisted — no duplicate insert from the "lost
+  response" retry. Final Postgres read-back: exactly one row, `days=3`
+  (the original request), never overwritten, duplicated, or bypassed by
+  either the mismatched or the retried attempt.
+
+  **Migration 466 fresh-install**: applied cleanly against a newly created
+  database with the project's `scripts/db/bootstrap.sql` shim, then the
+  complete `000`→`466` history — 462 `.sql` files, 0 errors; resulting
+  schema has 468 tables in `public` (`pg_tables`); `idempotency_keys.
+  request_hash` confirmed present (`TEXT`, nullable) via `\d`.
+
+  **Test suite, this checkpoint's final count**: 78/78 files (up from
+  checkpoint 12's 76 — 2 new files: the identity-unresolved orchestrator
+  tests and the hash-mismatch route tests), 664/664 tests passed (up from
+  654 — 10 new: 6 + 4), 0 regressions. `tsc --noEmit` clean on both
+  `apps/api` and `apps/web`.
+
 - **Next planned batches** (not yet started — listed so a future session
   picks up here, not from zero): continue item 2's batch — tier 2 of the
   remaining ~49 unopened `routes/attendance` files (punch/corrections/
@@ -1379,6 +1576,43 @@ retried row (`approved_at` on the other two rows is unchanged, not just
 Screenshots are ephemeral (`/tmp/claude-0/.../cp10-retry-panel/`, not
 committed) — re-run the browser script to regenerate them; 2 were sent to
 the user this round.
+
+**Real stack + real HTTP + real Postgres, checkpoint 13** (same local
+stack, restarted this round — `pg_ctlcluster 16 main start`, the gateway
+shim, `tsx watch` auto-reloading the API on this round's source changes,
+the Vite web dev server; `hrms_uat` and all committed scripts survived
+from earlier in this session):
+- `scripts/db/verify-approval-chain-bypass.mjs`'s new "Part B" (steps
+  8–11) is the real-Postgres + real-HTTP proof for the identity-
+  unresolved fail-closed fix — see the checkpoint 13 batch-log entry
+  above for the full sequence. All 4 new steps pass; the original 7-step
+  Part A re-runs unchanged (re-run specifically to confirm the gateway
+  fix below introduced no regression).
+- `scripts/db/verify-encashment-idempotency-hash.mjs` (new) is the
+  real-Postgres + real-HTTP proof for the idempotency-key payload-
+  fingerprint fix — same-key-different-payload refusal and lost-response
+  retry replay, both read back from real Postgres, not asserted from the
+  HTTP response alone. Building it surfaced and fixed a genuine gap in
+  the LOCAL TEST GATEWAY itself (`/tmp/supabase-gateway.mjs`, sandbox-only,
+  not part of the repo): its generic insert/update handler had no
+  column-type awareness and forwarded any JS `null` as a bare SQL NULL,
+  so every real `claimIdempotency()` call against a NOT-NULL jsonb column
+  (`idempotency_keys.response`) failed silently via that function's own
+  documented fail-safe — meaning the encashment route's real-HTTP
+  Idempotency-Key behavior had never actually been exercised successfully
+  end-to-end before this round (checkpoint 12's real-Postgres script
+  called the RPC directly via raw `pg.Client`, deliberately routing around
+  this exact limitation per its own code comment; the mocked route tests
+  mock `supabase` entirely). Fixed with a small, explicitly-commented
+  `JSONB_NULL_COLUMNS` allow-list in the shim (currently just
+  `idempotency_keys.response`) rather than worked around in the test.
+  `verify-encashment-cap-atomic.mjs` and `verify-approval-chain-bypass.mjs`
+  were both re-run after this shim change specifically to confirm zero
+  regression — both: unchanged, all parts/steps still pass.
+- Migration 466 fresh-install: a newly created database, `scripts/db/
+  bootstrap.sql`, then the complete `000`→`466` history — 462 `.sql`
+  files, 0 errors, 468 tables in `public` (`pg_tables`),
+  `idempotency_keys.request_hash` present as `TEXT`, nullable.
 
 ## Explicitly still blocked / out of scope (unchanged from the prior round)
 
