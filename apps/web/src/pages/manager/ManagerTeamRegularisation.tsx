@@ -82,6 +82,28 @@ export function ManagerTeamRegularisation() {
 
   const rows = data?.data ?? []
 
+  // SYSTEM_AUDIT_2026-10-14 checkpoint 9 — live-browser verification found a
+  // real gap: once a bulk action's toast fades, there is nothing in the UI
+  // that says WHICH item failed, only a count ("1 failed"). The selection
+  // is cleared for successful and failed ids alike, and a failure that
+  // leaves the row no longer 'pending' (already actioned by someone else)
+  // makes it vanish from this list on the next refetch exactly like a
+  // success would — so the manager has no way to identify the failed
+  // request once the toast is gone. Name the failed items directly in the
+  // toast (by employee, reading from the list as it stood when the action
+  // was taken) rather than only a count.
+  function describeFailedItems(res: BulkResult): string {
+    const failedIds = res.results?.filter(r => !r.ok).map(r => r.id) ?? []
+    const names = failedIds
+      .map(id => rows.find(r => r.id === id))
+      .filter((r): r is RegReq => !!r)
+      .map(r => r.employee_name ?? r.employee_code ?? 'unknown')
+    if (names.length === 0) return ''
+    const shown = names.slice(0, 3).join(', ')
+    const extra = names.length > 3 ? ` +${names.length - 3} more` : ''
+    return ` (${shown}${extra})`
+  }
+
   function toggleAll() {
     if (selected.size === rows.length) setSelected(new Set())
     else setSelected(new Set(rows.map(r => r.id)))
@@ -108,7 +130,7 @@ export function ManagerTeamRegularisation() {
       // (green) even when some ids failed, which reads as full success at
       // a glance. Use the warning style whenever any item failed.
       if (failed > 0) {
-        toast.warning(`Approved ${approved} of ${total} · ${failed} failed`)
+        toast.warning(`Approved ${approved} of ${total} · ${failed} failed${describeFailedItems(res)}`, { duration: 8000 })
       } else {
         toast.success(`Approved ${approved} of ${total}`)
       }
@@ -137,7 +159,7 @@ export function ManagerTeamRegularisation() {
       bulkRejectKey.current = crypto.randomUUID()
       const { rejected = 0, failed, total } = res.summary
       if (failed > 0) {
-        toast.warning(`Rejected ${rejected} of ${total} · ${failed} failed`)
+        toast.warning(`Rejected ${rejected} of ${total} · ${failed} failed${describeFailedItems(res)}`, { duration: 8000 })
       } else {
         toast.success(`Rejected ${rejected} of ${total}`)
       }

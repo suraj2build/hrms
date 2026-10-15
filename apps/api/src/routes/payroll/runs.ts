@@ -2669,6 +2669,35 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
       return conflictError(reply, 'RUN_FROZEN', freezeRecheck.reason ?? `Payroll for ${run.month} was frozen while finalization was in progress. No slips were finalized.`)
     }
 
+    // SYSTEM_AUDIT_2026-10-14 checkpoint 9: same staleness class as the freeze
+    // re-check above, applied to the attendance-closure gate the top of this
+    // handler already checked once — that earlier read was a plain,
+    // unprotected SELECT, so if HR unlocks (or never locked) the period while
+    // the staleness-recompute loop above was running, this finalize would
+    // otherwise seal slips/run on the assumption that gate result still
+    // holds. recheck_attendance_lock_for_finalize (migration 463) acquires
+    // the SAME per-(tenant, month) advisory lock every protected mutation RPC
+    // now acquires (migration 462) before re-reading the state, so this
+    // re-check is genuinely serialized against a concurrent lock/unlock call,
+    // not just a second unprotected read racing the first one.
+    if (!force_finalize) {
+      const { error: lockRecheckErr } = await fastify.supabase.rpc('recheck_attendance_lock_for_finalize', {
+        p_tenant_id: tenantId,
+        p_month:     run.month,
+      })
+      if (lockRecheckErr) {
+        const msg = lockRecheckErr.message ?? ''
+        if (msg.includes('ATTENDANCE_REOPENED:')) {
+          return reply.code(423).send({
+            error:   'ATTENDANCE_REOPENED',
+            message: `Attendance for ${run.month} was reopened while finalization was in progress. No slips were finalized. ` +
+                     'Re-lock the period and retry finalization.',
+          })
+        }
+        return serverError(req, reply, lockRecheckErr, ErrorCode.QUERY_FAILED, 'Failed to re-verify attendance lock before finalizing')
+      }
+    }
+
     // Step 1: Finalize draft slips
     const { error: slipFinalizeErr } = await fastify.supabase
       .from('payroll_slips')

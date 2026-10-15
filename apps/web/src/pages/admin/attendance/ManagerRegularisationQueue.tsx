@@ -130,6 +130,25 @@ export default function ManagerRegularisationQueue() {
     qc.invalidateQueries({ queryKey: ['ess-approvals-corrections'] })
   }
 
+  // SYSTEM_AUDIT_2026-10-14 checkpoint 9 — live-browser verification found
+  // that once a partial-failure toast fades, nothing in the UI says WHICH
+  // item failed, only a count. Selection clears for successful and failed
+  // ids alike, and an already-actioned failure vanishes from this list on
+  // refetch exactly like a success would. Name the failed items (by
+  // employee, read from `items` as it stood when the action was taken)
+  // directly in the toast rather than only a count.
+  function describeFailedItems(res: BulkResult): string {
+    const failedIds = res.results?.filter(r => !r.ok).map(r => r.id) ?? []
+    const names = failedIds
+      .map(id => items.find(r => r.id === id))
+      .filter((r): r is RegItem => !!r)
+      .map(r => r.employee_name ?? r.employee_code ?? 'unknown')
+    if (names.length === 0) return ''
+    const shown = names.slice(0, 3).join(', ')
+    const extra = names.length > 3 ? ` +${names.length - 3} more` : ''
+    return ` (${shown}${extra})`
+  }
+
   const bulkApproveMutation = useMutation({
     mutationFn: (ids: string[]) =>
       api.post<BulkResult>('/attendance/regularisation/bulk-approve', { ids }),
@@ -145,7 +164,7 @@ export default function ManagerRegularisationQueue() {
       const approved = res?.summary?.approved ?? 0
       const failed = res?.summary?.failed ?? 0
       if (failed > 0) {
-        toast.warning(`${approved} approved, ${failed} failed`)
+        toast.warning(`${approved} approved, ${failed} failed${describeFailedItems(res)}`, { duration: 8000 })
       } else {
         toast.success(`Approved ${approved} request${approved !== 1 ? 's' : ''}`)
       }
@@ -162,7 +181,7 @@ export default function ManagerRegularisationQueue() {
       const rejected = res?.summary?.rejected ?? 0
       const failed = res?.summary?.failed ?? 0
       if (failed > 0) {
-        toast.warning(`${rejected} rejected, ${failed} failed`)
+        toast.warning(`${rejected} rejected, ${failed} failed${describeFailedItems(res)}`, { duration: 8000 })
       } else {
         toast.success(`Rejected ${rejected} request${rejected !== 1 ? 's' : ''}`)
       }

@@ -648,6 +648,115 @@ checkpoint so completed work is never repeated. Batch log:
   **Test suite**: 605/605 passed, 70/70 files (up from checkpoint 7's
   604/604 — 1 new retry-safety test), 0 regressions; `tsc --noEmit` clean
   on both `apps/api` and `apps/web`.
+- **Checkpoint 9** (this commit): the user accepted checkpoint 8's
+  evidence as closing the specific gap previously raised, and asked for
+  three acceptance properties to be carried forward while the broader
+  sweep continues: every relevant writer shares the lock, multi-month
+  acquisition stays consistently ordered, and payroll finalization must
+  calculate from the protected state rather than persist a pre-lock
+  calculation. All three were checked, not assumed; one more concrete
+  defect was found and fixed, plus a live-browser-verified UI gap.
+
+  **Alternate writers / lock sharing — confirmed complete for
+  `attendance_period_locks`, one new participant added.** Grepped every
+  reference to the table: the only writers of `attendance_period_locks.
+  state` are the four endpoints in `period-locks.ts` (already converted
+  to shared-lock RPCs in checkpoint 8); `routes/payroll/runs.ts` only
+  *reads* it as a gate, never writes it. That read, however, is exactly
+  where the user's second acceptance property bit: it happens ONCE, early
+  in `POST /payroll/runs/:id/finalize`, via a plain unprotected `SELECT`
+  — and is never re-verified before the actual persist. The same file's
+  own author had already recognised this exact staleness class for a
+  DIFFERENT guard: the code immediately before Step 1 explicitly re-checks
+  the FREEZE guard with the comment "the stale-employee recompute loop
+  above can run long enough for a concurrent POST /freeze... to land in
+  between" — but never applied that same re-check to the attendance-lock
+  gate sitting right next to it. If HR unlocks (or never locked) the
+  period while the staleness-recompute loop is running, finalize would
+  seal slips/run on a calculation made while believing the period was
+  closed — precisely "persist results calculated before acquiring the
+  lock."
+
+  **Fix (migration 463)**: `recheck_attendance_lock_for_finalize(tenant,
+  month)` acquires the SAME `fn_lock_period_months` advisory lock every
+  protected mutation RPC now acquires (migration 462), then re-reads
+  `attendance_period_locks.state` fresh under that lock — genuinely
+  serialized against a concurrent `lock_period_atomic`/`unlock_period_
+  atomic` call, not a second unprotected read racing the first. Called
+  immediately before Step 1, alongside the pre-existing freeze re-check
+  (force_finalize still bypasses it, matching the original gate's own
+  bypass). **Not attempted, disclosed rather than silently skipped**:
+  this does not re-run the leave-staleness check for approvals landing in
+  the narrower window between the recompute loop finishing and this
+  re-check — only the attendance-lock STATE itself is re-verified;
+  closing that fully would mean porting the recompute loop's slip
+  computation into SQL, out of proportion to the concrete defect found.
+  Converting the entire ~900-line finalize flow (slips, loan/advance
+  schedules, maker-checker, accounting) into one atomic transaction was
+  considered and rejected as disproportionate to this specific gap.
+
+  **Proof, real Postgres** (`scripts/db/verify-finalize-lock-recheck.mjs`,
+  4 parts, all pass): no pre-existing lock row at all → refused (the case
+  a row lock can't cover); LOCKED → succeeds; unlocked again → refused
+  (proves this is a live re-check, not a cached read); a concurrent
+  `lock_period_atomic` call is shown genuinely blocked in `pg_locks` while
+  the recheck's transaction holds the lock open. **Mocked route tests**
+  (`runs-finalize.test.ts`, 2 new): refuses with 423 `ATTENDANCE_REOPENED`
+  and finalizes nothing when the recheck reports reopened; `force_finalize`
+  correctly bypasses it. Fixed a resulting regression in the file's
+  existing mock (`fastify.supabase.rpc` wasn't mocked at all — now
+  defaults to the same LOCKED state the `attendance_period_locks` table
+  mock already represents). **Multi-month ordering**: unaffected and
+  already proven in checkpoint 8 (`fn_lock_period_months` sorts
+  ascending); this RPC only ever locks one month (a payroll run is
+  month-scoped), so no new ordering concern. Fresh-install: migration 463
+  applied cleanly against a fresh Postgres 16 instance with the complete
+  000→463 history (459 files, 0 errors, 480 tables, function present).
+  Smoke-tested through the real compiled API (lock→start-payroll→
+  finalize→finalize-again correctly refused 409).
+
+  **Bulk-action mixed-result/retry — verified live in the browser, not
+  assumed from the API fix alone.** Seeded a real tenant with a manager
+  and 3 direct reports' pending regularisations, logged in for real,
+  selected all 3, and raced a real HR-admin period-lock call (via the
+  actual `/attendance/period-locks/:month/lock` endpoint, not a mock)
+  against the click so one of the three genuinely fails server-side while
+  the other two succeed — `scripts/db/browser-verify-bulk-mixed-result.mjs`.
+  Confirmed: the toast correctly read "Approved 2 of 3 · 1 failed"
+  (checkpoint 8's fix holds up live); successful items correctly
+  disappeared from the pending list on refetch. **Found a real, now-fixed
+  gap in the remaining property ("failed items remain identifiable")**:
+  after the toast's few seconds, there was nothing anywhere in the UI
+  saying WHICH item failed — only a count. Selection cleared for
+  successful and failed ids alike, and a failure that leaves the item no
+  longer 'pending' (this test's locked-period rejection was itself auto-
+  rejected moments later by the pre-existing "auto-LOP on lock" background
+  job in `period-locks.ts`, a separate, already-correct feature) makes it
+  vanish from the refetched list exactly like a success would — so once
+  the toast faded, the manager had no way to identify which request
+  needed attention. Fixed in both `ManagerTeamRegularisation.tsx` and
+  `ManagerRegularisationQueue.tsx`: the warning toast now names the
+  failed item(s) by employee, resolved from `results` against the list as
+  it stood when the action was taken (e.g. "Approved 2 of 3 · 1 failed
+  (Bob Reports)"), with duration extended to 8s so there's a real chance
+  to read it. Re-ran the same live scenario after the fix — confirmed the
+  toast now reads the employee's name, screenshotted and sent to the
+  user. **Retry-safety** itself (the third property) is proven at the API
+  layer, not browser-replayed: checkpoint 8's `RETRY SAFETY` test already
+  demonstrates a resubmitted batch cannot re-approve an already-succeeded
+  id (explicit `CONFLICT`, not silent re-approval) while the genuinely-
+  still-pending id processes exactly once — the one browser-reachable
+  failure mode found this round (already-actioned/auto-rejected) is
+  terminal, not retryable, so a browser-level retry of it is not a
+  meaningful case; the meaningful case (transient failure, still pending)
+  is exactly what the mocked test already covers against the real status-
+  check logic (`approveRegularisation`'s pre-check and migration 462's
+  `approve_regularisation_atomic` DB-level backstop, both read this round
+  to confirm the mock's behavior matches).
+
+  **Test suite**: 607/607 passed, 70/70 files (up from checkpoint 8's
+  605/605 — 2 new finalize-recheck tests), 0 regressions; `tsc --noEmit`
+  clean on both `apps/api` and `apps/web`.
 - **Next planned batches** (not yet started — listed so a future session
   picks up here, not from zero): continue item 2's batch — the remaining
   ~60 unopened `routes/attendance` files (tier 1 next: `leave-employee.ts`,
