@@ -1717,6 +1717,21 @@ the repository, not estimated.
   audit itself has re-verified, per the same evidentiary discipline this
   register has used throughout (source / mocked / real-Postgres / browser
   kept distinct, never blended into one "tested" claim).
+- **"Examined" is not "tested," and both are weaker than "defect-free."**
+  Examined means the source was read against the item-2 checklist. Tested
+  means a specific claim from that reading has mocked, real-Postgres,
+  real-HTTP, or browser evidence behind it (per-checkpoint, cited in the
+  batch-log entries above — e.g. `corrections.ts` is both Examined AND
+  Tested, with 5 mocked tests + 4 real-HTTP steps; a file marked Examined
+  with no accompanying test citation was read and found to already match
+  the checklist, which is a weaker claim than "proven under test." Neither
+  status is a claim of defect-freedom: it is specifically a claim about
+  what WAS checked, not a guarantee about what wasn't. The "Open defects"
+  column counts only what is currently KNOWN and disclosed-unfixed (one
+  row, `retroactive.ts`'s dedup gap) — it is not, and must not be read as,
+  an assurance that the other 234 unexamined files, or the 53 examined-
+  but-found-correct files, contain zero defects. Absence of a listed
+  defect means "not yet found," not "verified absent."
 
 | Module (route namespace) | Total files | Examined (this audit) | Remaining | Open defects | Blocked verification |
 |---|---|---|---|---|---|
@@ -1813,6 +1828,27 @@ the confirmed-100%-dead `AdminDashboard.tsx` / `Dashboard.tsx` (zero route
 registrations, verified in an earlier round) — flagging rather than
 deleting since the session's own destructive-action guard declined the
 delete.
+
+### Separate totals: frontend pages, shared services, migrations
+
+The backend route tracker above (289 files) is explicitly **not** the
+whole system. Three more surfaces, counted directly, kept as their own
+totals rather than folded into the 289 so backend progress is never read
+as whole-system progress:
+
+| Surface | Total (Bash-verified) | Examined this audit | Evidence depth | Remaining |
+|---|---|---|---|---|
+| **Frontend pages** (`apps/web/src/pages/**/*.tsx`) | **306** (41 directories) | **~26** distinct files named in this register's checkpoint history (nav-link target fixed or logic referenced) | **Mixed, and shallower than the backend bar** — of those ~26, only **5** have actual browser evidence (real login, real click, screenshot): `Attendance.tsx`, `ControlCenter.tsx`, `CommandPalette.tsx` (attendance-processing flow), `ApprovalInbox.tsx` (3 screenshots, scope-verify), `ManagerTeamRegularisation.tsx` (bulk-retry panel). The other ~21 are nav-link-target fixes only — the file was read to confirm/correct a `<Link>`/`navigate()` target, not reviewed for business logic, authorization, or data correctness. **"Examined" here means "a stale link was found and fixed," not "this page's logic was audited."** | ~280-301 depending on which bar is applied |
+| **Shared services, API** (`apps/api/src/lib/**/*.ts`, excl. `__tests__`) | **171** | **~16**: `accrual-engine.ts`, `approval-orchestrator.ts`, `approval-service.ts`, `approval-guards.ts`, `workflow-service.ts`, `idempotency.ts`, `period-lock.ts`, `manager-scope.ts`, `audit-service.ts`, `event-bus.ts`, `ot-engine.ts`, `api-errors.ts`, `pilot-guard.ts`, `user-account-service.ts`, `manager-compensation.ts`, `workforce-orchestrator.ts` | Read in full against the logic a calling route needed, not independently re-derived against a standalone checklist the way routes are — correct for what each route-level finding needed, not a claim that the rest of each file (or any untouched function in an examined file) is clean | ~155 |
+| **Shared services, web** (`apps/web/src/lib/**/*.ts*`) | **70** | **0** | — not examined this audit | 70 |
+| **Database migrations** (`supabase/migrations/*.sql`) | **463** | **Verified by a DIFFERENT method, not comparable to "examined"**: every migration through 467 has been applied, in order, to a fresh Postgres 16 instance with zero errors (most recently confirmed this checkpoint) — this proves the migration HISTORY is internally consistent and reproducible, not that each migration's SQL was individually read against a correctness checklist. A handful (446/447/448/450/461/462/463/464/465/466/467) were individually authored and read in depth as part of a specific fix this audit; the rest were pre-existing and have NOT been read line-by-line this audit. | n/a — different evidence type, not file-counted the same way |
+
+**Reading this correctly**: "54 of 289 backend route files examined" is
+real, specific progress on the ONE surface this audit has gone deepest
+on. It says nothing about the other ~310 lib files, ~306 web pages, or
+whether an unexamined migration has a defect — those are separate,
+largely-unstarted surfaces with their own totals above, not implicitly
+covered by the backend number.
 
 ## Checkpoint 14 qualifications — both closed with a real fix, not a restated assumption
 
