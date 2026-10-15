@@ -98,9 +98,23 @@ export default async function rosterRoute(fastify: FastifyInstance) {
     const toDate   = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10)
 
     // Batch-fetch everything needed for the roster grid in parallel.
-    // employees is paginated — an unbounded .select() truncates at
-    // PostgREST's 1,000-row ceiling for a large tenant, silently dropping
-    // employees from the roster grid.
+    //
+    // SYSTEM_AUDIT_2026-10-14 checkpoint 14 — employees was already
+    // paginated (an unbounded .select() truncates at PostgREST's
+    // 1,000-row ceiling for a large tenant), but shift_roster, employee_
+    // shifts, and job_history were NOT — the exact bug class CLAUDE.md's
+    // universal fetchAllRows rule exists to prevent (its own canonical
+    // example is this same "silently blank for employees past row 1000"
+    // failure on the Muster Roll). employee_shifts and job_history are
+    // each sized 1:1 with active employee count — for a 2,877-employee
+    // tenant (CLAUDE.md's own reference scale) both would silently
+    // truncate at 1000, leaving every employee past that point with no
+    // standing-shift/work-location match even though the (correctly
+    // paginated) employee list itself includes them — a correct-looking
+    // roster grid with wrong data for most of a large tenant's roster.
+    // shift_roster (a month's worth of per-day overrides) can exceed it
+    // too for any tenant with heavy override usage. Fixed: all three now
+    // use fetchAllRows, matching employees' own pattern exactly.
     let empError: unknown = null
     const employeesPromise = fetchAllRows((from, to) =>
       fastify.supabase
@@ -112,12 +126,47 @@ export default async function rosterRoute(fastify: FastifyInstance) {
         .range(from, to),
     ).catch((err) => { empError = err; return [] })
 
+    let rosterError: unknown = null
+    const rosterPromise = fetchAllRows((from, to) =>
+      fastify.supabase
+        .from('shift_roster')
+        .select('id, employee_id, date, shift_id')
+        .eq('tenant_id', req.tenantId)
+        .gte('date', fromDate)
+        .lte('date', toDate)
+        .order('employee_id')
+        .order('date')
+        .range(from, to),
+    ).catch((err) => { rosterError = err; return [] })
+
+    let standingError: unknown = null
+    const standingPromise = fetchAllRows((from, to) =>
+      fastify.supabase
+        .from('employee_shifts')
+        .select('employee_id, shift_id')
+        .eq('tenant_id', req.tenantId)
+        .eq('is_current', true)
+        .order('employee_id')
+        .range(from, to),
+    ).catch((err) => { standingError = err; return [] })
+
+    let jobError: unknown = null
+    const jobRowsPromise = fetchAllRows((from, to) =>
+      fastify.supabase
+        .from('job_history')
+        .select('employee_id, work_location_id, work_locations(id, name)')
+        .eq('tenant_id', req.tenantId)
+        .eq('is_current', true)
+        .order('employee_id')
+        .range(from, to),
+    ).catch((err) => { jobError = err; return [] })
+
     const [
       employees,
-      { data: shifts,    error: shiftError },
-      { data: roster,    error: rosterError },
-      { data: standing,  error: standingError },
-      { data: jobRows,   error: jobError },
+      { data: shifts, error: shiftError },
+      roster,
+      standing,
+      jobRows,
     ] = await Promise.all([
       employeesPromise,
 
@@ -128,24 +177,9 @@ export default async function rosterRoute(fastify: FastifyInstance) {
         .eq('is_active', true)
         .order('name'),
 
-      fastify.supabase
-        .from('shift_roster')
-        .select('id, employee_id, date, shift_id')
-        .eq('tenant_id', req.tenantId)
-        .gte('date', fromDate)
-        .lte('date', toDate),
-
-      fastify.supabase
-        .from('employee_shifts')
-        .select('employee_id, shift_id')
-        .eq('tenant_id', req.tenantId)
-        .eq('is_current', true),
-
-      fastify.supabase
-        .from('job_history')
-        .select('employee_id, work_location_id, work_locations(id, name)')
-        .eq('tenant_id', req.tenantId)
-        .eq('is_current', true),
+      rosterPromise,
+      standingPromise,
+      jobRowsPromise,
     ])
 
     if (empError || shiftError || rosterError || standingError || jobError) {
@@ -395,22 +429,29 @@ export default async function rosterRoute(fastify: FastifyInstance) {
     const fromDates = expandDateRange(from_week_start, shiftDate(from_week_start, 6))
     const toDates   = expandDateRange(to_week_start,   shiftDate(to_week_start,   6))
 
-    // Fetch source week roster rows
-    let q = fastify.supabase
-      .from('shift_roster')
-      .select('employee_id, date, shift_id')
-      .eq('tenant_id', req.tenantId)
-      .in('date', fromDates)
-
-    if (employee_ids?.length) {
-      q = q.in('employee_id', employee_ids)
+    // Fetch source week roster rows. Paginated — an unscoped copy-week call
+    // (no employee_ids filter) over a tenant with heavy override usage can
+    // exceed PostgREST's 1,000-row ceiling for even a single week, the same
+    // silent-truncation risk fixed above for the main roster grid.
+    let sourceRows: Array<{ employee_id: string; date: string; shift_id: string }>
+    try {
+      sourceRows = await fetchAllRows((from, to) => {
+        let q = fastify.supabase
+          .from('shift_roster')
+          .select('employee_id, date, shift_id')
+          .eq('tenant_id', req.tenantId)
+          .in('date', fromDates)
+          .order('employee_id')
+          .order('date')
+          .range(from, to)
+        if (employee_ids?.length) q = q.in('employee_id', employee_ids)
+        return q as any
+      })
+    } catch (fetchErr) {
+      return serverError(req, reply, fetchErr, ErrorCode.QUERY_FAILED, 'Failed to fetch source week roster')
     }
 
-    const { data: sourceRows, error: fetchErr } = await q
-
-    if (fetchErr) return serverError(req, reply, fetchErr, ErrorCode.QUERY_FAILED, 'Failed to fetch source week roster')
-
-    if (!sourceRows?.length) {
+    if (!sourceRows.length) {
       return reply.send({ message: 'No roster overrides in source week to copy', rows_copied: 0 })
     }
 
