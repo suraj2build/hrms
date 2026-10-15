@@ -1669,43 +1669,236 @@ checkpoint so completed work is never repeated. Batch log:
   de-emphasizing), not a security or financial-correctness defect; left
   for a future round rather than scope-creeping this batch.
 
-  **Test suite, this checkpoint's final count**: 80/80 files (up from
-  78 — 1 new file, `corrections-approval-chain.test.ts`), 674/674 tests
-  passed (up from 669 — 5 new), 0 regressions. `tsc --noEmit` clean on
-  both `apps/api` and `apps/web`.
+  **Test suite, this checkpoint's final count**: 79/79 files (up from
+  78 — 1 new file, `corrections-approval-chain.test.ts`), 669/669 tests
+  passed (up from 664 — 5 new), 0 regressions. `tsc --noEmit` clean on
+  both `apps/api` and `apps/web`. (**Correction**: the version of this
+  entry pushed in commit `ad72803a` stated 80/80 files and 674/674 tests —
+  an arithmetic slip caught on the next re-run, corrected here; no test
+  file or test case was ever actually lost, this was a reporting error
+  only, not a regression.)
 
-- **Next planned batch** (not yet started): tier 2's remaining files —
-  the other ~43 unopened `routes/attendance` files beyond this batch's 6
-  (muster/muster-upload, roster-api/roster-calendar/roster-context,
-  wo-credit, wfh, leave-duration/leave-jobs/leave-reconciliation/leave-
-  scheduler-status/leave-accrual-lifecycle, manager-dashboard, payroll-
-  summary, and the intelligence/anomaly/forensics/confidence/risk cluster
-  — `anomalies.ts`, `anomaly-reconcile.ts`, `confidence.ts`, `forensics.ts`,
-  `health-index.ts`, `inference.ts`, `intelligence.ts`, `risk.ts`,
-  `timeline-intelligence.ts`, `workforce-optimization.ts`, `pipeline-
-  stats.ts`, `policy-conflicts.ts`, `simulate-policy.ts` — largely
-  already de-emphasized per CLAUDE.md's 2026-10-11 admin-load philosophy
-  decision, so a lighter pass there is appropriate, not full per-route
-  authorization re-derivation); regularisation-policy.ts; context.ts;
-  api-sources.ts; ingest.ts; fetch.ts; upload.ts/upload-health.ts;
-  queue-actions.ts; status.ts; last-run.ts; run-details.ts; run-export.ts;
-  sample-csv.ts; who-is-in.ts; work-sessions.ts; debug-raw.ts; audit.ts;
-  force-unlock.ts; reconciliation.ts/reconciliation-validate.ts. Then
-  item 3 — Compensation, Payroll, statutory calculations, reimbursements,
-  loans/advances, F&F and accounting (much of this has prior-round
-  coverage per CLAUDE.md, but has not been re-verified against this
-  round's full item-2 checklist). Then items 4-6 per the user's stated
-  execution order: Masters/organization/positions/onboarding/
-  recruitment/assets/documents; ESS/manager/admin/owner portals +
-  dashboards/reports/imports/notifications/support/integrations; shared
-  infrastructure and cross-module interactions. Also recommended, not yet
-  done: delete the confirmed-100%-dead `AdminDashboard.tsx` / `Dashboard.
-  tsx` (zero route registrations, verified in an earlier round) —
-  flagging rather than deleting since the session's own destructive-
-  action guard declined the delete.
+## Repository-wide file tracker (checkpoint 14, replaces prior approximate tier counts)
+
+The user asked for a fixed, countable tracker in place of "~49 unopened
+files"-style prose estimates. Below is that tracker, counted directly from
+the repository, not estimated.
+
+**Scope and exclusions, stated explicitly:**
+- **Counted unit**: `.ts` files under `apps/api/src/routes/**` (excluding
+  `__tests__/` directories), the backend route surface this audit's item-2
+  checklist (tenant scoping, object/team-level authorization, FK
+  cross-tenant validation, CAS/optimistic concurrency, storage-path
+  privacy, pagination, approval/reversal correctness) actually applies to.
+  Verified by direct `find`, not recalled from memory: **289 files across
+  53 route-namespace directories, plus 1 standalone top-level file
+  (`setup.ts`) = 54 tracked rows, 289 files total.**
+- **Excluded from this file-count** (tracked qualitatively elsewhere in
+  this register, not as audited "files" here): `apps/web/src/pages/**`
+  (this audit's web-layer work has been nav-link spot-checks and a handful
+  of browser-verified flows, not a per-file authorization review — the
+  web app has 40+ page directories, separately disclosed below, not
+  file-counted); `apps/api/src/lib/**` shared services (reviewed
+  opportunistically while tracing a route's logic, e.g. `accrual-engine.ts`,
+  `approval-orchestrator.ts` — not independently tracked as "files" since
+  they have no authorization surface of their own, only logic a route
+  calls into); `supabase/migrations/**` (tracked separately via the
+  fresh-install/schema-drift checks already in this register, not as
+  "route files"); `scripts/`, `components/` (not routes).
+- **"Examined" is deliberately strict**: a file counts as Examined only
+  where this specific audit (SYSTEM_AUDIT_2026-10-14, checkpoints 1–14)
+  has a documented, specific finding (a defect fixed, or a file explicitly
+  named as read against the item-2 checklist and found correct) — not
+  merely referenced in passing, not merely nav-link-fixed on the web side,
+  and not merely "tested in a prior round" (G01-G13, UAT rounds,
+  market-readiness rounds, tenant-licensing work) predating this specific
+  audit. Those prior-round claims are real prior evidence — cited per-row
+  below where they exist — but are kept visibly separate from what this
+  audit itself has re-verified, per the same evidentiary discipline this
+  register has used throughout (source / mocked / real-Postgres / browser
+  kept distinct, never blended into one "tested" claim).
+
+| Module (route namespace) | Total files | Examined (this audit) | Remaining | Open defects | Blocked verification |
+|---|---|---|---|---|---|
+| attendance | 64 | 16 | 48 | 1 (retroactive.ts dedup, disclosed §cp14) | — |
+| employees | 31 | 31 | 0 | 0 | separation-workflow.ts F&F section (~lines 416-972) relies on prior-round evidence, not re-read this audit |
+| payroll (incl. statutory/) | 52 | 0 | 52 | — | approval/finalization/F&F/encashment-adjacent correctness relies on PRIOR rounds (G12 etc.), not re-verified by this audit's own checkpoints |
+| masters | 29 | 0 | 29 | — | nav-link fixes only; no file-level authz review this audit |
+| ess | 12 | 0 | 12 | — | distinct from the frozen web ESS Context Rail (CLAUDE.md) — this is the unrelated API namespace |
+| onboarding | 8 | 0 | 8 | — | — |
+| system | 8 | 0 | 8 | — | — |
+| datasets | 10 | 0 | 10 | — | — |
+| analytics | 6 | 0 | 6 | — | — |
+| manager | 6 | 3 (team-assets.ts/team-helpdesk.ts/team-regularisation-context.ts — referenced as the operational-visibility policy source in checkpoint 4) | 3 | 0 | — |
+| enterprise | 3 | 0 | 3 | — | — |
+| governance | 3 | 0 | 3 | — | — |
+| operations | 3 | 0 | 3 | — | — |
+| workspace | 4 | 0 | 4 | — | — |
+| notifications | 4 | 0 | 4 | — | web nav fixes only; backend not audited this audit |
+| compensation | 2 | 0 | 2 | — | — |
+| approvals | 2 | 1 (governance-evolution.ts — cp11: 500-vs-409 + missing FK check) | 1 (workflows.ts not opened) | 0 | — |
+| fabric | 2 | 0 | 2 | — | — |
+| intelligence | 2 | 0 | 2 | — | — |
+| owner | 2 | 1 (error-reports.ts — screenshot-signing re-validation) | 1 (index.ts) | 0 | index.ts's activate/suspend/cancel/hard-delete relies on the prior tenant-licensing round (CLAUDE.md), not this audit |
+| recruitment | 2 | 0 | 2 | — | built in a prior market-readiness round, not re-verified this audit |
+| trust | 2 | 0 | 2 | — | — |
+| setup (top-level file) | 1 | 1 (cp1: anti-hijack IDOR fix) | 0 | 0 | — |
+| support | 1 | 1 (cp2: screenshot-path tenant-folder validation) | 0 | 0 | — |
+| absconding | 1 | 0 | 1 | — | — |
+| assets | 1 | 0 | 1 | — | F&F asset-recovery covered via a prior round, not this audit |
+| assistant | 1 | 0 | 1 | — | — |
+| benefits | 1 | 0 | 1 | — | — |
+| billing | 1 | 0 | 1 | — | — |
+| certifications | 1 | 0 | 1 | — | — |
+| community | 1 | 0 | 1 | — | — |
+| compliance | 1 | 0 | 1 | — | PT/TDS slabs verified in a prior UAT round, not this audit |
+| departments | 1 | 0 | 1 | — | — |
+| documents | 1 | 0 | 1 | — | — |
+| executive | 1 | 0 | 1 | — | — |
+| helpdesk | 1 | 0 | 1 | — | — |
+| import | 1 | 0 | 1 | — | — |
+| imports | 1 | 0 | 1 | — | — |
+| integrations | 1 | 0 | 1 | — | — |
+| letters | 1 | 0 | 1 | — | — |
+| mood | 1 | 0 | 1 | — | — |
+| observability | 1 | 0 | 1 | — | — |
+| policy | 1 | 0 | 1 | — | — |
+| positions | 1 | 0 | 1 | — | — |
+| recognition | 1 | 0 | 1 | — | — |
+| reports | 1 | 0 | 1 | — | — |
+| security | 1 | 0 | 1 | — | — |
+| signal-intelligence | 1 | 0 | 1 | — | — |
+| succession | 1 | 0 | 1 | — | — |
+| surveys | 1 | 0 | 1 | — | — |
+| talent | 1 | 0 | 1 | — | — |
+| uploads | 1 | 0 | 1 | — | — |
+| whatsapp | 1 | 0 | 1 | — | — |
+| workforce | 1 | 0 | 1 | — | — |
+| **TOTAL (54 rows, 53 namespaces + setup.ts)** | **289** | **54** | **235** | **2 open-disclosed (retroactive.ts dedup; none else currently open — every other defect found this audit was fixed in the same checkpoint it was found)** | **global: hosted Supabase/RLS/storage behavior is never verified anywhere in this tracker — see "Explicitly still blocked" below; PT/TDS/F&F/asset/careers/tenant-licensing rows above rely on evidence from rounds OUTSIDE this specific audit, real but not re-verified here** |
+
+**Reduction this batch (checkpoint 14, tier 2 batch 1)**: attendance moved
+from 0/64 examined (nothing in `attendance` had been counted under this
+strict this-audit-only definition before checkpoint 14's own file-level
+work began) to 16/64 — the checkpoint 3/6/7/11/12/13/14 files
+(`leave-requests.ts`, `leave.ts`, `leave-collision.ts`, `leave-employee.ts`,
+`leave-policy-resolve.ts`, `leave-accrual.ts`, `regularisation.ts`,
+`overtime.ts`, `comp-off.ts` (approval-queue scope), `process.ts`,
+`period-locks.ts`, `punch.ts`, `corrections.ts`, `recompute.ts`,
+`retroactive.ts`, plus the encashment route). **Overall remaining: 235 of
+289 files (81%).** This replaces every prior "~49 unopened" / "~43
+unopened" estimate in this document with the exact count above; those
+prose estimates undercounted because they were scoped to "tier 2 of
+`routes/attendance`" alone rather than the full repository.
+
+**Next planned batch**: continue tier 2 of `attendance` (48 files
+remaining there) — muster.ts/muster-upload.ts, roster-api.ts/roster-
+calendar.ts/roster-context.ts, wo-credit.ts, wfh.ts, leave-duration.ts/
+leave-jobs.ts/leave-reconciliation.ts/leave-scheduler-status.ts/leave-
+accrual-lifecycle.ts/leave-entitlement.ts, manager-dashboard.ts, payroll-
+summary.ts, regularisation-policy.ts, context.ts, api-sources.ts,
+ingest.ts, fetch.ts, upload.ts/upload-health.ts, queue-actions.ts,
+status.ts, last-run.ts, run-details.ts, run-export.ts, sample-csv.ts,
+who-is-in.ts, work-sessions.ts, debug-raw.ts, audit.ts, force-unlock.ts,
+reconciliation.ts/reconciliation-validate.ts, and the intelligence/
+anomaly/forensics/confidence/risk cluster (`anomalies.ts`, `anomaly-
+reconcile.ts`, `confidence.ts`, `forensics.ts`, `health-index.ts`,
+`inference.ts`, `intelligence.ts`, `risk.ts`, `timeline-intelligence.ts`,
+`workforce-optimization.ts`, `pipeline-stats.ts`, `policy-conflicts.ts`,
+`simulate-policy.ts` — already de-emphasized per CLAUDE.md's 2026-10-11
+admin-load philosophy decision, so a lighter pass is appropriate there,
+not full per-route authorization re-derivation). Then `payroll` (52,
+largest remaining namespace), `masters` (29), `ess` (12), then the
+long tail of 1-3-file namespaces. Also recommended, not yet done: delete
+the confirmed-100%-dead `AdminDashboard.tsx` / `Dashboard.tsx` (zero route
+registrations, verified in an earlier round) — flagging rather than
+deleting since the session's own destructive-action guard declined the
+delete.
+
+## Checkpoint 14 qualifications — both closed with a real fix, not a restated assumption
+
+Two qualifications were raised against checkpoint 14's own work before it
+could be treated as closed. Both are genuine defects, not documentation
+gaps, now fixed (migration 467, applied to `hrms_uat` and verified against
+a fresh `000`→`467` install — 463 `.sql` files, 0 errors):
+
+**1. Auto-LOP rejection + approval-instance closure must commit together.**
+The first version of the period-locks.ts fix (earlier this checkpoint)
+closed the orphaned-instance bug with two SEPARATE `supabase-js` calls — a
+crash or network failure between them would recreate the exact orphan the
+fix was meant to close, just via a different trigger, not close the gap.
+Fixed for real: `auto_lop_reject_regularisations_atomic` (migration 467)
+folds the regularisation reject and the approval_instances close into one
+plpgsql function body, which runs as a single transaction by construction
+— the same guarantee every other atomic RPC in this audit relies on
+(`finalize_payroll_run_atomic`, `request_leave_encashment_atomic`, etc.).
+This satisfies "commit together" directly, making a separate retry/
+recovery path unnecessary. Wired into `period-locks.ts`'s fire-and-forget
+block in place of the two raw updates. **Found and fixed along the way**:
+building this surfaced a genuine gap in the LOCAL TEST GATEWAY (not the
+product) — its RPC parameter serializer treated a JS array the same as a
+plain object, JSON.stringify-ing a `UUID[]` parameter into a JSON-array
+STRING that Postgres then rejected as a malformed array literal. Fixed
+(`Array.isArray` check added before the jsonb-object JSON.stringify
+branch) in `scripts/db/local-test-gateway.mjs`; re-ran the other 2 real-
+HTTP scripts (`verify-approval-chain-bypass.mjs`,
+`verify-encashment-idempotency-hash.mjs`) afterward to confirm zero
+regression — both unchanged, all steps still pass. **Real-Postgres +
+real-HTTP proof**: `verify-period-lock-auto-lop-closes-chain.mjs` (already
+committed this checkpoint) re-run against the fixed RPC — same scenario as
+before (a regularisation genuinely advanced to an open level-2 instance
+via real HTTP, then HR locks the period via real HTTP) — now PASSES: the
+regularisation reads `'rejected'` AND `approval_instances` is closed
+(`final_approved=false`, `closed_at` set) in the same atomic call.
+
+**2. Cap-policy effective-dating — "re-reading the policy live" was not
+actually proof against a concurrent policy edit.** `leave_accrual_rules`
+has `effective_from`/`effective_to` columns AND a unique constraint on
+`(tenant_id, leave_type_id, effective_from)` — the schema is explicitly
+designed to hold multiple time-scoped rule versions, not one mutable row.
+`request_leave_encashment_atomic` (migration 465) and `processEncashment`'s
+rule lookup (`lib/accrual-engine.ts`) both picked "the active rule with
+the latest `effective_from`," full stop — with NO check that
+`effective_from` had actually arrived yet, and `processEncashment`'s
+`.maybeSingle()` would additionally throw outright the moment a second
+active version ever existed. This contradicts both the schema's own
+design and the ALREADY-CORRECT pattern used by the monthly/yearly accrual
+job's own rule lookup in the very same file
+(`.lte('effective_from', periodEndDate).or('effective_to.is.null,
+effective_to.gte.' + periodDate)`) — migration 465's own comment had
+rationalized the gap as "the product invariant is one active rule at a
+time," which was never actually true. **Recorded, intended behavior,
+stated explicitly per the user's ask**: a rule version governs every
+encashment request or approval made on or after its `effective_from` and
+before its `effective_to` (or forever, if `effective_to` is `NULL`) —
+evaluated FRESH against `CURRENT_DATE` at both request time and approval
+time, exactly like the accrual job's own period-scoped lookup. A
+future-dated version has NO effect until that date arrives; from that
+date, every NEW check picks it up — there is no separate "grandfather"
+window for already-pending requests, consistent with how every other
+rule-driven check in this codebase (accrual, period locks, approval
+chains) already re-reads current state fresh rather than snapshotting it
+at submission time. **Fixed** (migration 467): both lookups now filter
+`effective_from <= CURRENT_DATE AND (effective_to IS NULL OR
+effective_to >= CURRENT_DATE)` before taking the latest version;
+`processEncashment`'s lookup additionally switched from `.maybeSingle()`
+to `.order().limit(1)` so a second active version can never make it throw.
+**Real-Postgres + real-HTTP proof**: new "Part 6" in
+`scripts/db/verify-encashment-cap-atomic.mjs` — (a) a request that only
+fits under a FUTURE (not-yet-effective) cap of 50 is correctly refused
+against the CURRENT cap of 5; (b) a request that fits the current cap
+succeeds normally; (c) once the new version's `effective_from` is moved
+to today (simulating its date arriving), it correctly takes over — a
+request of 40 days (3+40=43, over the old cap of 5, under the new cap of
+50) succeeds; (d) via real HTTP, `POST /leave/encashment/:id/approve`
+with TWO active rule versions present (one now-expired-dated-into-the-past,
+one now-effective) returns 200 and applies the correct one, proving
+`processEncashment` no longer throws on multiple active rows. All 4 PASS.
 
 **Scale disclosure, stated up front so it isn't mistaken for completion:**
-the API has **289 route files** across **52 route namespaces**; the web
+the API has **289 route files** across **53 route namespaces plus 1
+standalone top-level file** (`setup.ts`) — see checkpoint 14's repository-
+wide tracker above for the exact, Bash-verified per-namespace breakdown,
+which supersedes this round-number; the web
 app has **40+ page directories** and **168 registered navigation entries**
 (`nav-config.ts`). A literal line-by-line pass over every file against
 every category in item 2 (API method/path/query/body/response mismatches;

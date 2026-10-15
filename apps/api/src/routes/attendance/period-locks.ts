@@ -110,36 +110,31 @@ export default async function periodLocksRoutes(fastify: FastifyInstance) {
 
         if (!pendingRegs || pendingRegs.length === 0) return
 
-        // 2. Auto-reject all pending regs with system reason
+        // 2. Auto-reject all pending regs with system reason, closing any open
+        // multi-level approval_instances row alongside it.
+        //
+        // SYSTEM_AUDIT_2026-10-14 checkpoint 14 — a raw UPDATE here bypasses
+        // gateReject entirely, unlike every genuine reject in
+        // regularisation.ts; if any of these regs had an OPEN approval_
+        // instances row (advanced to level 2, awaiting HR), leaving it
+        // orphaned (final_approved still NULL) would keep surfacing a dead
+        // request in an approver's pending-approvals view. The regularisation
+        // reject and the instance close must commit together — not as two
+        // independent supabase-js calls, where a crash/network failure
+        // between them re-creates the exact orphan this fix closes, just via
+        // a different trigger. auto_lop_reject_regularisations_atomic
+        // (migration 467) does both inside one plpgsql function body, which
+        // runs as a single transaction by construction — the same guarantee
+        // every other atomic RPC in this codebase relies on.
         const regIds = pendingRegs.map((r: any) => r.id)
-        await fastify.supabase
-          .from('attendance_regularisation')
-          .update({
-            status: 'rejected',
-            rejection_reason: 'Period locked — regularisation window closed. Attendance marked as Absent (LOP).',
-            approved_at: new Date().toISOString(),
-          })
-          .eq('tenant_id', req.tenantId)
-          .in('id', regIds)
-
-        // SYSTEM_AUDIT_2026-10-14 checkpoint 13 batch — this raw UPDATE bypasses
-        // gateReject entirely, unlike every genuine reject in regularisation.ts.
-        // If any of these regs had an OPEN multi-level approval_instances row
-        // (e.g. advanced to level 2, awaiting HR), the above left it orphaned:
-        // current_level/final_approved unchanged, final_approved still NULL —
-        // the entity now reads 'rejected' but its chain metadata still claims
-        // "awaiting approval," which would keep surfacing in an approver's
-        // pending-approvals view for a request that can no longer be acted on.
-        // Close any such instance the same way recordAndAdvance's own close
-        // branch does (final_approved + closed_at), so system-forced rejection
-        // leaves no stale open chain behind.
-        await fastify.supabase
-          .from('approval_instances')
-          .update({ final_approved: false, closed_at: new Date().toISOString() })
-          .eq('tenant_id', req.tenantId)
-          .eq('entity_type', 'attendance_regularisation')
-          .in('entity_id', regIds)
-          .is('final_approved', null)
+        const { error: lopErr } = await fastify.supabase.rpc('auto_lop_reject_regularisations_atomic', {
+          p_tenant_id: req.tenantId,
+          p_reg_ids:   regIds,
+        })
+        if (lopErr) {
+          fastify.log.warn({ err: lopErr, tenant_id: req.tenantId, month }, 'auto-LOP: atomic reject+close RPC failed')
+          return
+        }
 
         // 3. For each unique employee+date, update attendance_daily status to 'absent' (LOP)
         const uniquePairs = Array.from(

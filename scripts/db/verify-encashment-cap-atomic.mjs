@@ -42,9 +42,30 @@
 import pg from 'pg'
 
 const DB_URL = 'postgres://postgres:postgres@localhost:5432/hrms_uat'
+const AUTH_BASE = 'http://localhost:9000'
+const API_BASE = 'http://localhost:2001'
+const PASSWORD = 'CapAtomicVerify!1'
 const pool = new pg.Pool({ connectionString: DB_URL })
 
 function uuid() { return crypto.randomUUID() }
+
+async function createAuthUser(email) {
+  const res = await fetch(`${AUTH_BASE}/auth/v1/admin/users`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email, password: PASSWORD }),
+  })
+  const body = await res.json()
+  if (!body.id) throw new Error(`createAuthUser failed for ${email}: ${JSON.stringify(body)}`)
+  return body.id
+}
+
+async function loginAndGetToken(email) {
+  const res = await fetch(`${AUTH_BASE}/auth/v1/token?grant_type=password`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email, password: PASSWORD }),
+  })
+  return (await res.json()).access_token
+}
 
 async function seedTenant() {
   const tenantId = uuid()
@@ -351,6 +372,88 @@ async function main() {
     console.log('a double-reversal attempt on the same request is refused, not silently re-credited (exactly one reversal ledger row, not two):', doubleReversalRefused && exactlyOneReversalLedgerRow ? 'PASS' : 'FAIL', reversalCountRow)
 
     allOk = allOk && firstOk && secondOk && sumMatchesExpected && reverseOfRejectedRefused && doubleReversalRefused && exactlyOneReversalLedgerRow
+  }
+
+  // ── PART 6 (checkpoint 14): rule effective-dating, not just "re-read live" ──
+  console.log('\n=== PART 6: a future-dated rule version has NO effect until its date arrives; approval-time lookup is also effective-dated and never throws on multiple active versions ===')
+  {
+    const year = 2106
+    const { tenantId: t6, empId: e6, leaveTypeId: lt6 } = await seedTenant()
+
+    // A current version (cap 5) plus a FUTURE version (cap 50) dated next year.
+    await pool.query(
+      `INSERT INTO leave_accrual_rules (tenant_id, leave_type_id, encashable, max_encashable_per_year, is_active, effective_from)
+       VALUES ($1,$2,true,5,true, CURRENT_DATE)`,
+      [t6, lt6],
+    )
+    const futureDate = new Date(); futureDate.setFullYear(futureDate.getFullYear() + 1)
+    await pool.query(
+      `INSERT INTO leave_accrual_rules (tenant_id, leave_type_id, encashable, max_encashable_per_year, is_active, effective_from)
+       VALUES ($1,$2,true,50,true, $3)`,
+      [t6, lt6, futureDate.toISOString().slice(0, 10)],
+    )
+
+    // Before this round's fix, `ORDER BY effective_from DESC LIMIT 1` with no
+    // date filter would pick the FUTURE 50-day version immediately. A request
+    // for 10 days (> current cap of 5, <= future cap of 50) must still be
+    // REFUSED today — the future version has not taken effect yet.
+    let futureVersionWronglyApplied = false
+    try {
+      await pool.query(`SELECT request_leave_encashment_atomic($1,$2,$3,$4,$5,$6)`, [t6, e6, lt6, year, 10, 'should be refused — future rule not yet effective'])
+      futureVersionWronglyApplied = true // if this didn't throw, the future cap was wrongly applied
+    } catch (err) {
+      const refusedOnCurrentCap = /ENCASHMENT_LIMIT_EXCEEDED/.test(err.message)
+      console.log('a request that only fits under the FUTURE (not-yet-effective) cap is correctly refused against the CURRENT cap:', refusedOnCurrentCap ? 'PASS' : 'FAIL', err.message)
+      allOk = allOk && refusedOnCurrentCap
+    }
+    if (futureVersionWronglyApplied) {
+      console.log('a request only valid under the future cap was WRONGLY accepted — future-dating not respected: FAIL')
+      allOk = false
+    }
+
+    // A request that fits the CURRENT cap (5) succeeds normally — the current
+    // version is correctly the one in effect today.
+    const { rows: [r6] } = await pool.query(`SELECT request_leave_encashment_atomic($1,$2,$3,$4,$5,$6) AS result`, [t6, e6, lt6, year, 3, 'fits current cap'])
+    const currentVersionApplies = r6.result?.status === 'pending'
+    console.log('a request that fits the CURRENT (already-effective) cap succeeds normally:', currentVersionApplies ? 'PASS' : 'FAIL', r6.result)
+    allOk = allOk && currentVersionApplies
+
+    // Retroactively make the "future" version effective as of today (simulating
+    // that its date has now arrived) — it must now correctly take over. Move
+    // the OLD version's effective_from safely into the past first, so the two
+    // rows don't collide on (tenant_id, leave_type_id, effective_from).
+    await pool.query(`UPDATE leave_accrual_rules SET effective_from = CURRENT_DATE - INTERVAL '60 days' WHERE tenant_id=$1 AND leave_type_id=$2 AND max_encashable_per_year=5`, [t6, lt6])
+    await pool.query(`UPDATE leave_accrual_rules SET effective_from = CURRENT_DATE WHERE tenant_id=$1 AND leave_type_id=$2 AND max_encashable_per_year=50`, [t6, lt6])
+    const { rows: [r6b] } = await pool.query(`SELECT request_leave_encashment_atomic($1,$2,$3,$4,$5,$6) AS result`, [t6, e6, lt6, year, 40, 'only fits once the new version is effective (3+40=43 > old cap 5, <= new cap 50)'])
+    const newVersionTakesOverOnceEffective = r6b.result?.status === 'pending'
+    console.log('once the new version\'s effective_from arrives, it correctly takes over (3+40=43 fits the new cap of 50, not the old cap of 5):', newVersionTakesOverOnceEffective ? 'PASS' : 'FAIL', r6b.result)
+    allOk = allOk && newVersionTakesOverOnceEffective
+
+    // ── Approval-time (processEncashment): must not throw with 2+ active
+    // versions present, and must apply the one actually effective today.
+    console.log('\n--- approval-time (processEncashment via real HTTP) — same effective-dating fix, proven against the live API ---')
+    const stamp6 = Date.now()
+    const hrEmail6 = `cp14-hr-${stamp6}@test.local`
+    const hrUserId6 = await createAuthUser(hrEmail6)
+    await pool.query(`INSERT INTO profiles (id, tenant_id, role, full_name, email, is_active) VALUES ($1,$2,'hr_admin','CP14 HR',$3,true)`, [hrUserId6, t6, hrEmail6])
+    const empEmail6 = `cp14-emp-${stamp6}@test.local`
+    const empUserId6 = await createAuthUser(empEmail6)
+    await pool.query(`INSERT INTO profiles (id, tenant_id, employee_id, role, full_name, email, is_active) VALUES ($1,$2,$3,'employee','CP14 Emp',$4,true)`, [empUserId6, t6, e6, empEmail6])
+    await pool.query(
+      `INSERT INTO employee_leave_balance (tenant_id, employee_id, leave_type_id, year, balance) VALUES ($1,$2,$3,$4,100)
+       ON CONFLICT (tenant_id, employee_id, leave_type_id, year) DO UPDATE SET balance=100`,
+      [t6, e6, lt6, year],
+    )
+    const { rows: [pendingReq6] } = await pool.query(`SELECT request_leave_encashment_atomic($1,$2,$3,$4,$5,$6) AS result`, [t6, e6, lt6, year, 2, 'approval-time effective-dating proof'])
+    const hrToken6 = await loginAndGetToken(hrEmail6)
+    const approveRes6 = await fetch(`${API_BASE}/leave/encashment/${pendingReq6.result.id}/approve`, {
+      method: 'POST', headers: { authorization: `Bearer ${hrToken6}`, 'content-type': 'application/json' }, body: '{}',
+    })
+    const approveBody6 = await approveRes6.json()
+    console.log('approval with TWO active rule versions present (one past, one now-effective) via real HTTP:', approveRes6.status, approveBody6)
+    const approvalDidNotThrow = approveRes6.status === 200
+    console.log('processEncashment correctly resolves ONE effective version and does not error on multiple active rows (the old `.maybeSingle()` with no date filter would have thrown "multiple rows" the moment a second version existed):', approvalDidNotThrow ? 'PASS' : 'FAIL')
+    allOk = allOk && approvalDidNotThrow
   }
 
   console.log(allOk ? '\nALL PARTS PASS' : '\nFAIL')

@@ -589,14 +589,30 @@ export async function processEncashment(
   if (fetchErr || !req) return { ok: false, message: 'Encashment request not found' }
   if (req.status !== 'pending') return { ok: false, message: `Request is already ${req.status}` }
 
-  // Check encashment is allowed in accrual rule
-  const { data: rule } = await supabase
+  // Check encashment is allowed in accrual rule.
+  // SYSTEM_AUDIT_2026-10-14 checkpoint 14 — leave_accrual_rules is
+  // explicitly versioned (effective_from/effective_to + a unique
+  // constraint on (tenant_id, leave_type_id, effective_from)), matching
+  // the date-scoped lookup the monthly accrual job already uses
+  // (monthlyAccrualJob below). This used to be a plain `.eq('is_active',
+  // true).maybeSingle()` with no date filter — a FUTURE-dated rule version
+  // would apply immediately instead of waiting for its effective date, and
+  // a second active version at all would make .maybeSingle() throw (more
+  // than one row), not silently ignore one. Fixed to mirror
+  // request_leave_encashment_atomic's own correction (migration 467):
+  // pick the most recent version whose window actually covers today.
+  const todayStr = new Date().toISOString().slice(0, 10)
+  const { data: ruleRows } = await supabase
     .from('leave_accrual_rules')
     .select('encashable, max_encashable_per_year')
     .eq('tenant_id', tenantId)
     .eq('leave_type_id', req.leave_type_id)
     .eq('is_active', true)
-    .maybeSingle()
+    .lte('effective_from', todayStr)
+    .or(`effective_to.is.null,effective_to.gte.${todayStr}`)
+    .order('effective_from', { ascending: false })
+    .limit(1)
+  const rule = ruleRows?.[0] ?? null
 
   if (!rule?.encashable) {
     return { ok: false, message: 'This leave type does not allow encashment' }

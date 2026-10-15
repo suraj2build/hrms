@@ -502,8 +502,19 @@ async function handleRest(req, res, pathname, searchParams, role, claims) {
       // pg's default array serialization produces a Postgres array literal
       // ({...}), not JSON — a jsonb-typed function parameter needs the value
       // as a JSON string instead, same as the POST/PATCH handlers below.
+      //
+      // SYSTEM_AUDIT_2026-10-14 checkpoint 14 — found via
+      // auto_lop_reject_regularisations_atomic's UUID[] parameter: a JS
+      // array is also `typeof === 'object'`, so it was being JSON.stringify
+      // 'd into a JSON-array STRING ("[\"...\"]"), which Postgres then
+      // rejected trying to parse as a native UUID[] literal ("malformed
+      // array literal"). A genuine Postgres ARRAY parameter needs to stay a
+      // real JS array — node-postgres serializes that to the correct `{...}`
+      // array-literal wire format itself. Only a non-array object (an
+      // actual jsonb parameter) needs the JSON.stringify treatment.
       const params = argNames.map((k) => {
         const v = body[k]
+        if (Array.isArray(v)) return v
         return v !== null && typeof v === 'object' ? JSON.stringify(v) : v
       })
       const argsSql = argNames.map((k, idx) => `${qIdent(k)} := $${idx + 1}`).join(', ')
