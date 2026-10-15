@@ -483,6 +483,26 @@ async function fetchEmbeds(parentTable, parentRows, items, client) {
 
 // ── REST engine: GET/POST/PATCH/DELETE /:table, POST /rpc/:fn ──────────────
 
+// Cache of fnName -> Map(paramName -> udt_name), populated lazily from
+// information_schema.parameters. See the RPC handler below for why this is
+// needed: Array.isArray() alone can't tell a native Postgres array
+// parameter apart from a jsonb parameter that happens to hold a JS array.
+const fnArgTypesCache = new Map()
+async function getFnArgTypes(client, fnName) {
+  if (fnArgTypesCache.has(fnName)) return fnArgTypesCache.get(fnName)
+  const { rows } = await client.query(
+    `SELECT p.parameter_name, p.udt_name
+     FROM information_schema.parameters p
+     JOIN information_schema.routines r
+       ON r.specific_name = p.specific_name AND r.specific_schema = p.specific_schema
+     WHERE r.routine_schema = 'public' AND r.routine_name = $1 AND p.parameter_name IS NOT NULL`,
+    [fnName],
+  )
+  const map = new Map(rows.map((r) => [r.parameter_name, r.udt_name]))
+  fnArgTypesCache.set(fnName, map)
+  return map
+}
+
 async function handleRest(req, res, pathname, searchParams, role, claims) {
   const client = await pool.connect()
   try {
@@ -512,8 +532,29 @@ async function handleRest(req, res, pathname, searchParams, role, claims) {
       // real JS array — node-postgres serializes that to the correct `{...}`
       // array-literal wire format itself. Only a non-array object (an
       // actual jsonb parameter) needs the JSON.stringify treatment.
+      //
+      // That fix itself over-corrected: credit_monthly_accrual_batch's
+      // p_employee_days is JSONB holding a JS array of {employee_id, days}
+      // objects, not a native Postgres array type — Array.isArray() alone
+      // can't tell these two cases apart (both are JS arrays at the call
+      // site), and passing a JSONB-destined array as a raw pg array
+      // serializes it to `{...}` array-literal syntax, which Postgres then
+      // rejects trying to parse as jsonb ("invalid input syntax for type
+      // json"), found while investigating the leave-accrual.ts batch in
+      // this same checkpoint. The only reliable disambiguator is the
+      // function's OWN declared parameter type, introspected from
+      // information_schema.parameters: a real array type's udt_name is
+      // prefixed with '_' (e.g. '_uuid' for uuid[]); jsonb/json need
+      // JSON.stringify regardless of whether the JS value is an array or a
+      // plain object.
+      const argTypes = await getFnArgTypes(client, fnName)
       const params = argNames.map((k) => {
         const v = body[k]
+        const udtName = argTypes.get(k)
+        if (udtName && udtName.startsWith('_')) return v // native Postgres array type
+        if (udtName === 'jsonb' || udtName === 'json') {
+          return v === null ? null : JSON.stringify(v)
+        }
         if (Array.isArray(v)) return v
         return v !== null && typeof v === 'object' ? JSON.stringify(v) : v
       })

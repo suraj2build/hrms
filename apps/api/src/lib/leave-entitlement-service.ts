@@ -777,56 +777,53 @@ async function writeLedgerEntry(
   expiresOn:   string | null,
   note?:       string,
 ): Promise<{ skipped: boolean }> {
-  try {
-    // Pre-check the composite idempotency key so callers can gate the
-    // (non-idempotent) balance-cache credit on whether this row already existed —
-    // re-running an accrual must not double-credit the cache.
-    const { data: existing } = await supabase
-      .from('leave_accrual_ledger')
-      .select('id')
-      .eq('tenant_id',     tenantId)
-      .eq('employee_id',   employeeId)
-      .eq('leave_type_id', leaveTypeId)
-      .eq('year',          year)
-      .eq('accrual_type',  accrualType)
-      .eq('accrued_on',    accrualDate)
-      .maybeSingle()
-    if (existing) return { skipped: true }
+  // SYSTEM_AUDIT_2026-10-14 checkpoint 14 — this used to be a pre-check
+  // SELECT followed by an .upsert({onConflict: '...', ignoreDuplicates: true}).
+  // leave_accrual_ledger's matching unique index (uidx_accrual_ledger_idempotency)
+  // is PARTIAL (`WHERE accrual_type = ANY (...)`), and Postgres can only use a
+  // partial unique index as an ON CONFLICT arbiter when the INSERT statement's
+  // own ON CONFLICT clause repeats that WHERE predicate — which supabase-js's
+  // upsert({onConflict}) option has no way to express. Every single call here
+  // therefore errored with "there is no unique or exclusion constraint matching
+  // the ON CONFLICT specification" (confirmed via real Postgres + real HTTP:
+  // scripts/db/verify-accrual-scope-gap.mjs), and that error was silently
+  // swallowed — the function always returned {skipped: false} regardless,
+  // telling every caller it's safe to credit the balance cache. Since
+  // creditEmployeeDays has no idempotency of its own (a plain read-balance/
+  // add/upsert), this meant the ledger-based "already credited this period"
+  // guard the comment at every call site claims to provide was actually a
+  // complete no-op: calling runEngineMonthlyAccrual twice for the same
+  // employee/leave-type/period credited the balance twice, with no ledger
+  // audit trail for either credit and no bound on how many times a retry or
+  // overlapping scheduler tick could repeat it.
+  //
+  // Fixed by switching to a plain INSERT and relying on the database's own
+  // 23505 unique-violation as the authoritative, race-safe idempotency
+  // signal (the same pattern already used by claimAccrualRun/claimIdempotency
+  // elsewhere in this codebase) instead of a client-side pre-check-then-write
+  // that can't even reach the DB-level guarantee here. Any OTHER insert
+  // failure now propagates instead of being swallowed, so the caller's
+  // existing per-employee try/catch skips the balance credit rather than
+  // crediting it with a silently missing audit row.
+  const { error: insertErr } = await supabase.from('leave_accrual_ledger').insert({
+    tenant_id:     tenantId,
+    employee_id:   employeeId,
+    leave_type_id: leaveTypeId,
+    accrual_type:  accrualType,
+    days,
+    year,
+    accrued_on:    accrualDate,   // correct column name (not run_date)
+    expires_on:    expiresOn,
+    is_expired:    false,
+    notes:         note ?? null,  // correct column name (not note)
+  })
 
-    const { error: upsertErr } = await supabase.from('leave_accrual_ledger').upsert(
-      {
-        tenant_id:     tenantId,
-        employee_id:   employeeId,
-        leave_type_id: leaveTypeId,
-        accrual_type:  accrualType,
-        days,
-        year,
-        accrued_on:    accrualDate,   // correct column name (not run_date)
-        expires_on:    expiresOn,
-        is_expired:    false,
-        notes:         note ?? null,  // correct column name (not note)
-      },
-      {
-        onConflict:       'tenant_id,employee_id,leave_type_id,year,accrual_type,accrued_on',
-        ignoreDuplicates: true,
-      },
-    )
-    if (upsertErr) {
-      // The balance-cache write (creditEmployeeDays / an RPC) is the primary
-      // source of truth and has already committed by the time callers act on
-      // this — don't revert it. But a missing ledger row means a later
-      // reconciliation/carry-forward run rebuilding balances from this ledger
-      // would silently diverge from the cache, so make it discoverable.
-      console.warn(
-        `[leave-entitlement-service] leave_accrual_ledger upsert failed for employee=${employeeId} leaveType=${leaveTypeId} accrualType=${accrualType} year=${year} days=${days}:`,
-        upsertErr.message,
-      )
-    }
-    return { skipped: false }
-  } catch {
-    // swallow — ledger write is supplemental; balance update is primary
-    return { skipped: false }
-  }
+  if (!insertErr) return { skipped: false }
+  if (insertErr.code === '23505') return { skipped: true }
+  throw new Error(
+    `leave_accrual_ledger insert failed for employee=${employeeId} leaveType=${leaveTypeId} ` +
+    `accrualType=${accrualType} year=${year} days=${days}: ${insertErr.message}`,
+  )
 }
 
 /**
