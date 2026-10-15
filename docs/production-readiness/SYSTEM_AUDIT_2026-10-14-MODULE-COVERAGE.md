@@ -1735,7 +1735,7 @@ the repository, not estimated.
 
 | Module (route namespace) | Total files | Examined (this audit) | Remaining | Open defects | Blocked verification |
 |---|---|---|---|---|---|
-| attendance | 64 | 16 | 48 | 1 (retroactive.ts dedup, disclosed §cp14) | — |
+| attendance | 64 | 29 | 35 | 2 disclosed (retroactive.ts dedup; engine-accrual scope gap — see §cp14 continuation below). 4 found-and-FIXED-same-batch (roster-api.ts pagination ×2, roster-calendar.ts rotation-members pagination, leave-reconciliation.ts breakdown-aggregation, writeLedgerEntry idempotency — don't count as open) | engine-accrual/legacy-policy "two independent systems, no mutual-exclusivity check" risk is disclosed but NOT confirmed as a live double-credit (see below) |
 | employees | 31 | 31 | 0 | 0 | separation-workflow.ts F&F section (~lines 416-972) relies on prior-round evidence, not re-read this audit |
 | payroll (incl. statutory/) | 52 | 0 | 52 | — | approval/finalization/F&F/encashment-adjacent correctness relies on PRIOR rounds (G12 etc.), not re-verified by this audit's own checkpoints |
 | masters | 29 | 0 | 29 | — | nav-link fixes only; no file-level authz review this audit |
@@ -1789,7 +1789,7 @@ the repository, not estimated.
 | uploads | 1 | 0 | 1 | — | — |
 | whatsapp | 1 | 0 | 1 | — | — |
 | workforce | 1 | 0 | 1 | — | — |
-| **TOTAL (54 rows, 53 namespaces + setup.ts)** | **289** | **54** | **235** | **2 open-disclosed (retroactive.ts dedup; none else currently open — every other defect found this audit was fixed in the same checkpoint it was found)** | **global: hosted Supabase/RLS/storage behavior is never verified anywhere in this tracker — see "Explicitly still blocked" below; PT/TDS/F&F/asset/careers/tenant-licensing rows above rely on evidence from rounds OUTSIDE this specific audit, real but not re-verified here** |
+| **TOTAL (54 rows, 53 namespaces + setup.ts)** | **289** | **67** | **222** | **3 open-disclosed (retroactive.ts dedup; engine-accrual scope gap; see §cp14 continuation) — none else currently open; every other defect found this audit was fixed in the same checkpoint it was found** | **global: hosted Supabase/RLS/storage behavior is never verified anywhere in this tracker — see "Explicitly still blocked" below; PT/TDS/F&F/asset/careers/tenant-licensing rows above rely on evidence from rounds OUTSIDE this specific audit, real but not re-verified here** |
 
 **Reduction this batch (checkpoint 14, tier 2 batch 1)**: attendance moved
 from 0/64 examined (nothing in `attendance` had been counted under this
@@ -1805,12 +1805,103 @@ unopened" estimate in this document with the exact count above; those
 prose estimates undercounted because they were scoped to "tier 2 of
 `routes/attendance`" alone rather than the full repository.
 
-**Next planned batch**: continue tier 2 of `attendance` (48 files
-remaining there) — muster.ts/muster-upload.ts, roster-api.ts/roster-
-calendar.ts/roster-context.ts, wo-credit.ts, wfh.ts, leave-duration.ts/
-leave-jobs.ts/leave-reconciliation.ts/leave-scheduler-status.ts/leave-
-accrual-lifecycle.ts/leave-entitlement.ts, manager-dashboard.ts, payroll-
-summary.ts, regularisation-policy.ts, context.ts, api-sources.ts,
+**Checkpoint 14 continuation (same 48-file batch, no new phase)**:
+13 more `attendance` files examined — `wfh.ts`, `muster.ts`, `muster-
+upload.ts`, `roster-context.ts`, `wo-credit.ts` (all read in full, no
+defect found), `roster-api.ts`, `roster-calendar.ts`, `leave-duration.ts`,
+`leave-jobs.ts`, `leave-reconciliation.ts`, `leave-scheduler-status.ts`,
+`leave-accrual-lifecycle.ts`, `leave-entitlement.ts`. Four real defects
+found and fixed in this continuation, each with real-Postgres/real-HTTP
+evidence (verification scripts committed alongside):
+1. `roster-api.ts`'s main `GET /attendance/roster` had `shift_roster`,
+   `employee_shifts`, and `job_history` as unbounded `.select()` calls —
+   the same CLAUDE.md pagination-ceiling class as the Muster Roll bug,
+   since `employee_shifts`/`job_history` are sized 1:1 with employee
+   count. A second instance in `copy-week`'s source-week fetch, same fix.
+   Proof: `scripts/db/verify-roster-api-pagination.mjs` seeds 1,050
+   employees/standing-shifts/job_history rows in one tenant and confirms
+   the real endpoint returns all 1,050, not truncated at 1,000.
+2. `roster-calendar.ts`'s `GET /roster-rotation-members` had the same
+   unbounded-select shape for a table sized ~1:1 with rotation-assigned
+   employee count (unlike this file's other, genuinely small admin-CRUD
+   tables).
+3. `leave-reconciliation.ts`'s `GET /leave/reconciliation/open` computed
+   its `by_type`/`by_severity` breakdown from the same capped (`limit`,
+   ≤200) page shown to the dashboard, so the breakdown silently
+   undercounted for any tenant with more unresolved issues than that page
+   size while `total` (from an exact count) stayed correct. Fixed by
+   deriving the breakdown from a dedicated `fetchAllRows` pull.
+4. **The most severe finding of this continuation**:
+   `leave-entitlement-service.ts`'s `writeLedgerEntry()` — relied on by
+   `runEngineMonthlyAccrual`/its yearly sibling to prevent double-crediting
+   `employee_leave_balance` on a repeated call — used an
+   `.upsert({onConflict: '...'})` against a column list that matches
+   `leave_accrual_ledger`'s `uidx_accrual_ledger_idempotency` index, but
+   that index is PARTIAL; Postgres rejected the upsert on *every* call
+   with "there is no unique or exclusion constraint matching the ON
+   CONFLICT specification", and that error was silently swallowed —
+   the function always returned `{skipped: false}`, making the "can't
+   double-credit on re-run" guarantee a complete no-op, since
+   `creditEmployeeDays()` itself has no idempotency of its own. Found
+   empirically while investigating a separate suspected issue (see below)
+   — `employee_leave_balance` was observed drifting to 2× the ledger
+   total via `scripts/db/verify-accrual-scope-gap.mjs`. Fixed by switching
+   to a plain `INSERT` and treating a real `23505` unique-violation as the
+   idempotency signal (the same pattern `claimAccrualRun`/
+   `claimIdempotency` already use elsewhere in this codebase). Proof:
+   `scripts/db/verify-engine-accrual-ledger-idempotency.mjs` — two real
+   HTTP calls to the same monthly-accrual endpoint for the same employee/
+   leave-type/period; call 2 is now a genuine no-op (`skipped: 1`,
+   balance and ledger both unchanged), and `employee_leave_balance` is
+   confirmed equal to `sum(leave_accrual_ledger)` afterward.
+
+Also fixed in the same continuation (test infrastructure, not product
+code): the local gateway's RPC handler treated every JS array parameter
+as a native Postgres array type (from an earlier checkpoint-14 fix for a
+`UUID[]` parameter), which broke `credit_monthly_accrual_batch`'s JSONB
+`p_employee_days` parameter (a JS array of objects). Fixed by introspecting
+each RPC's real parameter types from `information_schema.parameters` and
+only treating a value as a native array when the function's own declared
+parameter type is itself an array type.
+
+**Disclosed, not fixed, pending a product decision** (found while
+building the reproduction above, not yet fully resolved):
+- `runEngineMonthlyAccrual` only processes `scope_type='employee'`
+  `leave_policy_assignments` — department/work_location/default-scoped
+  assignments (confirmed, via `scripts/db/verify-accrual-scope-gap.mjs`
+  Part 1, to be the most common real-world shape) receive **zero**
+  monthly accrual from this code path. The nightly `leave-reconciliation`
+  job does detect the resulting drift (observed firsthand against the
+  test tenant used in that script, which the live scheduler itself
+  flagged as `severity: "error"` within the same test run), but does not
+  auto-correct it. This needs a scope decision (extend the engine path to
+  resolve the full scope chain, the way `leave-duration.ts`/`leave-
+  accrual-lifecycle.ts` already correctly do for *reading* policy, vs.
+  some other remediation) before a fix is written.
+- `leave_accrual_rules` (admin UI: `/leave/accrual/rules`, backs
+  `accrual-engine.ts`'s `runMonthlyAccrual`) and `leave_policy_rules`/
+  `leave_policy_assignments` (admin UI: `masters/leave-policy-*`, backs
+  `leave-entitlement-service.ts`'s `runEngineMonthlyAccrual`) are two
+  fully independent, HR-admin-configurable systems for the same kind of
+  monthly/quarterly accrual rate, with **no mutual-exclusivity check at
+  either CRUD layer**, and the scheduler (`leave-scheduler.ts`'s
+  `execLeaveMonthlyAccrual`) calls both unconditionally for every tenant
+  every month. This audit did **not** reproduce a live double-credit from
+  this specific overlap (`verify-accrual-scope-gap.mjs` Part 3 showed only
+  one of the two paths actually crediting, for reasons specific to that
+  test's scope shape) — it is reported as a confirmed *misconfiguration
+  risk* given the complete lack of any cross-system guard, not as a
+  reproduced double-credit. Distinguishing this from the writeLedgerEntry
+  defect above matters: that one IS reproduced and IS fixed; this one is
+  disclosed as an open architectural question.
+
+**Updated reduction**: attendance moved from 16/64 to **29/64** examined
+(35 remaining). **Overall: 67 of 289 files examined, 222 remaining (77%
+remaining)** — down from 235 remaining at the top of this batch.
+
+**Next planned batch**: continue tier 2 of `attendance` (35 files
+remaining there) — manager-dashboard.ts, payroll-summary.ts,
+regularisation-policy.ts, context.ts, api-sources.ts,
 ingest.ts, fetch.ts, upload.ts/upload-health.ts, queue-actions.ts,
 status.ts, last-run.ts, run-details.ts, run-export.ts, sample-csv.ts,
 who-is-in.ts, work-sessions.ts, debug-raw.ts, audit.ts, force-unlock.ts,
