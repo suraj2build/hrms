@@ -1735,7 +1735,7 @@ the repository, not estimated.
 
 | Module (route namespace) | Total files | Examined (this audit) | Remaining | Open defects | Blocked verification |
 |---|---|---|---|---|---|
-| attendance | 64 | 29 | 35 | 2 disclosed (retroactive.ts dedup; engine-accrual scope gap — see §cp14 continuation below). 4 found-and-FIXED-same-batch (roster-api.ts pagination ×2, roster-calendar.ts rotation-members pagination, leave-reconciliation.ts breakdown-aggregation, writeLedgerEntry idempotency — don't count as open) | engine-accrual/legacy-policy "two independent systems, no mutual-exclusivity check" risk is disclosed but NOT confirmed as a live double-credit (see below) |
+| attendance | 64 | 33 | 31 | 2 disclosed (retroactive.ts dedup; engine-accrual scope gap — see §cp14 continuation below). 5 found-and-FIXED-same-batch (roster-api.ts pagination ×2, roster-calendar.ts rotation-members pagination, leave-reconciliation.ts breakdown-aggregation, writeLedgerEntry idempotency, regularisation-policy.ts SLA-breach-reject chain orphaning — don't count as open) | engine-accrual/legacy-policy "two independent systems, no mutual-exclusivity check" risk is disclosed but NOT confirmed as a live double-credit (see below) |
 | employees | 31 | 31 | 0 | 0 | separation-workflow.ts F&F section (~lines 416-972) relies on prior-round evidence, not re-read this audit |
 | payroll (incl. statutory/) | 52 | 0 | 52 | — | approval/finalization/F&F/encashment-adjacent correctness relies on PRIOR rounds (G12 etc.), not re-verified by this audit's own checkpoints |
 | masters | 29 | 0 | 29 | — | nav-link fixes only; no file-level authz review this audit |
@@ -1789,7 +1789,26 @@ the repository, not estimated.
 | uploads | 1 | 0 | 1 | — | — |
 | whatsapp | 1 | 0 | 1 | — | — |
 | workforce | 1 | 0 | 1 | — | — |
-| **TOTAL (54 rows, 53 namespaces + setup.ts)** | **289** | **67** | **222** | **3 open-disclosed (retroactive.ts dedup; engine-accrual scope gap; see §cp14 continuation) — none else currently open; every other defect found this audit was fixed in the same checkpoint it was found** | **global: hosted Supabase/RLS/storage behavior is never verified anywhere in this tracker — see "Explicitly still blocked" below; PT/TDS/F&F/asset/careers/tenant-licensing rows above rely on evidence from rounds OUTSIDE this specific audit, real but not re-verified here** |
+| **TOTAL (54 rows, 53 namespaces + setup.ts)** | **289** | **71** | **218** | **3 open-disclosed (retroactive.ts dedup; engine-accrual scope gap; see §cp14 continuation) — none else currently open; every other defect found this audit was fixed in the same checkpoint it was found** | **global: hosted Supabase/RLS/storage behavior is never verified anywhere in this tracker — see "Explicitly still blocked" below; PT/TDS/F&F/asset/careers/tenant-licensing rows above rely on evidence from rounds OUTSIDE this specific audit, real but not re-verified here** |
+
+**Checkpoint 14 continuation, second leg**: 4 more files examined —
+`manager-dashboard.ts`, `payroll-summary.ts`, `context.ts` (no defects;
+all already correctly bound team-scale queries / delegate to
+`fetchAllRows`-correct `buildMonthReadModel` / explicitly cite CLAUDE.md's
+bounded-top-N exception), and `regularisation-policy.ts`, where a fifth
+real defect was found and fixed: `POST /attendance/regularisation/
+breach-check`'s SLA-breach auto-reject used a raw `UPDATE`, bypassing
+`gateReject` — the same orphaned-`approval_instances`-chain bug class as
+the period-locks.ts fix earlier in this same checkpoint. Fixed by routing
+it through the same `auto_lop_reject_regularisations_atomic` RPC
+(migration 468 adds a `p_rejection_reason` parameter, non-breaking for
+the existing period-locks.ts call site). Proven via
+`scripts/db/verify-sla-breach-reject-closes-chain.mjs`: a real 2-level
+chain advanced to level 2, backdated past a 1-hour SLA, breach-check
+called over real HTTP — the request rejects with the SLA message AND the
+chain closes (`final_approved=false`, `closed_at` set), not orphaned.
+**Updated: attendance 33/64 examined (31 remaining); overall 71/289
+examined, 218 remaining.**
 
 **Reduction this batch (checkpoint 14, tier 2 batch 1)**: attendance moved
 from 0/64 examined (nothing in `attendance` had been counted under this
