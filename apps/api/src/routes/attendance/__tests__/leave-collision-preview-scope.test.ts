@@ -26,6 +26,7 @@ function buildApp(opts: {
   userId:           string
   callerEmployeeId: string | null
   reportIds:        string[]
+  employeeInTenant?: boolean  // false simulates employee_id belonging to a DIFFERENT tenant (or not existing)
 }) {
   const app = Fastify()
   app.decorate('authenticate', async (req: any) => {
@@ -37,7 +38,8 @@ function buildApp(opts: {
   const supabase = {
     from(table: string) {
       if (table === 'employees') {
-        return { select: () => ({ eq: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: { id: 'target' }, error: null }) }) }) }) }
+        const found = opts.employeeInTenant !== false
+        return { select: () => ({ eq: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: found ? { id: 'target' } : null, error: null }) }) }) }) }
       }
       if (table === 'profiles') {
         return {
@@ -104,5 +106,43 @@ describe('GET /leave/collision/preview — ownership guard', () => {
     const app = buildApp({ userRole: 'manager', userId: 'u1', callerEmployeeId: MANAGER_EMP_ID, reportIds: [REPORT_A] })
     const res = await app.inject({ method: 'GET', url: url(OUTSIDE_EMP) })
     expect(res.statusCode).toBe(403)
+  })
+
+  // SYSTEM_AUDIT_2026-10-14 checkpoint 12 — additional cases the user
+  // explicitly asked to verify: reassignment, cross-tenant, unlinked
+  // manager — checking the new rule matches each endpoint's intended
+  // policy, not just the original defect's exact repro.
+
+  it('cross-tenant employee_id is refused 404 (tenant check runs before ownership is ever considered) — HR included', async () => {
+    const app = buildApp({ userRole: 'hr_admin', userId: 'u1', callerEmployeeId: 'emp-hr', reportIds: [], employeeInTenant: false })
+    const res = await app.inject({ method: 'GET', url: url(OUTSIDE_EMP) })
+    expect(res.statusCode).toBe(404)
+  })
+
+  it('a manager role with NO linked employee record is refused, not a silent tenant-wide fallthrough', async () => {
+    const app = buildApp({ userRole: 'manager', userId: 'u1', callerEmployeeId: null, reportIds: [] })
+    const res = await app.inject({ method: 'GET', url: url(OUTSIDE_EMP) })
+    expect(res.statusCode).toBe(403)
+  })
+
+  it('reassignment: the FORMER manager loses access and the NEW manager gains it — authorization is derived fresh each call, not cached', async () => {
+    // Before reassignment: M1 manages the employee.
+    const beforeApp = buildApp({ userRole: 'manager', userId: 'm1', callerEmployeeId: MANAGER_EMP_ID, reportIds: [REPORT_A] })
+    const before = await beforeApp.inject({ method: 'GET', url: url(REPORT_A) })
+    expect(before.statusCode).toBe(200)
+
+    // After reassignment: a fresh getDirectReportIds call for M1 no longer
+    // includes the employee (manager_id changed in employees table) —
+    // simulated here by a fresh buildApp call whose reportIds fixture
+    // reflects the new live state, exactly as a real re-fetch would.
+    const afterApp = buildApp({ userRole: 'manager', userId: 'm1', callerEmployeeId: MANAGER_EMP_ID, reportIds: [] })
+    const after = await afterApp.inject({ method: 'GET', url: url(REPORT_A) })
+    expect(after.statusCode).toBe(403)
+
+    // The NEW manager (M2) now has the employee in their live report tree.
+    const M2_EMP_ID = '55555555-5555-5555-5555-555555555555'
+    const newManagerApp = buildApp({ userRole: 'manager', userId: 'm2', callerEmployeeId: M2_EMP_ID, reportIds: [REPORT_A] })
+    const newManagerRes = await newManagerApp.inject({ method: 'GET', url: url(REPORT_A) })
+    expect(newManagerRes.statusCode).toBe(200)
   })
 })

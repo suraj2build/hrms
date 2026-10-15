@@ -39,7 +39,7 @@ import {
   processCarryForward,
   processEncashment,
 } from '../../lib/accrual-engine.js'
-import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
+import { checkIdempotency, storeIdempotency, claimIdempotency, releaseIdempotencyClaim } from '../../lib/idempotency.js'
 import { notFound, serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
@@ -279,30 +279,38 @@ export default async function leaveAccrualRoutes(fastify: FastifyInstance) {
     const parsed = schema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
 
-    // SYSTEM_AUDIT_2026-10-14 checkpoint 10+1 — this is the one write
-    // endpoint in this file that submits money-affecting state (a request
-    // against the leave_accrual_rules.max_encashable_per_year cap) with no
-    // Idempotency-Key handling, unlike the sibling /leave/accrual/run a
-    // few lines above. The annual-cap check below reads a SUM then
-    // inserts — no DB constraint enforces the cap (confirmed: migration
-    // 072's index on leave_encashment_requests is non-unique) and
-    // processEncashment() at approval time only re-checks leave BALANCE
-    // sufficiency, never this cap again — so a double-click or a client
-    // retry after a timeout could submit two requests that each read the
-    // same pre-insert sum, each pass the cap check, and both later get
-    // approved independently, exceeding the configured annual cap with
-    // nothing to catch it. An idempotency key closes the common
-    // double-click/retry case the same way /leave/accrual/run already
-    // does. A fully concurrency-proof fix (re-checking the cap atomically
-    // under a row/advisory lock at insert AND at approval time) is a
-    // larger lift than this specific gap warrants — not attempted,
-    // disclosed rather than silently left implicit.
+    // SYSTEM_AUDIT_2026-10-14 checkpoint 12 — corrects checkpoint 11's fix,
+    // which used checkIdempotency/storeIdempotency (the plain check-then-
+    // work-then-store pair). That pattern's own module doc explicitly
+    // warns it has "a race window between the check and the eventual
+    // storeIdempotency() call, wide enough for both requests to see no
+    // cached hit and both do the work" — exactly the simultaneous-same-
+    // key case a reviewer correctly flagged as unproven. Switched to
+    // claimIdempotency's atomic INSERT-based claim (unique constraint on
+    // (tenant_id, key)), the same pattern leave-entitlement.ts already
+    // uses for this exact race class.
+    //
+    // Idempotency alone was ALSO never enough for the annual-cap defect:
+    // two DIFFERENT idempotency keys (two genuinely separate submissions)
+    // are two different requests by design — idempotency protects against
+    // the SAME request being replayed, not against two distinct, valid
+    // requests colliding on a shared resource (the cap). That requires
+    // the cap check and the insert to be atomic with respect to EVERY
+    // concurrent request for this employee/leave_type/year, not just ones
+    // sharing a key — see request_leave_encashment_atomic (migration 465),
+    // which takes a pg_advisory_xact_lock scoped to exactly that tuple and
+    // performs the re-sum + cap check + insert inside one transaction.
     const iKey = (req.headers['idempotency-key'] as string | undefined)?.trim()
+    const scope = 'leave-encashment-request'
     if (iKey) {
-      const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, 'leave-encashment-request')
+      const cached = await checkIdempotency(fastify.supabase, req.tenantId, iKey, scope)
       if (cached) {
         reply.header('Idempotency-Replayed', 'true')
         return reply.code(cached.status_code).send(cached.response)
+      }
+      const claimed = await claimIdempotency(fastify.supabase, req.tenantId, iKey, scope)
+      if (!claimed) {
+        return reply.code(409).send({ error: 'DUPLICATE_REQUEST', message: 'An identical request is already being processed' })
       }
     }
 
@@ -314,61 +322,35 @@ export default async function leaveAccrualRoutes(fastify: FastifyInstance) {
       .single()
 
     if (!prof?.employee_id) {
+      if (iKey) await releaseIdempotencyClaim(fastify.supabase, req.tenantId, iKey, scope)
       return reply.code(400).send({ error: 'NO_EMPLOYEE_LINK', message: 'Profile not linked to employee record' })
     }
 
     const year = parsed.data.year ?? new Date().getFullYear()
 
-    // Verify encashment is allowed for this leave type
-    const { data: rule } = await fastify.supabase
-      .from('leave_accrual_rules')
-      .select('encashable, max_encashable_per_year')
-      .eq('tenant_id', req.tenantId)
-      .eq('leave_type_id', parsed.data.leave_type_id)
-      .eq('is_active', true)
-      .maybeSingle()
+    const { data: rpcData, error: rpcError } = await fastify.supabase.rpc('request_leave_encashment_atomic', {
+      p_tenant_id:     req.tenantId,
+      p_employee_id:   prof.employee_id,
+      p_leave_type_id: parsed.data.leave_type_id,
+      p_year:          year,
+      p_days:          parsed.data.days,
+      p_notes:         parsed.data.notes ?? null,
+    })
 
-    if (!rule?.encashable) {
-      return reply.code(422).send({ error: 'NOT_ENCASHABLE', message: 'This leave type does not allow encashment' })
-    }
-
-    // Check annual encashment limit
-    if (rule.max_encashable_per_year > 0) {
-      const { data: existingEnc } = await fastify.supabase
-        .from('leave_encashment_requests')
-        .select('days')
-        .eq('tenant_id', req.tenantId)
-        .eq('employee_id', prof.employee_id)
-        .eq('leave_type_id', parsed.data.leave_type_id)
-        .eq('year', year)
-        .not('status', 'eq', 'rejected')
-
-      const alreadyEncashed = (existingEnc ?? []).reduce((sum: number, r: { days: number }) => sum + Number(r.days), 0)
-      if (alreadyEncashed + parsed.data.days > rule.max_encashable_per_year) {
-        return reply.code(422).send({
-          error:   'ENCASHMENT_LIMIT_EXCEEDED',
-          message: `Annual encashment limit is ${rule.max_encashable_per_year} days. Already requested: ${alreadyEncashed}`,
-        })
+    if (rpcError) {
+      if (iKey) await releaseIdempotencyClaim(fastify.supabase, req.tenantId, iKey, scope)
+      const msg = rpcError.message ?? ''
+      if (msg.includes('NOT_ENCASHABLE:')) {
+        return reply.code(422).send({ error: 'NOT_ENCASHABLE', message: 'This leave type does not allow encashment' })
       }
+      if (msg.includes('ENCASHMENT_LIMIT_EXCEEDED:')) {
+        return reply.code(422).send({ error: 'ENCASHMENT_LIMIT_EXCEEDED', message: msg.replace(/^.*ENCASHMENT_LIMIT_EXCEEDED:\s*/, '') })
+      }
+      return serverError(req, reply, rpcError, ErrorCode.INSERT_FAILED, 'Failed to submit encashment request')
     }
 
-    const { data, error } = await fastify.supabase
-      .from('leave_encashment_requests')
-      .insert({
-        tenant_id:     req.tenantId,
-        employee_id:   prof.employee_id,
-        leave_type_id: parsed.data.leave_type_id,
-        year,
-        days:          parsed.data.days,
-        notes:         parsed.data.notes ?? null,
-      })
-      .select('id, days, status, created_at')
-      .single()
-
-    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to submit encashment request')
-
-    const responseBody = { data }
-    if (iKey) await storeIdempotency(fastify.supabase, req.tenantId, iKey, 'leave-encashment-request', 201, responseBody)
+    const responseBody = { data: rpcData }
+    if (iKey) await storeIdempotency(fastify.supabase, req.tenantId, iKey, scope, 201, responseBody)
     return reply.code(201).send(responseBody)
   })
 

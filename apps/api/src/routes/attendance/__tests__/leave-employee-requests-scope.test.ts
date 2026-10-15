@@ -137,4 +137,36 @@ describe('GET /leave/requests — team-scope guard', () => {
     const res = await app.inject({ method: 'GET', url: '/leave/requests' })
     expect(res.statusCode).toBe(403)
   })
+
+  // SYSTEM_AUDIT_2026-10-14 checkpoint 12 — additional cases the user
+  // explicitly asked to verify against each endpoint's intended policy.
+
+  it('a manager requesting a CROSS-TENANT employee_id is refused 403 — getDirectReportIds is itself tenant-scoped, so a foreign id never appears in the report tree', async () => {
+    const { app } = buildApp({ userRole: 'manager', userId: 'u1', callerEmployeeId: MANAGER_EMP_ID, reportIds: [REPORT_A] })
+    const res = await app.inject({ method: 'GET', url: '/leave/requests?employee_id=99999999-9999-9999-9999-999999999999' })
+    expect(res.statusCode).toBe(403)
+  })
+
+  it('HR requesting a CROSS-TENANT employee_id gets zero rows, not another tenant\'s data — listLeaveRequests always ANDs employee_id with this tenant\'s tenant_id, so no row can match both', async () => {
+    const { app, capturedFilters } = buildApp({ userRole: 'hr_admin', userId: 'u1', callerEmployeeId: 'emp-hr', reportIds: [] })
+    const res = await app.inject({ method: 'GET', url: '/leave/requests?employee_id=99999999-9999-9999-9999-999999999999' })
+    expect(res.statusCode).toBe(200)
+    expect(JSON.parse(res.body)).toEqual([])
+    expect(capturedFilters[0]).toEqual({ employeeId: '99999999-9999-9999-9999-999999999999' })
+  })
+
+  it('reassignment: the FORMER manager loses access and the NEW manager gains it — authorization is derived fresh each call, not cached', async () => {
+    const before = await buildApp({ userRole: 'manager', userId: 'm1', callerEmployeeId: MANAGER_EMP_ID, reportIds: [REPORT_A] })
+      .app.inject({ method: 'GET', url: `/leave/requests?employee_id=${REPORT_A}` })
+    expect(before.statusCode).toBe(200)
+
+    const after = await buildApp({ userRole: 'manager', userId: 'm1', callerEmployeeId: MANAGER_EMP_ID, reportIds: [] })
+      .app.inject({ method: 'GET', url: `/leave/requests?employee_id=${REPORT_A}` })
+    expect(after.statusCode).toBe(403)
+
+    const M2_EMP_ID = '55555555-5555-5555-5555-555555555555'
+    const newManagerRes = await buildApp({ userRole: 'manager', userId: 'm2', callerEmployeeId: M2_EMP_ID, reportIds: [REPORT_A] })
+      .app.inject({ method: 'GET', url: `/leave/requests?employee_id=${REPORT_A}` })
+    expect(newManagerRes.statusCode).toBe(200)
+  })
 })

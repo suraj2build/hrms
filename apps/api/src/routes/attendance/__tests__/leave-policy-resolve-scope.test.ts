@@ -29,6 +29,7 @@ function buildApp(opts: {
   userId:           string
   callerEmployeeId: string | null
   reportIds:        string[]
+  employeeInTenant?: boolean  // false simulates employee_id belonging to a DIFFERENT tenant (or not existing)
 }) {
   const app = Fastify()
   app.decorate('authenticate', async (req: any) => {
@@ -51,7 +52,8 @@ function buildApp(opts: {
         }
       }
       if (table === 'employees') {
-        return { select: () => ({ eq: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: { id: 'target', first_name: 'F', last_name: 'L', employee_code: 'E1', joining_date: '2020-01-01' }, error: null }) }) }) }) }
+        const found = opts.employeeInTenant !== false
+        return { select: () => ({ eq: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: found ? { id: 'target', first_name: 'F', last_name: 'L', employee_code: 'E1', joining_date: '2020-01-01' } : null, error: null }) }) }) }) }
       }
       if (table === 'leave_types') {
         return { select: () => ({ eq: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: { id: 'lt-1', name: 'Casual' }, error: null }) }) }) }) }
@@ -106,6 +108,36 @@ describe('GET /leave/policy/resolve/:employeeId — ownership guard', () => {
     const app = buildApp({ userRole: 'manager', userId: 'u1', callerEmployeeId: MANAGER_EMP_ID, reportIds: [REPORT_A] })
     const res = await app.inject({ method: 'GET', url: `/leave/policy/resolve/${OUTSIDE_EMP}` })
     expect(res.statusCode).toBe(403)
+  })
+
+  // SYSTEM_AUDIT_2026-10-14 checkpoint 12 — additional cases the user
+  // explicitly asked to verify against each endpoint's intended policy.
+
+  it('a manager role with NO linked employee record is refused, not a silent tenant-wide fallthrough', async () => {
+    const app = buildApp({ userRole: 'manager', userId: 'u1', callerEmployeeId: null, reportIds: [] })
+    const res = await app.inject({ method: 'GET', url: `/leave/policy/resolve/${OUTSIDE_EMP}` })
+    expect(res.statusCode).toBe(403)
+  })
+
+  it('HR resolving a CROSS-TENANT employee_id is refused 404 — the tenant-membership check still runs after the (HR-bypassed) ownership check', async () => {
+    const app = buildApp({ userRole: 'hr_admin', userId: 'u1', callerEmployeeId: 'emp-hr', reportIds: [], employeeInTenant: false })
+    const res = await app.inject({ method: 'GET', url: `/leave/policy/resolve/${OUTSIDE_EMP}` })
+    expect(res.statusCode).toBe(404)
+  })
+
+  it('reassignment: the FORMER manager loses access and the NEW manager gains it — authorization is derived fresh each call, not cached', async () => {
+    const before = await buildApp({ userRole: 'manager', userId: 'm1', callerEmployeeId: MANAGER_EMP_ID, reportIds: [REPORT_A] })
+      .inject({ method: 'GET', url: `/leave/policy/resolve/${REPORT_A}` })
+    expect(before.statusCode).toBe(200)
+
+    const after = await buildApp({ userRole: 'manager', userId: 'm1', callerEmployeeId: MANAGER_EMP_ID, reportIds: [] })
+      .inject({ method: 'GET', url: `/leave/policy/resolve/${REPORT_A}` })
+    expect(after.statusCode).toBe(403)
+
+    const M2_EMP_ID = '55555555-5555-5555-5555-555555555555'
+    const newManagerRes = await buildApp({ userRole: 'manager', userId: 'm2', callerEmployeeId: M2_EMP_ID, reportIds: [REPORT_A] })
+      .inject({ method: 'GET', url: `/leave/policy/resolve/${REPORT_A}` })
+    expect(newManagerRes.statusCode).toBe(200)
   })
 })
 

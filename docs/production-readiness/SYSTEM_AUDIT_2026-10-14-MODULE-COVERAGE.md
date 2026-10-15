@@ -1058,6 +1058,213 @@ checkpoint so completed work is never repeated. Batch log:
   mocked-route-test-verified this round; none of the four has real-
   Postgres or live-browser evidence yet — disclosed, not implied, matching
   this register's established per-evidence-type discipline.
+- **Checkpoint 12** (this commit): the user independently reviewed
+  checkpoint 11 and correctly rejected its encashment-cap fix as
+  incomplete — idempotency alone cannot protect a shared cap against
+  simultaneous same-key requests racing before either result is stored,
+  or against two DIFFERENT-key requests (two legitimately separate
+  submissions by design). The user also asked for real-Postgres evidence
+  for the approval-chain fix against an actual persisted multi-stage
+  chain (checkpoint 11 had only mocked tests), expanded team-scope
+  coverage (reassignment/cross-tenant/unlinked-manager), and precise,
+  citable traceability for checkpoint 10's claims rather than the word
+  "closed" alone. All four addressed, each with real evidence, not just
+  a narrower disclosure.
+
+  **1. Encashment cap — genuinely atomic now, not idempotency-shaped.**
+  Inspecting `lib/idempotency.ts` confirmed the suspicion directly: it
+  defines TWO different patterns — `checkIdempotency`/`storeIdempotency`
+  (a plain check-then-work-then-store pair whose own module doc already
+  warns "a race window between the check and the eventual
+  storeIdempotency() call, wide enough for both requests to see no cached
+  hit and both do the work") and a SEPARATE `claimIdempotency` (an atomic
+  INSERT relying on the `(tenant_id, key)` unique constraint, used
+  correctly by `leave-entitlement.ts` for this exact race class).
+  Checkpoint 11 used the non-atomic pair — a real, confirmed gap. Fixed:
+  the route now calls `claimIdempotency`/`releaseIdempotencyClaim`,
+  matching `leave-entitlement.ts`'s established pattern exactly.
+  Idempotency was never going to be sufficient for the cap itself,
+  though — it answers "is this a replay," not "does the combined total
+  of every request for this employee/leave_type/year stay under the cap,
+  regardless of which key each one used." Migration 465 adds
+  `request_leave_encashment_atomic`, a single transaction that takes
+  `pg_advisory_xact_lock(hashtextextended(tenant:employee:leave_type:year,
+  0))` (the same composite-key convention migrations 425/427 already use
+  for this exact employee-scoped shape), re-sums existing requests, checks
+  the cap, and inserts — all serialized against every concurrent request
+  for that tuple, independent of idempotency keys entirely. **A second,
+  independent defect found while building this fix**: the cap sum
+  excluded only `status='rejected'`, never `'reversed'` — but
+  `reverse_leave_encashment_atomic` (migration 446) credits the leave
+  balance BACK on reversal, so a reversed request's days should free back
+  into the cap too; leaving it counted understated the employee's
+  remaining allowance forever after a correction. Fixed in the same
+  migration.
+
+  **Real-Postgres proof** (`scripts/db/verify-encashment-cap-atomic.mjs`,
+  4 parts, all pass): Part 1 — two real `pg.Client` connections race an
+  INSERT on the identical `idempotency_keys` row; exactly one succeeds,
+  the other hits a genuine `23505` (the DB primitive `claimIdempotency`
+  itself relies on). Part 2 — two DIFFERENT-key requests (no idempotency
+  key touches the RPC layer at all) for the same employee/leave_type/year,
+  individually under a 5-day cap (3 + 3) but combined over it;
+  `pg_locks`-confirmed the second GENUINELY BLOCKS while the first's
+  transaction is open, then correctly refuses `ENCASHMENT_LIMIT_EXCEEDED`
+  once it sees the first's committed 3 days — exactly one row persists,
+  never both. Part 3 — an over-cap request is refused with zero rows
+  inserted (plpgsql exception auto-rolls back the whole function), then a
+  corrected retry at a valid amount succeeds cleanly. Part 4 — a request
+  is approved (hand-simulating the balance deduction the real approval
+  flow performs, since that flow itself is out of this script's scope),
+  then reversed via the real `reverse_leave_encashment_atomic` RPC;
+  read-back from real Postgres confirms the leave balance is credited
+  back to EXACTLY its original value, the cap correctly frees back up for
+  a new request (the `'reversed'`-exclusion fix), the reconciled live
+  request total for the year matches exactly (the reversed days are not
+  double-counted), and `leave_balance_ledger` has exactly one `reversal`
+  row with the correct delta. **Mocked route tests**
+  (`leave-encashment-request-idempotency.test.ts`, rewritten, 7 tests):
+  proves the ROUTE's wiring to both mechanisms — delegates to the RPC
+  (not a raw insert); a same-key retry replays via the cached response;
+  a key already in the CLAIMED (in-flight) state is refused 409 without
+  ever reaching the RPC (deterministic proxy for the race Part 1 proves
+  against real Postgres — JS microtask timing cannot reliably force two
+  `Fastify.inject` calls to interleave in a synchronous mock, so this is
+  proven by state, not by racing timers); two different keys both reach
+  the RPC (idempotency does not suppress genuinely separate requests); a
+  failed RPC call releases the claim so a corrected retry is not
+  permanently stuck. Fresh-install: migration 465 applies cleanly against
+  a throwaway Postgres 16 instance with the complete 000→465 history (461
+  files, 0 errors, 480 tables, function present).
+
+  **2. Approval-chain bypass — proven against a REAL persisted multi-stage
+  chain + real HTTP, not mocked.** `scripts/db/verify-approval-chain-
+  bypass.mjs` seeds a genuine tenant, a manager with one direct report, a
+  real pending `attendance_regularisation` row, and a REAL 2-level
+  `approval_workflow_config` (`direct_manager` → `hr_admin`) — then drives
+  the actual compiled API over real HTTP. Step 1: the manager approves
+  level 1 for real; read-back confirms the chain genuinely ADVANCES (not
+  finalizes) — `attendance_regularisation.status` stays `'pending'`, a
+  real `approval_instances` row exists at `current_level=2,
+  final_approved=null`. Step 2: HR deletes BOTH config rows mid-flight
+  (the exact scenario under test). Step 3: the SAME manager — who already
+  satisfies `direct_manager` and would pass the legacy `validateApprover`
+  check — attempts to approve AGAIN; **genuinely refused with a real 409**
+  ("has an approval chain in progress... Restore the configuration..."),
+  and read-back confirms the regularisation is STILL `pending`,
+  `approved_by` is still `null`, and the `approval_instances` row is
+  UNCHANGED — no partial or hybrid state, nothing silently skipped. Step
+  4, the authorized recovery path: HR restores the identical config (same
+  `level` numbers, via the real `POST /approvals/workflows/config`
+  endpoint) and the CORRECT level-2 approver (hr_admin) then approves for
+  real — read-back confirms the chain resumes cleanly and finalizes
+  (`status='approved'`, `approval_instances.final_approved=true`). **The
+  documented recovery path, now proven, not asserted**: when an in-flight
+  chain's config is deleted or deactivated, HR must restore
+  `approval_workflow_config` rows with the SAME `level` numbers the open
+  `approval_instances.current_level` still expects (via `POST /approvals/
+  workflows/config`, which upserts on `(tenant_id, workflow_type,
+  level)`) — after that, the correct approver for that level can proceed
+  normally; there is no separate "force-unstick" endpoint, and none is
+  needed, since restoring the config is sufficient and keeps the
+  per-level approver requirement intact rather than bypassing it.
+  (A seed-config bug was hit and fixed while building this script:
+  `getOrCreateInstance` resolves a new instance's `submitted_by` from the
+  OWNING employee's own `profiles` row, not the approvers' — without one,
+  it silently returns null and `gateApprove` falls straight to legacy
+  before ever reaching the config/instance check under test, which is
+  exactly why the first run of this script showed the bypass "succeeding"
+  at step 1 for the wrong reason; fixed by seeding a profile for the
+  report employee too, not just the manager and HR.)
+
+  **3. Team-scope rules — expanded coverage for reassignment, cross-
+  tenant, and unlinked-manager, across all three checkpoint-11 fixes.**
+  9 new mocked tests added across the three existing scope-test files
+  (now 8/10/10 tests respectively — 28 total, up from 5/7/7 — 19 total):
+  **reassignment** — the
+  former manager genuinely loses access and the new manager genuinely
+  gains it, proven by varying the `reportIds` fixture between calls
+  (standing in for `getDirectReportIds`'s real live RPC read, which has
+  no caching layer to go stale) rather than assuming it from the
+  production code alone; **cross-tenant** — `leave-collision.ts` and
+  (for HR) `leave-policy-resolve.ts` both correctly 404 a foreign-tenant
+  `employee_id` (the tenant-membership check runs before or independent
+  of the ownership check); `leave-employee.ts`'s `GET /leave/requests`
+  has no explicit tenant-membership check of its own, but a manager
+  requesting a foreign `employee_id` is still correctly refused 403
+  (`getDirectReportIds` is itself tenant-scoped, so a foreign id can
+  never appear in the report tree), and HR requesting one gets zero rows
+  back, not another tenant's data (`listLeaveRequests` always ANDs
+  `employee_id` with THIS tenant's `tenant_id`, so no row can satisfy
+  both) — verified, not newly built, since tightening this to an explicit
+  404 was not asked for and would be scope creep on a route that is
+  already safe; **unlinked manager** — a `manager`-role profile with no
+  linked `employee_id` is refused 403 on all three endpoints, not a
+  silent tenant-wide fallthrough (already proven for `leave-employee.ts`
+  in checkpoint 11; now proven for the other two as well).
+
+  **Test suite, this checkpoint's final count**: 76/76 files (unchanged —
+  all of this checkpoint's test additions extended existing files rather
+  than adding new ones), 654/654 tests passed (up from checkpoint 11's
+  641 — 13 new: 4 in the rewritten encashment-idempotency file + 3 each
+  in the three team-scope files), 0 regressions. `tsc --noEmit` clean on
+  both `apps/api` and `apps/web`. Fresh-install: migration 465 verified
+  against the complete 000→465 migration history (461 files, 0 errors,
+  480 tables).
+
+  **4. Checkpoint 10's exact traceability — citations, not the word
+  "closed."** The user correctly declined to accept prose-only closure
+  claims. Precise references, re-checked against the current source this
+  round rather than restated from memory:
+  - **The finalization transaction boundary**: `supabase/migrations/
+    464_payroll_finalize_atomic_seal.sql` lines 51–140 define
+    `finalize_payroll_run_atomic` as a single `LANGUAGE plpgsql` FUNCTION
+    (not a PROCEDURE — a plain function body has no internal `COMMIT`
+    available to it at all, so nothing inside it can end the transaction
+    early). Line 77, `PERFORM fn_lock_period_months(p_tenant_id,
+    ARRAY[p_month])`, is the FIRST statement and acquires the advisory
+    lock. Lines 84–93 re-verify the attendance-lock state. Lines 99–111
+    re-verify the run's CAS status `FOR UPDATE`. Lines 113–131 are Step 1
+    (finalize draft slips) and Step 2 (seal the run) — the LAST writes
+    before `RETURN` at line 133 and `END;` at line 139. Because
+    Supabase-js's `.rpc()` call (`apps/api/src/routes/payroll/runs.ts`
+    line 2702) invokes this function as a single top-level SQL statement,
+    and Postgres executes an entire function body as part of the ONE
+    implicit transaction that statement opens, the lock acquired at line
+    77 is provably held, uninterrupted, through every statement up to and
+    including line 131 — there is no code path, inside this function,
+    capable of releasing it earlier. This is what "the transaction
+    boundary" concretely is: lines 51–140 in their entirety, one
+    transaction, no exceptions.
+  - **The deterministic concurrency proof** (re-run this round to
+    reconfirm, not just cited from memory): `scripts/db/verify-finalize-
+    atomic-seal.mjs` Part 2 opens a real transaction on connection A that
+    calls this exact RPC and does NOT commit; while that transaction is
+    open, connection B's concurrent `unlock_period_atomic` call is shown
+    via `SELECT count(*) FROM pg_locks WHERE locktype='advisory' AND
+    pid=$1 AND granted=false` to be genuinely blocked (not merely slow);
+    only after connection A commits does connection B's call proceed —
+    and by then the run and slip are already sealed. Part 1 is the
+    negative control proving the OLD (checkpoint-9) split pattern really
+    did let stale payroll commit, by hand-replaying it against the same
+    schema. All three parts re-run clean this round.
+  - **The durable bulk-failure panel**: `apps/web/src/pages/manager/
+    ManagerTeamRegularisation.tsx` — the `FailedItem` interface at line
+    65, the `lastFailures` state at line 92, the `toFailedItems` resolver
+    at line 108, and the persistent panel's render guard at line 259
+    (`{lastFailures.length > 0 && (...)}`, which is NOT a toast — it stays
+    mounted until the user retries or dismisses each row). Live-browser
+    evidence: `scripts/db/verify-checkpoint10-bulk-retry-panel.mjs`,
+    screenshotted at `4-panel-after-toast-fades.png` (taken 3.5s after the
+    bulk-approve click — longer than the toast's own display window) and
+    `5-after-retry.png` (after clicking the real "Retry" button), both
+    sent to the user in checkpoint 10's turn. The script's own Postgres
+    read-back, re-confirmed: after the first bulk action, A and C read
+    `approved` with real timestamps and B reads `pending`; after the
+    retry, B reads `approved` and — the specific claim this section is
+    citing evidence for — A's and C's `approved_at` timestamps are
+    BYTE-IDENTICAL to their first read, proving the retry touched only
+    the one row it targeted.
 - **Next planned batches** (not yet started — listed so a future session
   picks up here, not from zero): continue item 2's batch — tier 2 of the
   remaining ~49 unopened `routes/attendance` files (punch/corrections/
