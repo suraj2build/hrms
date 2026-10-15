@@ -2669,45 +2669,60 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
       return conflictError(reply, 'RUN_FROZEN', freezeRecheck.reason ?? `Payroll for ${run.month} was frozen while finalization was in progress. No slips were finalized.`)
     }
 
-    // SYSTEM_AUDIT_2026-10-14 checkpoint 9: same staleness class as the freeze
-    // re-check above, applied to the attendance-closure gate the top of this
-    // handler already checked once — that earlier read was a plain,
-    // unprotected SELECT, so if HR unlocks (or never locked) the period while
-    // the staleness-recompute loop above was running, this finalize would
-    // otherwise seal slips/run on the assumption that gate result still
-    // holds. recheck_attendance_lock_for_finalize (migration 463) acquires
-    // the SAME per-(tenant, month) advisory lock every protected mutation RPC
-    // now acquires (migration 462) before re-reading the state, so this
-    // re-check is genuinely serialized against a concurrent lock/unlock call,
-    // not just a second unprotected read racing the first one.
-    if (!force_finalize) {
-      const { error: lockRecheckErr } = await fastify.supabase.rpc('recheck_attendance_lock_for_finalize', {
-        p_tenant_id: tenantId,
-        p_month:     run.month,
-      })
-      if (lockRecheckErr) {
-        const msg = lockRecheckErr.message ?? ''
-        if (msg.includes('ATTENDANCE_REOPENED:')) {
-          return reply.code(423).send({
-            error:   'ATTENDANCE_REOPENED',
-            message: `Attendance for ${run.month} was reopened while finalization was in progress. No slips were finalized. ` +
-                     'Re-lock the period and retry finalization.',
-          })
-        }
-        return serverError(req, reply, lockRecheckErr, ErrorCode.QUERY_FAILED, 'Failed to re-verify attendance lock before finalizing')
+    // SYSTEM_AUDIT_2026-10-14 checkpoint 10 — the user correctly rejected
+    // checkpoint 9's recheck_attendance_lock_for_finalize (migration 463) as
+    // a real fix: that RPC acquired the shared advisory lock, re-read the
+    // state, and RETURNED — committing its own tiny transaction and
+    // releasing the lock immediately, with the actual financial writes
+    // (the old Step 1 / Step 2 below) happening as separate, LATER calls
+    // with nothing holding the lock across any of it. A concurrent unlock
+    // could land in that gap — "validation and persistence protected
+    // separately," not together.
+    //
+    // Fixed properly this round: finalize_payroll_run_atomic (migration
+    // 464) fuses the lock acquisition, the state re-check, AND both seal
+    // writes (slip finalize + run finalize) into ONE transaction. The
+    // advisory lock is held from the start of that call until it returns,
+    // so there is no window for a concurrent lock/unlock call to land
+    // between "confirmed locked" and "sealed" — it is forced to wait for
+    // this transaction to end, however long Step 1/Step 2 take. This also
+    // closes a real downstream consequence the narrower checkpoint-9 fix
+    // left open: ess/home.ts gates "payslip ready" on payroll_slips.status
+    // alone (not on payroll_runs.status), so a stale Step 1 that committed
+    // before a Step 2 rejection would have shown an employee a "finalized"
+    // payslip from a run that technically never sealed — fusing both
+    // writes into the same protected transaction means slips are never
+    // marked finalized unless the run seal in the SAME transaction also
+    // succeeds against freshly-verified state.
+    //
+    // force_finalize still bypasses the attendance-lock gate itself
+    // (p_check_attendance_lock = false) but the advisory lock is still
+    // taken, so two concurrent finalize calls — one forced, one not —
+    // still can't corrupt each other.
+    const { error: finalizeAtomicErr } = await fastify.supabase.rpc('finalize_payroll_run_atomic', {
+      p_tenant_id:             tenantId,
+      p_run_id:                id,
+      p_month:                 run.month,
+      p_actor_id:              req.userId,
+      p_check_attendance_lock: !force_finalize,
+    })
+
+    if (finalizeAtomicErr) {
+      const msg = finalizeAtomicErr.message ?? ''
+      if (msg.includes('ATTENDANCE_REOPENED:')) {
+        return reply.code(423).send({
+          error:   'ATTENDANCE_REOPENED',
+          message: `Attendance for ${run.month} was reopened while finalization was in progress. No slips were finalized. ` +
+                   'Re-lock the period and retry finalization.',
+        })
       }
-    }
-
-    // Step 1: Finalize draft slips
-    const { error: slipFinalizeErr } = await fastify.supabase
-      .from('payroll_slips')
-      .update({ status: 'finalized' })
-      .eq('run_id', id)
-      .eq('tenant_id', tenantId)
-      .eq('status', 'draft')
-
-    if (slipFinalizeErr) {
-      return serverError(req, reply, slipFinalizeErr, 'SLIP_FINALIZE_FAILED', 'Failed to finalize payroll slips — the run remains in draft. Retry finalization.')
+      if (msg.includes('RUN_STATE_CHANGED:')) {
+        return conflictError(reply, 'RUN_STATE_CHANGED', 'This payroll run was frozen or finalized by another request while this finalize was in progress. Refresh and check its current status before retrying.')
+      }
+      if (msg.includes('NOT_FOUND:')) {
+        return notFound(reply, 'NOT_FOUND', 'Payroll run not found')
+      }
+      return serverError(req, reply, finalizeAtomicErr, 'FINALIZE_FAILED', 'Failed to finalize payroll — the run remains in draft. Retry finalization.')
     }
 
     // Resync run-level totals from the just-finalized slips. Non-fatal: the
@@ -2947,49 +2962,24 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
       req.log.warn({ err: encErr, run_id: id }, 'payroll finalize: leave encashment paid-flip failed (non-fatal)')
     }
 
-    // Step 2: Mark the run as finalized (only after slips are confirmed finalized).
-    // The status filter makes this an ATOMIC seal: only a draft/partial_failed run
-    // can be flipped, so a concurrent or duplicated finalize request cannot
-    // re-stamp an already-finalized run (and re-run its side-effects).
-    //
-    // .select('id') so we can tell "0 rows matched" apart from "1 row updated" —
-    // a bare .update() with no matching row returns no error at all, so without
-    // this a losing caller (run already finalized elsewhere, or frozen between
-    // the recheck above and this write) would fall through and get told
-    // finalize succeeded, even though this specific call changed nothing.
-    const { data: runFinalizeRows, error: runFinalizeErr } = await fastify.supabase
-      .from('payroll_runs')
-      .update({ status: 'finalized', finalized_by: req.userId, finalized_at: new Date().toISOString() })
-      .eq('id', id)
-      .eq('tenant_id', req.tenantId)
-      .in('status', ['draft', 'partial_failed'])
-      .select('id')
-
-    if (runFinalizeErr) {
-      // Slips are finalized; run status is not.  Retrying finalization is safe:
-      // the slip update will match 0 draft rows (no-op) and only the run status
-      // update will re-execute.
-      return serverError(req, reply, runFinalizeErr, 'RUN_STATUS_UPDATE_FAILED', 'Payroll slips were finalized but run status update failed — retry finalization to complete.')
-    }
-    if (!runFinalizeRows || runFinalizeRows.length === 0) {
-      // Slips are already finalized (Step 1 above is itself idempotent — it
-      // only matches 'draft' slips, so this is safe to have happened). The run
-      // record just didn't match draft/partial_failed anymore: either it was
-      // frozen by a concurrent request that landed after our recheck above, or
-      // another finalize call already completed it first. Either way, tell the
-      // caller honestly instead of returning 200 for a state change this
-      // request didn't actually make.
-      return conflictError(reply, 'RUN_STATE_CHANGED', 'This payroll run was frozen or finalized by another request while this finalize was in progress. Refresh and check its current status before retrying.')
-    }
+    // SYSTEM_AUDIT_2026-10-14 checkpoint 10: Step 1 (slip finalize) and
+    // Step 2 (run finalize) used to be two separate calls here, each with
+    // its own atomic .select('id') compare-and-swap. Both are now inside
+    // finalize_payroll_run_atomic above — one transaction, so there is no
+    // split-state window between them for a concurrent request to land in
+    // (previously documented as "safe to retry," which is still true, but
+    // this is strictly stronger: the split state can no longer occur at
+    // all). The RPC's own error handling above already maps a lost race
+    // to RUN_STATE_CHANGED and a reopened period to ATTENDANCE_REOPENED.
 
     // G04: commit the maker-checker approval/auto-approval NOW — only here,
-    // after Step 1 AND Step 2 have both durably succeeded (the atomic
-    // .select('id') check above confirms THIS request actually won the
-    // finalize), is the audit trail guaranteed to match reality. Committing
-    // any earlier (even "right before Step 1", a bug a prior round of this
-    // same fix left in place) would again let a Step 1/Step 2 failure leave
-    // maker_checker_log claiming "approved" for a finalize that didn't
-    // durably happen — exactly the defect G04 was supposed to close.
+    // after finalize_payroll_run_atomic has durably succeeded (confirming
+    // THIS request actually won the finalize), is the audit trail
+    // guaranteed to match reality. Committing any earlier (even "right
+    // before Step 1", a bug a prior round of this same fix left in place)
+    // would again let a finalize failure leave maker_checker_log claiming
+    // "approved" for a finalize that didn't durably happen — exactly the
+    // defect G04 was supposed to close.
     //
     // A failure HERE is the mirror-image case: finalize has ALREADY
     // genuinely succeeded (slips + run are finalized), so this must never

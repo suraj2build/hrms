@@ -17,7 +17,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   CheckSquare, XSquare, Clock, AlertTriangle,
   Loader2,
-  CheckCircle2, XCircle, Search,
+  CheckCircle2, XCircle, Search, RotateCcw,
 } from 'lucide-react'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { PageHeader }    from '@/components/layout/PageHeader'
@@ -56,6 +56,21 @@ interface BulkResult {
   summary?: { approved?: number; rejected?: number; failed?: number; total?: number }
 }
 
+// SYSTEM_AUDIT_2026-10-14 checkpoint 10 — durable (component-state) record
+// of a bulk action's failures, mirroring ManagerTeamRegularisation.tsx's
+// fix: request id, employee, date, the server's own error, and which
+// action to retry. Rendered in a panel that stays until retried or
+// dismissed, not until a toast's timer fires.
+interface FailedItem {
+  id:           string
+  employeeName: string
+  employeeCode: string | null
+  date:         string
+  error:        string
+  action:       'approve' | 'reject'
+  rejectReason?: string
+}
+
 const TYPE_LABELS: Record<string, string> = {
   missed_punch:    'Missed Punch',
   forgot_checkout: 'Forgot Checkout',
@@ -91,6 +106,7 @@ export default function ManagerRegularisationQueue() {
   const [rejectOpen,   setRejectOpen]   = useState(false)
   const [rejectReason, setRejectReason] = useState('')
   const [search,       setSearch]       = useState('')
+  const [lastFailures, setLastFailures] = useState<FailedItem[]>([])
 
   // ── Data ──────────────────────────────────────────────────────────────────────
   const endpoint = isHrAdmin
@@ -130,23 +146,26 @@ export default function ManagerRegularisationQueue() {
     qc.invalidateQueries({ queryKey: ['ess-approvals-corrections'] })
   }
 
-  // SYSTEM_AUDIT_2026-10-14 checkpoint 9 — live-browser verification found
-  // that once a partial-failure toast fades, nothing in the UI says WHICH
-  // item failed, only a count. Selection clears for successful and failed
-  // ids alike, and an already-actioned failure vanishes from this list on
-  // refetch exactly like a success would. Name the failed items (by
-  // employee, read from `items` as it stood when the action was taken)
-  // directly in the toast rather than only a count.
-  function describeFailedItems(res: BulkResult): string {
-    const failedIds = res.results?.filter(r => !r.ok).map(r => r.id) ?? []
-    const names = failedIds
-      .map(id => items.find(r => r.id === id))
-      .filter((r): r is RegItem => !!r)
-      .map(r => r.employee_name ?? r.employee_code ?? 'unknown')
-    if (names.length === 0) return ''
-    const shown = names.slice(0, 3).join(', ')
-    const extra = names.length > 3 ? ` +${names.length - 3} more` : ''
-    return ` (${shown}${extra})`
+  // SYSTEM_AUDIT_2026-10-14 checkpoint 10 — supersedes checkpoint 9's toast-
+  // only `describeFailedItems`: a longer toast still fades, so once it's
+  // gone nothing says which item failed. Resolve the failed ids (read from
+  // `items` as it stood when the action was taken) into durable FailedItem
+  // rows instead, rendered in a panel until retried or dismissed.
+  function toFailedItems(res: BulkResult, action: 'approve' | 'reject', rejectReason?: string): FailedItem[] {
+    return (res.results ?? [])
+      .filter(r => !r.ok)
+      .map(r => {
+        const row = items.find(i => i.id === r.id)
+        return {
+          id:           r.id,
+          employeeName: row?.employee_name ?? row?.employee_code ?? 'Unknown employee',
+          employeeCode: row?.employee_code ?? null,
+          date:         row?.date ?? '—',
+          error:        r.error ?? 'Failed',
+          action,
+          rejectReason,
+        }
+      })
   }
 
   const bulkApproveMutation = useMutation({
@@ -163,12 +182,17 @@ export default function ManagerRegularisationQueue() {
       // useOperationalQueue.ts's bulk actions.
       const approved = res?.summary?.approved ?? 0
       const failed = res?.summary?.failed ?? 0
+      const failures = toFailedItems(res, 'approve')
       if (failed > 0) {
-        toast.warning(`${approved} approved, ${failed} failed${describeFailedItems(res)}`, { duration: 8000 })
+        toast.warning(`${approved} approved, ${failed} failed`, { duration: 8000 })
       } else {
         toast.success(`Approved ${approved} request${approved !== 1 ? 's' : ''}`)
       }
-      setSelected(new Set())
+      // Retain only the failed ids in the selection — the existing bulk
+      // action button then doubles as "retry remaining failures" without
+      // risk of re-approving an id that already succeeded.
+      setLastFailures(failures)
+      setSelected(new Set(failures.map(f => f.id)))
       invalidate()
     },
     onError: () => toast.error('Bulk approve failed'),
@@ -177,15 +201,17 @@ export default function ManagerRegularisationQueue() {
   const bulkRejectMutation = useMutation({
     mutationFn: ({ ids, reason }: { ids: string[]; reason: string }) =>
       api.post<BulkResult>('/attendance/regularisation/bulk-reject', { ids, rejection_reason: reason || undefined }),
-    onSuccess: (res) => {
+    onSuccess: (res, variables) => {
       const rejected = res?.summary?.rejected ?? 0
       const failed = res?.summary?.failed ?? 0
+      const failures = toFailedItems(res, 'reject', variables.reason)
       if (failed > 0) {
-        toast.warning(`${rejected} rejected, ${failed} failed${describeFailedItems(res)}`, { duration: 8000 })
+        toast.warning(`${rejected} rejected, ${failed} failed`, { duration: 8000 })
       } else {
         toast.success(`Rejected ${rejected} request${rejected !== 1 ? 's' : ''}`)
       }
-      setSelected(new Set())
+      setLastFailures(failures)
+      setSelected(new Set(failures.map(f => f.id)))
       setRejectOpen(false)
       setRejectReason('')
       invalidate()
@@ -195,16 +221,46 @@ export default function ManagerRegularisationQueue() {
 
   const singleApproveMutation = useMutation({
     mutationFn: (id: string) => api.post(`/attendance/regularisation/${id}/approve`, {}),
-    onSuccess: () => { toast.success('Approved'); invalidate() },
-    onError:   () => toast.error('Approve failed'),
+    onSuccess: (_res, id) => {
+      toast.success('Approved')
+      setLastFailures(prev => prev.filter(f => f.id !== id))
+      setSelected(prev => { const next = new Set(prev); next.delete(id); return next })
+      invalidate()
+    },
+    onError: (err: unknown, id) => {
+      const message = err instanceof Error ? err.message : 'Approve failed'
+      setLastFailures(prev => prev.map(f => f.id === id ? { ...f, error: message } : f))
+      toast.error('Approve failed')
+    },
   })
 
   const singleRejectMutation = useMutation({
     mutationFn: ({ id, reason }: { id: string; reason: string }) =>
       api.post(`/attendance/regularisation/${id}/reject`, { rejection_reason: reason || undefined }),
-    onSuccess: () => { toast.success('Rejected'); invalidate() },
-    onError:   () => toast.error('Reject failed'),
+    onSuccess: (_res, { id }) => {
+      toast.success('Rejected')
+      setLastFailures(prev => prev.filter(f => f.id !== id))
+      setSelected(prev => { const next = new Set(prev); next.delete(id); return next })
+      invalidate()
+    },
+    onError: (err: unknown, { id }) => {
+      const message = err instanceof Error ? err.message : 'Reject failed'
+      setLastFailures(prev => prev.map(f => f.id === id ? { ...f, error: message } : f))
+      toast.error('Reject failed')
+    },
   })
+
+  function retryFailure(item: FailedItem) {
+    if (item.action === 'approve') {
+      singleApproveMutation.mutate(item.id)
+    } else {
+      singleRejectMutation.mutate({ id: item.id, reason: item.rejectReason || '' })
+    }
+  }
+
+  function dismissFailure(id: string) {
+    setLastFailures(prev => prev.filter(f => f.id !== id))
+  }
 
   // ── Selection helpers ─────────────────────────────────────────────────────────
   const allSelected  = filtered.length > 0 && filtered.every(r => selected.has(r.id))
@@ -267,6 +323,47 @@ export default function ManagerRegularisationQueue() {
           </div>
         ) : undefined}
       />
+
+      {/* ── Persistent bulk-failure panel ─────────────────────────
+          SYSTEM_AUDIT_2026-10-14 checkpoint 10 — stays until retried or
+          dismissed, not until a toast's timer fires. */}
+      {lastFailures.length > 0 && (
+        <div className="mb-4 rounded-lg border border-warning/40 bg-warning/5 p-3">
+          <div className="mb-2 flex items-center justify-between">
+            <p className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
+              <AlertTriangle className="h-4 w-4 text-warning" />
+              {lastFailures.length} request{lastFailures.length !== 1 ? 's' : ''} need attention
+            </p>
+            <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setLastFailures([])}>
+              Dismiss all
+            </Button>
+          </div>
+          <div className="space-y-1.5">
+            {lastFailures.map(f => (
+              <div key={f.id} className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-xs">
+                <span className="font-mono text-muted-foreground" title={f.id}>{f.id.slice(0, 8)}…</span>
+                <span className="font-medium">{f.employeeName}</span>
+                {f.employeeCode && <span className="text-muted-foreground">({f.employeeCode})</span>}
+                <span className="tabular-nums text-muted-foreground">{fmtDate(f.date)}</span>
+                <span className="rounded bg-muted px-1.5 py-0.5 uppercase text-[10px] font-semibold text-muted-foreground">{f.action}</span>
+                <span className="min-w-0 flex-1 truncate text-destructive" title={f.error}>{f.error}</span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-6 gap-1 px-2 text-xs"
+                  disabled={singleApproveMutation.isPending || singleRejectMutation.isPending}
+                  onClick={() => retryFailure(f)}
+                >
+                  <RotateCcw className="h-3 w-3" /> Retry
+                </Button>
+                <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => dismissFailure(f.id)} title="Dismiss">
+                  <XCircle className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ── Regularisation policy (HR admin only) ───────────────── */}
       {isHrAdmin && (

@@ -757,6 +757,133 @@ checkpoint so completed work is never repeated. Batch log:
   **Test suite**: 607/607 passed, 70/70 files (up from checkpoint 8's
   605/605 — 2 new finalize-recheck tests), 0 regressions; `tsc --noEmit`
   clean on both `apps/api` and `apps/web`.
+- **Checkpoint 10** (this commit): the user correctly rejected a repeat
+  post of the checkpoint 9 report as adding no new evidence, and named two
+  concerns neither closed: (1) `recheck_attendance_lock_for_finalize`'s
+  advisory lock is released the instant that RPC call returns (it commits
+  its own transaction), so the financial writes that followed as separate
+  later calls were never actually covered by it — validation and
+  persistence were not protected together; (2) a longer toast naming the
+  failed employee is still temporary — once it fades, nothing durable
+  identifies which request needs attention. Both are now closed, with the
+  user's exact specified proof structure for point 1 and a live-browser
+  retry for point 2. **Correction to checkpoint 9's claim above**:
+  checkpoint 9's "genuinely serialized ... not a second unprotected read
+  racing the first" was accurate only for the re-check itself — it did not
+  mean the finalize was protected end-to-end, and the writeup should not
+  have been read that way. It wasn't: Step 1/Step 2 ran as separate,
+  later, unprotected `fastify.supabase` calls after the recheck RPC had
+  already committed and released its lock.
+
+  **Point 1 — finalization race, fixed for real this time (migration
+  464, `finalize_payroll_run_atomic`).** The only architecturally sound
+  fix, given this codebase's connection-pooled/PostgREST-style client
+  (confirmed again this round: each `.rpc()`/`.from()` call is its own
+  independent transaction, no session continuity across calls) is to fuse
+  the lock acquisition, the attendance-state re-check, AND both seal
+  writes into **one** transaction, so there is no gap between "confirmed
+  locked" and "sealed" for a concurrent unlock to land in. `routes/
+  payroll/runs.ts`'s finalize handler now calls this single RPC in place
+  of the old recheck-then-two-separate-updates sequence; the old "Step 2:
+  mark the run as finalized" block is deleted outright (folded into the
+  RPC), not left dangling. **Scope decision, stated not implied**: Step 1
+  (slip finalize) had to be folded in too, not just Step 2 (run finalize)
+  — traced `ess/home.ts` and confirmed payslip visibility gates on
+  `payroll_slips.status='finalized'` alone, independent of `payroll_runs.
+  status`, so leaving Step 1 outside the fused transaction would have let
+  an employee see a "finalized" payslip from a run that was never actually
+  sealed. Verified the existing intermediate side-effects that still run
+  after the fused RPC (resyncRunTotals, advance/loan marking, the G12
+  leave-encashment paid-flip, maker-checker) have no ordering dependency
+  on `payroll_runs.status` still reading `'draft'` — safe to run after
+  Step1+Step2 instead of between them, same as before. The freeze-guard
+  re-check immediately before the call is left untouched — a different,
+  unrelated mechanism, not the subject of this finding.
+
+  **Proof, in the exact sequence the user specified** —
+  `scripts/db/verify-finalize-atomic-seal.mjs` (committed, 3 parts, real
+  Postgres, all pass): **Part 1, negative control** — hand-replays
+  checkpoint 9's exact broken pattern (call the old recheck RPC, let it
+  return and release its lock, land a concurrent `unlock_period_atomic`
+  in the now-open gap, then run the old-style raw Step 1/Step 2 UPDATEs
+  with no further check) and confirms it **still seals stale payroll**
+  (period reads `OPEN`, run reads `finalized` anyway) — proving the gap
+  was real, not hypothetical, and that checkpoint 9 alone did not close
+  it. **Part 2, positive proof** — pauses after `finalize_payroll_run_
+  atomic` returns but *before* its own transaction commits (a second
+  `pg.Client` holds `BEGIN; SELECT finalize_payroll_run_atomic(...)` open),
+  attempts to reopen the period from a concurrent connection during that
+  window, and confirms via `pg_locks` (`locktype='advisory' AND
+  pid=$1 AND granted=false`) that the reopen is **genuinely blocked**, not
+  just slow — only proceeding after the finalize transaction commits.
+  Read-back confirms the run+slip are sealed and the period only flips to
+  `OPEN` *after*, never a hybrid state. **Part 3, control** — reopening
+  *before* a fresh finalize attempt starts is still refused outright with
+  `ATTENDANCE_REOPENED`, confirming the gate itself still works end-to-end.
+  **Mocked route tests** (`runs-finalize.test.ts`): both checkpoint-9 tests
+  rewritten against the new RPC name and the `p_check_attendance_lock`
+  param (the mock previously simulated the old two-call sequence; fixed to
+  simulate the fused RPC, including a regression where `slipUpdateSpy`
+  wasn't invoked by the new default mock path). **Fresh-install**:
+  applied cleanly against a throwaway Postgres 16 instance with the
+  complete 000→464 migration history (460 files, 0 errors, 480 tables) —
+  this also caught and fixed a real mistake made while iterating on the
+  migration file itself: changing `finalize_payroll_run_atomic`'s
+  parameter list without an explicit `DROP FUNCTION IF EXISTS` first left
+  TWO overloads coexisting in `hrms_uat` (Postgres treats a different
+  parameter list as a different function); the migration now drops the
+  old 4-param signature before recreating the 5-param one, and the
+  fresh-install check confirms exactly one overload exists.
+
+  **Point 2 — bulk-failure identification, durable panel + working
+  retry, verified live in the browser, not assumed from the component
+  diff alone.** Replaced `describeFailedItems` (a string folded into the
+  toast, however long its duration) with a `FailedItem[]` component-state
+  array and a persistent panel — row per failure, rendered until retried
+  or dismissed, showing the request id, employee, date, the server's own
+  error, and which action (`approve`/`reject`) to retry — in both
+  `ManagerTeamRegularisation.tsx` and `ManagerRegularisationQueue.tsx`
+  (the only two bulk-regularisation UIs; `useOperationalQueue.ts`'s
+  consumers were already covered in a prior checkpoint and are unaffected
+  by this change). Selection after a bulk action is set to **only the
+  failed ids**, not cleared — the existing "Approve N"/"Approve All"
+  button then doubles as a correct "retry remaining failures" control with
+  no separate code path, and per-row retry reuses the existing single-item
+  endpoints (`POST /attendance/regularisation/:id/approve` /
+  `/:id/reject`) rather than resubmitting the original batch, so a retry
+  can never re-touch an id that already succeeded.
+
+  **Live-browser verification** (`scripts/db/verify-checkpoint10-bulk-
+  retry-panel.mjs`, committed, self-contained — seeds its own tenant,
+  manager, 3 direct reports and 3 pending regularisations): selected all
+  3, bulk-approved while B's period was LOCKED, waited past the toast's
+  display window, and screenshotted — the panel was **still showing B's
+  row by employee name, date, and the real server error** (sent to the
+  user). Postgres read-back at that point: A and C `approved`, B still
+  `pending` — exactly the partial-success case. Reopened the period,
+  clicked "Retry" on B's row, screenshotted again — panel cleared, a
+  fresh "Approved Bala Report's request" toast, no pending requests left
+  (sent to the user). Postgres read-back: B now `approved`; **A's and
+  C's `approved_at` timestamps are byte-identical to the first read**,
+  proving the retry touched only B and did not re-process or duplicate
+  the already-succeeded items. **One scenario-design correction made
+  mid-run, disclosed rather than silently fixed**: the first script draft
+  locked B's period through the real `POST /attendance/period-locks/
+  :month/lock` endpoint (matching checkpoint 9's own script) — but that
+  endpoint also fires a background auto-reject-pending-as-LOP job (a
+  separate, already-correct feature, not the subject of this fix), which
+  flips the regularisation straight to a terminal `rejected` state no
+  retry can ever undo. That is real, correct product behavior, not a bug
+  — but it is not the *transient, retry-after-resolution* race this point
+  is about, so the script now writes `attendance_period_locks.state`
+  directly for the lock/unlock steps, still exercising the real
+  `approveRegularisation()` lock-check code path under test, without
+  triggering the unrelated auto-reject side effect.
+
+  **Test suite**: 607/607 passed, 70/70 files — unchanged from checkpoint
+  9's count (the 2 finalize tests were rewritten in place against the new
+  RPC, not added to); 0 regressions. `tsc --noEmit` clean on both
+  `apps/api` and `apps/web`.
 - **Next planned batches** (not yet started — listed so a future session
   picks up here, not from zero): continue item 2's batch — the remaining
   ~60 unopened `routes/attendance` files (tier 1 next: `leave-employee.ts`,
@@ -857,6 +984,24 @@ started.
 - `scripts/db/browser-verify-approvals-scope.mjs` (Playwright, the pre-installed Chromium) logs in for real (typed email+password through the actual `/login` form) as each of MGR_TOP, MGR_MID and HR_ADMIN against the same seeded tenant, navigates to the real Approval Inbox, and screenshots it — 3 PNGs sent to the user. MGR_TOP's page reads "No pending approvals — All items have been reviewed," sidebar badge blank; MGR_MID's shows "Approvals 2," "Leave Requests (1)," "Attendance Corrections (1)," the real employee's row, and working Approve/Reject buttons; HR_ADMIN's shows the same 2 items tenant-wide plus a notification banner. Same employee, same pending items, in every screenshot — the only variable is which manager is logged in.
 
 All three scripts are committed (not throwaway) for re-use by a future session. Screenshots are ephemeral (`/tmp/scope-verify-screens/`, not committed) — re-run the browser script to regenerate them.
+
+**Real stack + real HTTP + real Postgres + live browser, checkpoint 10**
+(same local stack restarted this round): `scripts/db/verify-finalize-
+atomic-seal.mjs` is the deterministic concurrency proof for the
+finalization-race fix — two real `pg.Client` connections, `pg_locks`-
+confirmed genuine blocking (not a sequential/timing-based proxy for it),
+plus a deliberate negative control that hand-reproduces checkpoint 9's
+broken pattern to prove the flagged gap was real before showing the fix
+closes it. `scripts/db/verify-checkpoint10-bulk-retry-panel.mjs` is the
+live-browser proof for the bulk-failure panel — real login, real bulk
+action, real partial failure, a screenshot of the panel still showing the
+failure after the toast's display window has elapsed, a real "Retry"
+click, and a Postgres read-back proving the retry affected only the
+retried row (`approved_at` on the other two rows is unchanged, not just
+"still correct by coincidence"). Both scripts are committed for re-use.
+Screenshots are ephemeral (`/tmp/claude-0/.../cp10-retry-panel/`, not
+committed) — re-run the browser script to regenerate them; 2 were sent to
+the user this round.
 
 ## Explicitly still blocked / out of scope (unchanged from the prior round)
 
