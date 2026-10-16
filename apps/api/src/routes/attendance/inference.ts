@@ -153,7 +153,12 @@ export default async function attendanceInferenceRoute(fastify: FastifyInstance)
 
     const total_inferences = rows.length
 
-    const penalties = rows.filter((r) => r.confidence_penalty != null).map((r) => r.confidence_penalty as number)
+    // Number(): confidence_penalty aliases a DECIMAL(5,2) column, which can
+    // come back as a string depending on the PostgREST client — the same
+    // coercion this codebase already applies to every other DECIMAL column
+    // read before arithmetic (e.g. Number(row.days) in leave.ts). Without
+    // it, `+` on string values concatenates instead of summing.
+    const penalties = rows.filter((r) => r.confidence_penalty != null).map((r) => Number(r.confidence_penalty))
     const avg_confidence_penalty = penalties.length > 0
       ? Math.round((penalties.reduce((s, v) => s + v, 0) / penalties.length) * 1000) / 1000
       : null

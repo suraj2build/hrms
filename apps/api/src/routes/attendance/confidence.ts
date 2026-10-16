@@ -119,10 +119,15 @@ export default async function attendanceConfidenceRoute(fastify: FastifyInstance
       work_hours: number | null
     }>
 
+    // Number(): confidence_score is a DECIMAL(5,2) column, which can come
+    // back as a string depending on the PostgREST client — the same
+    // coercion this codebase already applies elsewhere before arithmetic
+    // on a DECIMAL column (e.g. Number(row.days) in leave.ts). Without it,
+    // `+` on string values concatenates instead of summing.
     const scored = rows.filter((r) => r.confidence_score != null)
     const total_days   = rows.length
-    const avg_score    = scored.length > 0 ? scored.reduce((s, r) => s + (r.confidence_score ?? 0), 0) / scored.length : null
-    const min_score    = scored.length > 0 ? Math.min(...scored.map((r) => r.confidence_score ?? 100)) : null
+    const avg_score    = scored.length > 0 ? scored.reduce((s, r) => s + Number(r.confidence_score ?? 0), 0) / scored.length : null
+    const min_score    = scored.length > 0 ? Math.min(...scored.map((r) => Number(r.confidence_score ?? 100))) : null
     const critical_days = rows.filter((r) => r.confidence_level === 'critical').length
     const low_days      = rows.filter((r) => r.confidence_level === 'low').length
 
@@ -175,9 +180,11 @@ export default async function attendanceConfidenceRoute(fastify: FastifyInstance
     }
 
     const by_level: Record<string, number> = { high: 0, medium: 0, low: 0, critical: 0 }
+    // Number(): see the employee-history route above — confidence_score can
+    // come back as a string, which would make `+` concatenate instead of sum.
     const scored = rows.filter((r) => r.confidence_score != null)
     const avg_confidence_score = scored.length > 0
-      ? Math.round((scored.reduce((s, r) => s + (r.confidence_score ?? 0), 0) / scored.length) * 100) / 100
+      ? Math.round((scored.reduce((s, r) => s + Number(r.confidence_score ?? 0), 0) / scored.length) * 100) / 100
       : null
 
     for (const row of rows) {
@@ -270,7 +277,9 @@ export default async function attendanceConfidenceRoute(fastify: FastifyInstance
       const entry = byEmployee.get(empId)!
       entry.dates.push(row.date as string)
       if (row.confidence_score != null) {
-        entry.scores.push(row.confidence_score as number)
+        // Number(): see the two routes above — confidence_score can come
+        // back as a string, which would make `+` concatenate instead of sum.
+        entry.scores.push(Number(row.confidence_score))
       }
     }
 
