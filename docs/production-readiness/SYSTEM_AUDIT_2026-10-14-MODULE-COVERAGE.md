@@ -1737,7 +1737,7 @@ the repository, not estimated.
 |---|---|---|---|---|---|
 | attendance | 64 | 64 | 0 | 1 open-confirmed (retroactive.ts dedup — low-severity, read-only observability, disclosed not fixed). 14 found-and-FIXED-same-batch (roster-api.ts pagination ×2, roster-calendar.ts rotation-members pagination, leave-reconciliation.ts breakdown-aggregation, writeLedgerEntry idempotency + atomicity, regularisation-policy.ts SLA-breach-reject chain orphaning, scoped-policy accrual gap (migration 470 + `leave-entitlement-service.ts` scope-chain resolver), two-accrual-system double-credit (migration 470 execution-time guard), reconciliation.ts's `/attendance/reconciliation/open` capped-breakdown undercounting, **workforce-optimization.ts missing-authz on 7 routes, health-index.ts department/tenant pagination, 4-file DECIMAL-string-coercion NaN bug, risk.ts `/summary` pagination, risk.ts non-deterministic pagination tie-breaker** — don't count as open) | — |
 | employees | 31 | 31 | 0 | 0 | separation-workflow.ts F&F section (~lines 416-972) relies on prior-round evidence, not re-read this audit |
-| payroll (incl. statutory/) | 52 | 14 | 38 | **1 open-confirmed, HIGH SEVERITY, disclosed-not-fixed, spans 3 files**: arrears.ts, variable-pay.ts, and adjustments.ts each have a complete, well-hardened create→approve workflow whose end state (`arrear_records`/`arrear_payouts`, `variable_payouts`, `payroll_adjustments`) is **never read by `payroll-engine.ts` or `payroll-snapshot-engine.ts`** — approving one changes nothing about what any employee is actually paid. See checkpoint 18 below for the full writeup and decision proposal; blocked pending a product decision, not attempted as a same-batch fix given its design scope (same class of work G12's encashment payout took 3 rounds to get right). 5 found-and-FIXED-same-batch (runs.ts DELETE TOCTOU race; compensation-revisions.ts silent component-copy swallow → rebuilt fully atomic; advances.ts /recover guaranteed-NOT-NULL-violation + stuck-schedule torn write; loans.ts /record-payment identical guaranteed-NOT-NULL-violation + non-idempotent retry; record_loan_payment_atomic (migration 396) column-ambiguity bug that made the function fail on every call since it was created — silently breaking runs.ts's own automatic loan-balance sweep this whole time) — don't count those 5 as open | approval/finalization/F&F/encashment-adjacent correctness relies on PRIOR rounds (G12 etc.), not re-verified by this audit's own checkpoints; the 38 remaining files include all 14 statutory/ files (not yet opened) |
+| payroll (incl. statutory/) | 52 | 16 | 36 | **1 open-confirmed, HIGH SEVERITY, disclosed-not-fixed, spans 3 files**: arrears.ts, variable-pay.ts, and adjustments.ts each have a complete, well-hardened create→approve workflow whose end state (`arrear_records`/`arrear_payouts`, `variable_payouts`, `payroll_adjustments`) is **never read by `payroll-engine.ts` or `payroll-snapshot-engine.ts`** — approving one changes nothing about what any employee is actually paid. See checkpoint 18 below for the full writeup and decision proposal; blocked pending a product decision, not attempted as a same-batch fix given its design scope (same class of work G12's encashment payout took 3 rounds to get right). 5 found-and-FIXED-same-batch (runs.ts DELETE TOCTOU race; compensation-revisions.ts silent component-copy swallow → rebuilt fully atomic; advances.ts /recover guaranteed-NOT-NULL-violation + stuck-schedule torn write; loans.ts /record-payment identical guaranteed-NOT-NULL-violation + non-idempotent retry; record_loan_payment_atomic (migration 396) column-ambiguity bug that made the function fail on every call since it was created — silently breaking runs.ts's own automatic loan-balance sweep this whole time) — don't count those 5 as open | approval/finalization/F&F/encashment-adjacent correctness relies on PRIOR rounds (G12 etc.), not re-verified by this audit's own checkpoints; the 38 remaining files include all 14 statutory/ files (not yet opened) |
 | masters | 29 | 0 | 29 | — | nav-link fixes only; no file-level authz review this audit |
 | ess | 12 | 0 | 12 | — | distinct from the frozen web ESS Context Rail (CLAUDE.md) — this is the unrelated API namespace |
 | onboarding | 8 | 0 | 8 | — | — |
@@ -1789,7 +1789,7 @@ the repository, not estimated.
 | uploads | 1 | 0 | 1 | — | — |
 | whatsapp | 1 | 0 | 1 | — | — |
 | workforce | 1 | 0 | 1 | — | — |
-| **TOTAL (54 rows, 53 namespaces + setup.ts)** | **289** | **116** | **173** | **2 open-confirmed: (1) retroactive.ts dedup — low-severity, read-only observability; (2) arrears/variable-pay/adjustments payroll-engine disconnect — HIGH SEVERITY, see checkpoint 18 — none else currently open; the scoped-policy accrual gap and the two-accrual-system double-credit, both CONFIRMED financial defects as of checkpoint 14, are now FIXED as of checkpoint 15 (migration 470) — see that section below; every other defect found this audit was fixed in the same checkpoint it was found** | **global: hosted Supabase/RLS/storage behavior is never verified anywhere in this tracker — see "Explicitly still blocked" below; PT/TDS/F&F/asset/careers/tenant-licensing rows above rely on evidence from rounds OUTSIDE this specific audit, real but not re-verified here** |
+| **TOTAL (54 rows, 53 namespaces + setup.ts)** | **289** | **118** | **171** | **2 open-confirmed: (1) retroactive.ts dedup — low-severity, read-only observability; (2) arrears/variable-pay/adjustments payroll-engine disconnect — HIGH SEVERITY, see checkpoint 18 — none else currently open; the scoped-policy accrual gap and the two-accrual-system double-credit, both CONFIRMED financial defects as of checkpoint 14, are now FIXED as of checkpoint 15 (migration 470) — see that section below; every other defect found this audit was fixed in the same checkpoint it was found** | **global: hosted Supabase/RLS/storage behavior is never verified anywhere in this tracker — see "Explicitly still blocked" below; PT/TDS/F&F/asset/careers/tenant-licensing rows above rely on evidence from rounds OUTSIDE this specific audit, real but not re-verified here** |
 
 **Checkpoint 14 continuation, second leg**: 4 more files examined —
 `manager-dashboard.ts`, `payroll-summary.ts`, `context.ts` (no defects;
@@ -2644,8 +2644,33 @@ defect spanning three of the four (`arrears.ts`/`variable-pay.ts`/
 `adjustments.ts`), found by asking the cross-module question none of
 their individual checklists would have surfaced.
 
-**Updated: payroll 14/52 examined (38 remaining). Overall: 116/289
-examined, 173 remaining.**
+Continuing the same batch, also examined `fbp.ts` and `reimbursements.ts`
+(1298 lines, full read) against the same cross-module question, since
+they are the other two "claim an amount, get it approved" payroll
+subsystems. Both are clear of the checkpoint-18 defect, for different and
+specific reasons, not by assumption:
+- `fbp.ts` is a reimbursement-reconciliation mechanism, not a payment
+  mechanism — the underlying allowance is already paid monthly via the
+  normal compensation catalog; this quarterly process only determines how
+  much of what was *already paid* becomes taxable against submitted
+  bills, writing `fbp_reconciliations.taxable_amount` which an existing,
+  separately-passing test suite (`fbp-reconciliation.test.ts`, 17 tests)
+  confirms flows into TDS. There is no "approve → nothing happens" gap
+  because there is no pending payment to make.
+- `reimbursements.ts` has its own complete, self-contained terminal
+  payment action — `POST /:id/pay` (idempotent, CAS'd on
+  `status='approved'`) — that marks a claim `'paid'` directly, independent
+  of any payroll run. This is a deliberate, different design (manual/bank
+  disbursement tracked entirely within this subsystem) from arrears/
+  variable-pay/adjustments, which have an "approve"/"apply" step that
+  implies folding into the *next payroll run* specifically and then does
+  not. Also already heavily hardened by prior rounds: self-approval guard,
+  gate-driven multi-level approval, claimed-amount cap on `approved_amount`
+  (SYSCERT_AUDIT_2026-08-02.md Medium finding), idempotency on approve/pay,
+  tenant-scoped attachment storage-path validation. No new defect.
+
+**Updated: payroll 16/52 examined (36 remaining). Overall: 118/289
+examined, 171 remaining.**
 
 ### Separate totals: frontend pages, shared services, migrations
 
