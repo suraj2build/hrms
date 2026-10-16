@@ -339,20 +339,25 @@ export default async function payrollCostRoute(fastify: FastifyInstance) {
         .eq('is_active', true)
         .range(from, to),
     )
-    const activeCompIds = [...new Set(activeCompRows.map((r: any) => r.employee_id))]
+    const activeCompSet = new Set(activeCompRows.map((r: any) => r.employee_id))
 
-    let noCompQuery = fastify.supabase
-      .from('employees')
-      .select('id', { count: 'exact', head: true })
-      .eq('tenant_id', req.tenantId)
-      .eq('status', 'active')
-    if (activeCompIds.length > 0) {
-      noCompQuery = noCompQuery.not('id', 'in', `(${activeCompIds.join(',')})`)
-    }
-    const { count: noCompCount, error: noCompErr } = await noCompQuery
-    if (noCompErr) return serverError(req, reply, noCompErr, ErrorCode.QUERY_FAILED, 'Failed to check compensation gaps')
+    // SYSTEM_AUDIT_2026-10-14: this used to push the whole `activeCompIds`
+    // list into a single `.not('id','in', '(...)')` filter — same bug class
+    // already found and fixed in esi.ts/ptax.ts/lwf.ts's stale-row cleanups:
+    // past roughly 1,200 ids the filter value gets long enough to break the
+    // request outright. Fixed by pulling all active employee ids (also via
+    // fetchAllRows, for the same 1,000-row-cap reason) and diffing in memory.
+    const activeEmployeeRows = await fetchAllRows((from, to) =>
+      fastify.supabase
+        .from('employees')
+        .select('id')
+        .eq('tenant_id', req.tenantId)
+        .eq('status', 'active')
+        .range(from, to),
+    )
+    const noCompCount = activeEmployeeRows.filter((r: any) => !activeCompSet.has(r.id)).length
 
-    if ((noCompCount ?? 0) > 0) {
+    if (noCompCount > 0) {
       insights.push({
         type: 'compensation_gap',
         severity: 'high',

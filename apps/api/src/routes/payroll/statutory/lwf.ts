@@ -451,16 +451,41 @@ export default async function lwfRoutes(fastify: FastifyInstance) {
     // Remove stale rows for employees no longer in this month's deductible set
     // (e.g. became exempt / state disabled / no longer configured since the last
     // compute), so a re-finalize cannot leave a phantom LWF liability on the filing.
+    //
+    // SYSTEM_AUDIT_2026-10-14: the previous version encoded every kept
+    // employee id into one `.not('employee_id','in', '(...)')` filter value —
+    // the same shape already found and fixed in esi.ts/ptax.ts, where it's
+    // documented as breaking the request outright (~44,000-char filter) past
+    // roughly 1,200 employees. Fixed the same way: find the actual stale ids
+    // (existing rows minus the kept set, both read via fetchAllRows to avoid
+    // the 1,000-row PostgREST cap) and delete them in bounded .in() chunks.
     {
-      const keepIds = contributions.map((c: any) => c.employee_id)
-      let delQ = fastify.supabase
-        .from('lwf_contributions')
-        .delete()
-        .eq('tenant_id', req.tenantId)
-        .eq('contribution_month', month)
-      if (keepIds.length > 0) delQ = delQ.not('employee_id', 'in', `(${keepIds.join(',')})`)
-      const { error: delErr } = await delQ
-      if (delErr) return serverError(req, reply, delErr, ErrorCode.DELETE_FAILED, 'Failed to clean up stale LWF contributions')
+      const keepSet = new Set(contributions.map((c: any) => c.employee_id))
+      let existingRows: Array<{ employee_id: string }>
+      try {
+        existingRows = await fetchAllRows((from, to) =>
+          fastify.supabase
+            .from('lwf_contributions')
+            .select('employee_id')
+            .eq('tenant_id', req.tenantId)
+            .eq('contribution_month', month)
+            .order('id')
+            .range(from, to),
+        )
+      } catch (existErr) {
+        return serverError(req, reply, existErr, ErrorCode.QUERY_FAILED, 'Failed to read existing LWF contributions for cleanup')
+      }
+      const staleIds = existingRows.map(r => r.employee_id).filter(id => !keepSet.has(id))
+      for (let i = 0; i < staleIds.length; i += 100) {
+        const chunk = staleIds.slice(i, i + 100)
+        const { error: delErr } = await fastify.supabase
+          .from('lwf_contributions')
+          .delete()
+          .eq('tenant_id', req.tenantId)
+          .eq('contribution_month', month)
+          .in('employee_id', chunk)
+        if (delErr) return serverError(req, reply, delErr, ErrorCode.DELETE_FAILED, 'Failed to clean up stale LWF contributions')
+      }
     }
 
     if (contributions.length > 0) {

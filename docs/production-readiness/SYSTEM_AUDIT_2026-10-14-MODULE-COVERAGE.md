@@ -1737,7 +1737,7 @@ the repository, not estimated.
 |---|---|---|---|---|---|
 | attendance | 64 | 64 | 0 | 1 open-confirmed (retroactive.ts dedup — low-severity, read-only observability, disclosed not fixed). 14 found-and-FIXED-same-batch (roster-api.ts pagination ×2, roster-calendar.ts rotation-members pagination, leave-reconciliation.ts breakdown-aggregation, writeLedgerEntry idempotency + atomicity, regularisation-policy.ts SLA-breach-reject chain orphaning, scoped-policy accrual gap (migration 470 + `leave-entitlement-service.ts` scope-chain resolver), two-accrual-system double-credit (migration 470 execution-time guard), reconciliation.ts's `/attendance/reconciliation/open` capped-breakdown undercounting, **workforce-optimization.ts missing-authz on 7 routes, health-index.ts department/tenant pagination, 4-file DECIMAL-string-coercion NaN bug, risk.ts `/summary` pagination, risk.ts non-deterministic pagination tie-breaker** — don't count as open) | — |
 | employees | 31 | 31 | 0 | 0 | separation-workflow.ts F&F section (~lines 416-972) relies on prior-round evidence, not re-read this audit |
-| payroll (incl. statutory/) | 52 | 28 | 24 | **0 open-confirmed.** The HIGH SEVERITY arrears/variable-pay/adjustments payroll-integration gap (checkpoint 18) is now FIXED as of checkpoint 22 (migrations 476-480) — see that section below; not left disclosed-only, per explicit instruction not to de-scope it. The loan-EMI finalize non-atomicity (found via injected-failure testing of the checkpoint-17 RPC fix, per explicit instruction to verify it through an actual finalize) is FIXED as of checkpoint 23 (migration 481) — see that section below. 7 found-and-FIXED-same-batch total (runs.ts DELETE TOCTOU race; compensation-revisions.ts silent component-copy swallow → rebuilt fully atomic; advances.ts /recover guaranteed-NOT-NULL-violation + stuck-schedule torn write; loans.ts /record-payment identical guaranteed-NOT-NULL-violation + non-idempotent retry; record_loan_payment_atomic (migration 396) column-ambiguity bug that made the function fail on every call since it was created — silently breaking runs.ts's own automatic loan-balance sweep this whole time; the arrears/variable-pay/adjustments payroll-integration gap itself; runs.ts's loan-EMI finalize sweep's own mark-paid/balance-decrement non-atomicity, checkpoint 23) — don't count as open | approval/finalization/F&F/encashment-adjacent correctness relies on PRIOR rounds (G12 etc.), not re-verified by this audit's own checkpoints; the 24 remaining files include all 14 statutory/ files (not yet opened); historical `loan_schedules` rows already stuck in the pre-checkpoint-23 shape (`status='paid' AND paid_amount IS NULL`) in real tenant data are not yet reconciled — tracked separately, per instruction not to silently backfill |
+| payroll (incl. statutory/) | 52 | 52 | 0 | **0 open-confirmed.** The HIGH SEVERITY arrears/variable-pay/adjustments payroll-integration gap (checkpoint 18) is now FIXED as of checkpoint 22 (migrations 476-480) — see that section below; not left disclosed-only, per explicit instruction not to de-scope it. The loan-EMI finalize non-atomicity (found via injected-failure testing of the checkpoint-17 RPC fix, per explicit instruction to verify it through an actual finalize) is FIXED as of checkpoint 23 (migration 481) — see that section below. The checkpoint-26 sweep of the remaining 24 files (all 14 statutory/ files plus cost/forecast/governance/ops-dashboard/scheduler-monitor/simulate/exports/filing-pack) found and fixed 3 more: lwf.ts's and cost.ts's stale-row/gap-check cleanups had the same unbounded `.not(id,'in',...)` truncation-at-scale bug already fixed in esi.ts/ptax.ts this audit, left unported; tds-plans.ts's submit handler silently discarded one write step's error. 10 found-and-FIXED-same-batch total (runs.ts DELETE TOCTOU race; compensation-revisions.ts silent component-copy swallow → rebuilt fully atomic; advances.ts /recover guaranteed-NOT-NULL-violation + stuck-schedule torn write; loans.ts /record-payment identical guaranteed-NOT-NULL-violation + non-idempotent retry; record_loan_payment_atomic (migration 396) column-ambiguity bug that made the function fail on every call since it was created — silently breaking runs.ts's own automatic loan-balance sweep this whole time; the arrears/variable-pay/adjustments payroll-integration gap itself; runs.ts's loan-EMI finalize sweep's own mark-paid/balance-decrement non-atomicity, checkpoint 23; lwf.ts's and cost.ts's unbounded exclusion filters and tds-plans.ts's unchecked demote-error, checkpoint 26) — don't count as open | approval/finalization/F&F/encashment-adjacent correctness relies on PRIOR rounds (G12 etc.), not re-verified by this audit's own checkpoints; historical `loan_schedules` rows already stuck in the pre-checkpoint-23 shape (`status='paid' AND paid_amount IS NULL`) in real tenant data are not yet reconciled — tracked separately, per instruction not to silently backfill; `lwf.ts`/`cost.ts`'s checkpoint-26 fixes haven't been re-run through the specific 1,200+-employee real-scale proof that originally caught this bug class in esi.ts/ptax.ts, only verified by code-pattern match |
 | masters | 29 | 0 | 29 | — | nav-link fixes only; no file-level authz review this audit |
 | ess | 12 | 0 | 12 | — | distinct from the frozen web ESS Context Rail (CLAUDE.md) — this is the unrelated API namespace |
 | onboarding | 8 | 0 | 8 | — | — |
@@ -1789,7 +1789,7 @@ the repository, not estimated.
 | uploads | 1 | 0 | 1 | — | — |
 | whatsapp | 1 | 0 | 1 | — | — |
 | workforce | 1 | 0 | 1 | — | — |
-| **TOTAL (54 rows, 53 namespaces + setup.ts)** | **289** | **130** | **159** | **1 open-confirmed: retroactive.ts dedup — low-severity, read-only observability. The arrears/variable-pay/adjustments payroll-engine disconnect (checkpoint 18, HIGH SEVERITY) is FIXED as of checkpoint 22 — see that section below; none else currently open; the scoped-policy accrual gap and the two-accrual-system double-credit, both CONFIRMED financial defects as of checkpoint 14, are now FIXED as of checkpoint 15 (migration 470) — see that section below; every other defect found this audit was fixed in the same checkpoint it was found** | **global: hosted Supabase/RLS/storage behavior is never verified anywhere in this tracker — see "Explicitly still blocked" below; PT/TDS/F&F/asset/careers/tenant-licensing rows above rely on evidence from rounds OUTSIDE this specific audit, real but not re-verified here** |
+| **TOTAL (54 rows, 53 namespaces + setup.ts)** | **289** | **154** | **135** | **1 open-confirmed: retroactive.ts dedup — low-severity, read-only observability. The arrears/variable-pay/adjustments payroll-engine disconnect (checkpoint 18, HIGH SEVERITY) is FIXED as of checkpoint 22 — see that section below; none else currently open; the scoped-policy accrual gap and the two-accrual-system double-credit, both CONFIRMED financial defects as of checkpoint 14, are now FIXED as of checkpoint 15 (migration 470) — see that section below; every other defect found this audit was fixed in the same checkpoint it was found** | **global: hosted Supabase/RLS/storage behavior is never verified anywhere in this tracker — see "Explicitly still blocked" below; PT/TDS/F&F/asset/careers/tenant-licensing rows above rely on evidence from rounds OUTSIDE this specific audit, real but not re-verified here** |
 
 **Checkpoint 14 continuation, second leg**: 4 more files examined —
 `manager-dashboard.ts`, `payroll-summary.ts`, `context.ts` (no defects;
@@ -3090,6 +3090,100 @@ disclosed `payroll_adjustments` frontend gap (checkpoint 22): the
 backend money-safety work (assign/finalize/rollback) is sound and
 proven; a further frontend build-out is a separate, explicitly flagged
 follow-up, not silently claimed as done here.
+
+## Checkpoint 26 — payroll statutory/ sweep (15 files) + cost.ts/forecast.ts/governance.ts/ops-dashboard.ts/scheduler-monitor.ts/simulate.ts/exports.ts/filing-pack.ts (8 files): 3 real defects found and fixed, closing out the "24 remaining payroll files"
+
+Per the standing instruction to continue the remaining payroll files
+without pausing. Delegated the read-only investigation to an Explore
+subagent (23 code files + 1 stray `.txt` read in full against the same
+defect patterns this audit has used throughout: raw manual 500s,
+`.limit()`/unbounded `.not(...,'in',...)` truncation at scale, missing
+tenant/team-scope authz, non-atomic multi-step financial writes), then
+independently verified and fixed each of its findings myself before
+committing — the subagent's report is evidence gathered, not a
+self-standing claim of "fixed."
+
+**Defect 1 — `lwf.ts`'s stale-contribution cleanup, the same bug class
+already fixed in `esi.ts`/`ptax.ts` this audit, left unfixed here.**
+`POST /payroll/statutory/lwf/contributions/compute` encoded every
+still-eligible employee id into a single `.not('employee_id','in',
+'(...)')` delete filter instead of diffing two `fetchAllRows`-fetched id
+sets in memory — `esi.ts`'s own code comments document this exact shape
+breaking the request outright (~44,000-char filter value) past roughly
+1,200 employees, confirmed earlier in this audit by actually running it
+at that scale. `lwf.ts` was never brought in line with the fix. Verified
+by reading both files side by side; fixed by porting the identical
+fetch-existing/diff/chunk-delete pattern.
+
+**Defect 2 — `cost.ts`'s compensation-gap check, the same bug class
+again.** `GET /analytics/payroll/cost/insights` correctly fetched the
+set of employees WITH active compensation via `fetchAllRows` (so that
+part wasn't truncated), but then pushed the whole id list into a single
+`.not('id','in', '(...)')` count filter to find employees WITHOUT one —
+same failure mode at the same rough headcount. Fixed by also fetching
+all active employees via `fetchAllRows` and computing the gap as a
+set difference in memory, rather than asking PostgREST to evaluate an
+arbitrarily large exclusion filter.
+
+**Defect 3 — `tds-plans.ts`'s submit handler silently discarded one
+step's error.** `POST /plans/my/:planId/submit` performs, as separate
+calls: (1) upsert the plan's `tax_declarations` rows, (2) demote every
+OTHER plan for the employee/FY to `is_primary: false`, (3) flip THIS
+plan to `status: 'submitted', is_primary: true`. Step (2)'s result was
+never checked at all — not destructured, not inspected — so a failure
+there was invisible, and could leave two or more plans simultaneously
+`is_primary = true` for the same employee/FY, a state `tds-recovery.ts`'s
+`/recovery/compute` implicitly assumes is unique (`.eq('is_primary',
+true).limit(1)`). Lower severity than the money-corruption class of bug
+this audit has focused on (no amount is wrong, no payment is duplicated,
+and step (1)'s upsert is idempotent so a client retry is largely
+self-healing) — fixed with the narrowly-scoped change that matters most:
+checking and surfacing step (2)'s error via `serverError()`, so a real
+failure there now fails the whole submit loudly instead of leaving a
+silent, hard-to-notice dual-primary state. Not rebuilt as a single
+atomic RPC this checkpoint — flagged, not silently left as if it were
+already as safe as the fully atomic examples elsewhere in this same
+file (`tds.ts`'s snapshot-creation endpoint, which explicitly rolls back
+its own insert if a later step fails, is the model for what a fuller fix
+here would look like).
+
+**Also removed**: `statutory/index-patch.txt`, a stale "apply this diff
+to index.ts" note from an earlier round — verified every import/
+registration it describes is already live in `apps/api/src/index.ts`
+(lines 248-252, 921-925), so it had zero functional effect; deleted as
+leftover clutter, not a behavior change.
+
+**No defects found** in the other 20 files read this checkpoint: `epf.ts`,
+`esi.ts` (already fixed, this audit's own reference example), `governance.ts`
+(statutory), `hra-declarations.ts`, `it-statement.ts`, `previous-
+employment.ts`, `ptax.ts` (likewise already fixed), `tax-governance.ts`,
+`tds-bulk.ts`, `tds-components.ts`, `tds-recovery.ts`, `tds.ts` (the
+most hardened file in the batch — every status transition folds its
+precondition into the UPDATE WHERE clause, and its snapshot endpoint is
+a correct worked example of the atomicity pattern defect 3 above is
+missing), `ytd-statement.ts`, `cost.ts` (forecast/trend/department-
+ranking parts), `forecast.ts`, `governance.ts` (top-level payroll
+freeze/unfreeze/maker-checker — its unfreeze handler is a correct
+update-before-insert example with an explicit documented recovery
+contract), `ops-dashboard.ts`, `scheduler-monitor.ts`, `simulate.ts`
+(read-only, cannot have a torn write since it performs no writes),
+`exports.ts`, `filing-pack.ts` (1,086 lines, consistently paginated
+throughout).
+
+`apps/api` `tsc --noEmit` clean; full vitest suite: 79 files, 669 tests
+passing (no new tests added this checkpoint — all three fixes are
+scale/error-handling corrections to existing logic, not new business
+rules, and the existing `pagination-scale-check.sh`-style real-scale
+proof already exists for the identical `esi.ts`/`ptax.ts` pattern these
+fixes now match; re-running that proof specifically against `lwf.ts`/
+`cost.ts` at 1,200+ employees is a reasonable follow-up, not done this
+checkpoint).
+
+**Payroll route-file coverage after this checkpoint: 52 of 52 examined**
+(28 before this checkpoint + this checkpoint's 24) — the "payroll
+(incl. statutory/)" row's own `cost.ts`/`forecast.ts` entries from
+checkpoint 4 era are superseded by this fuller pass. See the updated
+module table below.
 
 ## Checkpoint 14 qualifications — both closed with a real fix, not a restated assumption
 

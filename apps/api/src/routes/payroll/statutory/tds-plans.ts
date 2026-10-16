@@ -801,14 +801,19 @@ export default async function tdsPlansRoute(fastify: FastifyInstance) {
       if (declErr) return serverError(req, reply, declErr, ErrorCode.UPDATE_FAILED, 'Failed to save tax declarations')
     }
 
-    // Mark all other plans for this FY as non-primary
-    await fastify.supabase
+    // Mark all other plans for this FY as non-primary. SYSTEM_AUDIT_2026-10-14:
+    // this call's result was never checked — a failure here (left unnoticed)
+    // could leave two or more plans simultaneously is_primary=true for the
+    // same employee/FY, a state tds-recovery.ts's `/recovery/compute` (which
+    // reads `.eq('is_primary', true).limit(1)`) implicitly assumes is unique.
+    const { error: demoteErr } = await fastify.supabase
       .from('tax_declaration_plans')
       .update({ is_primary: false, updated_at: now })
       .eq('employee_id', employeeId)
       .eq('tenant_id', req.tenantId)
       .eq('financial_year', fy)
       .neq('id', planId)
+    if (demoteErr) return serverError(req, reply, demoteErr, ErrorCode.UPDATE_FAILED, 'Failed to demote other tax declaration plans')
 
     // Update this plan to submitted + is_primary + store projections
     const { data: updatedPlan, error: updateErr } = await fastify.supabase
