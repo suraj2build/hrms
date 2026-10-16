@@ -1735,7 +1735,7 @@ the repository, not estimated.
 
 | Module (route namespace) | Total files | Examined (this audit) | Remaining | Open defects | Blocked verification |
 |---|---|---|---|---|---|
-| attendance | 64 | 35 | 29 | 2 disclosed (retroactive.ts dedup; engine-accrual scope gap — see §cp14 continuation below). 5 found-and-FIXED-same-batch (roster-api.ts pagination ×2, roster-calendar.ts rotation-members pagination, leave-reconciliation.ts breakdown-aggregation, writeLedgerEntry idempotency, regularisation-policy.ts SLA-breach-reject chain orphaning — don't count as open) | engine-accrual/legacy-policy "two independent systems, no mutual-exclusivity check" risk is disclosed but NOT confirmed as a live double-credit (see below) |
+| attendance | 64 | 35 | 29 | 3 open-confirmed (retroactive.ts dedup; scoped-policy accrual gap — fully diagnosed, resolution recommended, not yet implemented; two-accrual-system CONFIRMED double-credit — reproduced both call orders, resolution recommended, crosses into unexamined `masters` namespace). 6 found-and-FIXED-same-batch (roster-api.ts pagination ×2, roster-calendar.ts rotation-members pagination, leave-reconciliation.ts breakdown-aggregation, writeLedgerEntry idempotency + atomicity, regularisation-policy.ts SLA-breach-reject chain orphaning — don't count as open) | two-accrual-system fix requires touching `masters/leave-policy-rules.ts` (0/29 examined) — deferred to a dedicated pass, not patched inside this one |
 | employees | 31 | 31 | 0 | 0 | separation-workflow.ts F&F section (~lines 416-972) relies on prior-round evidence, not re-read this audit |
 | payroll (incl. statutory/) | 52 | 0 | 52 | — | approval/finalization/F&F/encashment-adjacent correctness relies on PRIOR rounds (G12 etc.), not re-verified by this audit's own checkpoints |
 | masters | 29 | 0 | 29 | — | nav-link fixes only; no file-level authz review this audit |
@@ -1789,7 +1789,7 @@ the repository, not estimated.
 | uploads | 1 | 0 | 1 | — | — |
 | whatsapp | 1 | 0 | 1 | — | — |
 | workforce | 1 | 0 | 1 | — | — |
-| **TOTAL (54 rows, 53 namespaces + setup.ts)** | **289** | **73** | **216** | **3 open-disclosed (retroactive.ts dedup; engine-accrual scope gap; see §cp14 continuation) — none else currently open; every other defect found this audit was fixed in the same checkpoint it was found** | **global: hosted Supabase/RLS/storage behavior is never verified anywhere in this tracker — see "Explicitly still blocked" below; PT/TDS/F&F/asset/careers/tenant-licensing rows above rely on evidence from rounds OUTSIDE this specific audit, real but not re-verified here** |
+| **TOTAL (54 rows, 53 namespaces + setup.ts)** | **289** | **73** | **216** | **3 open-confirmed (retroactive.ts dedup; scoped-policy accrual gap — diagnosed, resolution recommended; two-accrual-system CONFIRMED double-credit — reproduced, resolution recommended; see §cp14 continuation) — none else currently open; every other defect found this audit was fixed in the same checkpoint it was found** | **global: hosted Supabase/RLS/storage behavior is never verified anywhere in this tracker — see "Explicitly still blocked" below; PT/TDS/F&F/asset/careers/tenant-licensing rows above rely on evidence from rounds OUTSIDE this specific audit, real but not re-verified here** |
 
 **Checkpoint 14 continuation, second leg**: 4 more files examined —
 `manager-dashboard.ts`, `payroll-summary.ts`, `context.ts` (no defects;
@@ -1893,40 +1893,134 @@ each RPC's real parameter types from `information_schema.parameters` and
 only treating a value as a native array when the function's own declared
 parameter type is itself an array type.
 
-**Disclosed, not fixed, pending a product decision** (found while
-building the reproduction above, not yet fully resolved):
-- `runEngineMonthlyAccrual` only processes `scope_type='employee'`
-  `leave_policy_assignments` — department/work_location/default-scoped
-  assignments (confirmed, via `scripts/db/verify-accrual-scope-gap.mjs`
-  Part 1, to be the most common real-world shape) receive **zero**
-  monthly accrual from this code path. The nightly `leave-reconciliation`
-  job does detect the resulting drift (observed firsthand against the
-  test tenant used in that script, which the live scheduler itself
-  flagged as `severity: "error"` within the same test run), but does not
-  auto-correct it. This needs a scope decision (extend the engine path to
-  resolve the full scope chain, the way `leave-duration.ts`/`leave-
-  accrual-lifecycle.ts` already correctly do for *reading* policy, vs.
-  some other remediation) before a fix is written.
-- `leave_accrual_rules` (admin UI: `/leave/accrual/rules`, backs
-  `accrual-engine.ts`'s `runMonthlyAccrual`) and `leave_policy_rules`/
-  `leave_policy_assignments` (admin UI: `masters/leave-policy-*`, backs
-  `leave-entitlement-service.ts`'s `runEngineMonthlyAccrual`) are two
-  fully independent, HR-admin-configurable systems for the same kind of
-  monthly/quarterly accrual rate, with **no mutual-exclusivity check at
-  either CRUD layer**, and the scheduler (`leave-scheduler.ts`'s
-  `execLeaveMonthlyAccrual`) calls both unconditionally for every tenant
-  every month. This audit did **not** reproduce a live double-credit from
-  this specific overlap (`verify-accrual-scope-gap.mjs` Part 3 showed only
-  one of the two paths actually crediting, for reasons specific to that
-  test's scope shape) — it is reported as a confirmed *misconfiguration
-  risk* given the complete lack of any cross-system guard, not as a
-  reproduced double-credit. Distinguishing this from the writeLedgerEntry
-  defect above matters: that one IS reproduced and IS fixed; this one is
-  disclosed as an open architectural question.
+**Checkpoint 14 continuation, fourth leg — user-directed follow-up on the
+two disclosed accrual items above.** The user correctly flagged that
+sequential-retry evidence doesn't prove concurrency safety or crash
+recovery, and that the two-system overlap needed an actual controlled
+test rather than staying an "unconfirmed risk." Both were re-investigated
+with dedicated real-Postgres + real-HTTP scripts; one finding is now
+fixed, the other is upgraded from disclosed risk to a CONFIRMED open
+functional defect, and the scope gap is now a fully diagnosed open
+finding (not deferred as "needs a product decision" with no further
+analysis).
+
+1. **Engine-accrual concurrency and crash recovery — FIXED** (migration
+   469, `credit_engine_accrual_atomic`;
+   `scripts/db/verify-engine-accrual-concurrency-and-crash-recovery.mjs`).
+   Genuinely concurrent requests (fired via `Promise.all`, not sequential
+   awaits) for the same employee/leave-type/period were already safe —
+   Postgres's own unique index on `leave_accrual_ledger` resolves the
+   race atomically (Part A, PASS). But the ledger INSERT and the balance
+   UPSERT were two separate statements; a failure between them (lost
+   connection, process restart) left the ledger row as a permanent
+   "already credited" signal with the balance never actually incremented
+   — unrecoverable by any future retry (Part B, reproduced the gap
+   against the pre-fix code by forcing the exact half-committed state).
+   Fixed by wrapping both writes in one atomic RPC; re-verified by forcing
+   a real mid-transaction failure (a `CHECK (balance >= 0)` violation)
+   inside the SAME call that already ran the ledger insert, and confirming
+   the whole call rolls back — no orphaned ledger row — after which a
+   normal retry credits cleanly. Both parts now PASS.
+
+2. **Two independent accrual-config systems overlapping for the same
+   employee/period — CONFIRMED DOUBLE-CREDIT, upgraded from disclosed
+   risk to an open functional defect.**
+   `scripts/db/verify-dual-accrual-system-overlap.mjs` configured ONE
+   employee with BOTH systems for the SAME leave type (an employee-scope
+   `leave_policy_rules` assignment at 12 days/year = 1/month, AND a
+   `leave_accrual_rules` row at 1 day/month) and called both real HTTP
+   endpoints (`POST /leave/accrual/run` and `POST /leave/jobs/monthly-
+   accrual`) in both orders. Result: **both orders produce a confirmed
+   double-credit** — 2 ledger rows, balance = 2, for an employee who
+   should have been credited 1 day that month. There is **no precedence
+   rule of any kind** — neither code path checks whether the other
+   system already (or will later) credit the same employee/leave-type/
+   period; whichever runs, runs, unconditionally, regardless of call
+   order. (Note: the ORIGINAL exploratory test for this, `verify-accrual-
+   scope-gap.mjs` Part 3, ran before the writeLedgerEntry fix above and
+   showed no double-credit only because Phase 1's ledger write was
+   silently failing at the time — that result is superseded and was never
+   a real "no overlap" finding.)
+   **Affected configuration**: any employee who has an active
+   employee-scope `leave_policy_assignments` row (or, by the same
+   mechanism, any scope once item 3 below is fixed) whose policy's
+   `leave_policy_rules` includes a `monthly`/`quarterly` rule for a leave
+   type that ALSO has an active `leave_accrual_rules` row for that same
+   leave type. Both are independently HR-admin-configurable with no
+   warning that the other exists.
+   **Recommended resolution** (not yet implemented — crosses into the
+   `masters` namespace, 0/29 examined by this audit, so deferred to a
+   dedicated pass rather than patched inside this one): add a
+   mutual-exclusivity check at BOTH CRUD layers — `leave-accrual.ts`'s
+   `POST`/`PUT /leave/accrual/rules` should refuse to create/activate a
+   rule for a `leave_type_id` that already has an active `leave_policy_
+   rules` row covering it (via any assignment scope), and symmetrically
+   `masters/leave-policy-rules.ts`'s create/update for a `monthly`/
+   `quarterly` rule should refuse one whose `leave_type_id` already has
+   an active `leave_accrual_rules` row. This prevents new dual-configs at
+   the point of creation (the cheapest, lowest-regression-risk fix) but
+   does **not** retroactively detect or correct any tenant already
+   dual-configured today — that needs a one-time audit query across
+   existing tenants before this fix ships, which this audit has not run.
+
+3. **Scoped-policy accrual gap — upgraded to a fully diagnosed open
+   functional defect** (previously disclosed as "needs a product
+   decision" with no further analysis; the user correctly rejected
+   treating that as sufficient).
+   Confirmed via `masters/leave-policy-assignments.ts` (line 30's
+   `z.discriminatedUnion('scope_type', [employee, department,
+   work_location, site, default])` and its `SCOPE_PRIORITY` map) that all
+   five assignment scopes are a real, fully-supported, HR-admin-reachable
+   configuration surface — department/work_location/site/default-scoped
+   policies are not an edge case or theoretical possibility; they are the
+   intended mechanism for covering employees WITHOUT an individual
+   override, which is the common case for most of a tenant's workforce.
+   **This is therefore a functional defect, not merely an architectural
+   gap**: `runEngineMonthlyAccrual`/`runEngineYearlyCredit` only query
+   `leave_policy_assignments` with `scope_type='employee'`
+   (`leave-entitlement-service.ts` lines ~880, ~1110), so every employee
+   covered ONLY by a department/work_location/site/default-scoped
+   assignment — i.e., anyone without a personal override — receives
+   **zero** accrual credit from this code path, silently. Confirmed
+   empirically (`scripts/db/verify-accrual-scope-gap.mjs` Part 1): a
+   default-scope-only employee got `employees_processed: 0` from the real
+   HTTP endpoint and zero ledger rows.
+   **Affected configurations**: any tenant using the `masters/leave-
+   policy-*` screens with department-, work_location-, site-, or
+   default-scoped assignments for `monthly`/`quarterly` `leave_policy_
+   rules` — i.e., any tenant that configures accrual this way for anyone
+   other than named individual employees. Tenants using ONLY
+   `leave_accrual_rules` (the older, flat per-leave-type system) or ONLY
+   employee-scope policy assignments are unaffected by this specific gap
+   (though may be affected by finding #2 above if both systems are
+   configured for the same leave type).
+   **Recommended resolution**: extend `runEngineMonthlyAccrual`'s (and
+   `runEngineYearlyCredit`'s) assignment query to resolve the full scope
+   chain per employee — employee → department → work_location → site →
+   default, in that priority order — mirroring the EXACT pattern already
+   correctly implemented for *reading* policy in
+   `resolveEffectiveDurationPolicy` (`leave-duration.ts`) and
+   `resolveLifecyclePolicyForEmployee` (`leave-accrual-lifecycle.ts`),
+   and matching the `SCOPE_PRIORITY` ordering `masters/leave-policy-
+   assignments.ts` already encodes. This requires, per active employee,
+   resolving their current `department_id`/`work_location_id`/`site_id`
+   (via `job_history`, the same join `leave-duration.ts` already does)
+   and walking the scope-candidate list — a bounded per-employee lookup,
+   not a new architecture, but touches the hot per-tenant accrual loop so
+   needs its own dedicated real-Postgres test (confirming no double-
+   credit is introduced between the newly-resolved scopes and the
+   existing employee-scope path, and that Phase 2's legacy-`leave_
+   policies` exclusion set still correctly excludes everyone the engine
+   path now covers) before shipping — which is why this audit is
+   diagnosing and recommending it here rather than writing it inline in
+   the same pass as the other fixes above, consistent with not rushing a
+   change to the hot accrual loop without dedicated verification.
 
 **Updated reduction**: attendance moved from 16/64 to **29/64** examined
-(35 remaining). **Overall: 67 of 289 files examined, 222 remaining (77%
-remaining)** — down from 235 remaining at the top of this batch.
+(35 remaining) as of this leg (unchanged by this diagnostic work, which
+touched lib files and a route already counted). **Overall: 67 of 289
+files examined, 222 remaining (77% remaining)** — down from 235 remaining
+at the top of this batch.
 
 **Next planned batch**: continue tier 2 of `attendance` (29 files
 remaining there, per the final count after this checkpoint's three legs
