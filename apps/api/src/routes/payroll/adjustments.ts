@@ -301,9 +301,16 @@ export default async function payrollAdjustmentsRoutes(fastify: FastifyInstance)
   })
 
   // ── POST /payroll/adjustments/:id/apply ──────────────────────────────────────
-  // Mark an approved adjustment as applied to a specific payroll run.
-  // The actual payroll recomputation is handled by the payroll run engine.
-  // This endpoint closes the adjustment record with the run it was folded into.
+  // SYSTEM_AUDIT_2026-10-14: restructured from a direct CAS-to-'applied' —
+  // which wrote the adjustment nowhere a payslip would ever read it, the
+  // exact "approve and nothing happens" defect this audit disclosed — to
+  // assign_payroll_adjustment_to_run_atomic (migration 478), the same
+  // assign/finalize/revert shape as leave encashment (447) and arrears/
+  // variable-pay (476/477). This call only ASSIGNS the run; status stays
+  // 'approved'. Every (re)generation of that run now folds this
+  // adjustment's signed amount into the employee's payslip fresh
+  // (fetchAdjustmentPayout/applyAdjustmentPayout, runs.ts) — finalizing
+  // that run is what actually flips status to 'applied'.
   fastify.post('/:id/apply', adminAuth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
     const schema = z.object({
@@ -317,54 +324,23 @@ export default async function payrollAdjustmentsRoutes(fastify: FastifyInstance)
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
-    const { data: existing } = await fastify.supabase
-      .from('payroll_adjustments')
-      .select('status, employee_id, adjustment_type, reason')
-      .eq('id', id)
-      .eq('tenant_id', req.tenantId)
-      .single()
+    const { data, error } = await fastify.supabase.rpc('assign_payroll_adjustment_to_run_atomic', {
+      p_tenant_id:      req.tenantId,
+      p_adjustment_id:  id,
+      p_payroll_run_id: parsed.data.run_id,
+      p_apply_to_month: parsed.data.apply_to_month ?? null,
+      p_notes:          parsed.data.notes ?? null,
+    })
 
-    if (!existing) return reply.code(404).send({ error: 'NOT_FOUND' })
-    if ((existing as any).status !== 'approved') {
-      return reply.code(409).send({ error: 'INVALID_STATUS', message: 'Only approved adjustments can be applied' })
+    if (error) {
+      const msg = error.message ?? ''
+      if (msg.includes('NOT_FOUND:'))        return notFound(reply, 'NOT_FOUND', 'Adjustment not found')
+      if (msg.includes('INVALID_STATUS:'))   return reply.code(409).send({ error: 'INVALID_STATUS', message: msg.replace(/^.*INVALID_STATUS:\s*/, '') })
+      if (msg.includes('ALREADY_ASSIGNED:')) return reply.code(409).send({ error: 'ALREADY_APPLIED', message: 'This adjustment was already applied by another request' })
+      if (msg.includes('RUN_NOT_FOUND:'))    return notFound(reply, 'RUN_NOT_FOUND', 'Payroll run not found')
+      if (msg.includes('RUN_NOT_DRAFT:'))    return reply.code(409).send({ error: 'RUN_NOT_DRAFT', message: msg.replace(/^.*RUN_NOT_DRAFT:\s*/, '') })
+      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to apply payroll adjustment')
     }
-
-    // Verify the run exists and belongs to this tenant
-    const { data: run } = await fastify.supabase
-      .from('payroll_runs')
-      .select('id, month, status')
-      .eq('id', parsed.data.run_id)
-      .eq('tenant_id', req.tenantId)
-      .single()
-
-    if (!run) return reply.code(404).send({ error: 'RUN_NOT_FOUND' })
-    if ((run as any).status === 'finalized') {
-      return reply.code(409).send({ error: 'RUN_FINALIZED', message: 'Cannot apply to a finalized run' })
-    }
-
-    // .eq('status','approved') + .eq('tenant_id', ...) + row-count check
-    // (fresh audit finding): previously had neither the tenant filter nor a
-    // status guard on this write — two concurrent apply calls for the same
-    // approved adjustment (e.g. against two different run_ids) could both
-    // pass the precheck above and both succeed, double-applying one
-    // adjustment across two payroll runs.
-    const { data: updatedRows, error } = await fastify.supabase
-      .from('payroll_adjustments')
-      .update({
-        status:         'applied',
-        applied_run_id: parsed.data.run_id,
-        apply_to_month: parsed.data.apply_to_month ?? (run as any).month,
-        applied_at:     new Date().toISOString(),
-        notes:          parsed.data.notes ?? null,
-      })
-      .eq('id', id)
-      .eq('tenant_id', req.tenantId)
-      .eq('status', 'approved')
-      .select()
-
-    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to apply payroll adjustment')
-    if (!updatedRows?.length) return reply.code(409).send({ error: 'ALREADY_APPLIED', message: 'This adjustment was already applied by another request' })
-    const data = updatedRows[0]
 
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
@@ -372,10 +348,9 @@ export default async function payrollAdjustmentsRoutes(fastify: FastifyInstance)
       recordId:    id,
       action:      'UPDATE',
       performedBy: req.userId,
-      onBehalfOf:  (existing as any).employee_id ?? null,
-      newData:     { status: 'applied', applied_run_id: parsed.data.run_id, apply_to_month: parsed.data.apply_to_month ?? (run as any).month },
+      newData:     { applied_run_id: parsed.data.run_id, apply_to_month: parsed.data.apply_to_month ?? null },
     })
 
-    return reply.send({ data, run_month: (run as any).month })
+    return reply.send({ data })
   })
 }

@@ -42,9 +42,16 @@ import {
   fetchActiveCompensation,
   applyAdvanceLoanRecovery,
   applyEncashmentPayout,
+  applyArrearsPayout,
+  applyVariablePayPayout,
+  applyAdjustmentPayout,
+  computeFlatMarginalTds,
   round2,
   type PayrollSlipResult,
   type EncashmentPayout,
+  type ArrearsPayout,
+  type VariablePayPayout,
+  type AdjustmentPayout,
 } from '../../lib/payroll-engine.js'
 import { resolveEmployeeStatutoryParams } from '../../lib/statutory/statutory-governance.js'
 import type { StatutoryTenantCache } from '../../lib/statutory/statutory-governance.js'
@@ -404,6 +411,18 @@ async function computeOneEmployee(
   const encashmentPayout = await fetchEncashmentPayout(supabase, tenantId, emp.id, opts.runId)
   if (encashmentPayout) result = applyEncashmentPayout(result, encashmentPayout)
 
+  // SYSTEM_AUDIT_2026-10-14: closing the "arrears/variable-pay/adjustments
+  // never reach a payslip" gap — same fetch-fresh-every-generation shape as
+  // encashment above, for the same reason (survives any number of re-runs).
+  const arrearsPayout = await fetchArrearsPayout(supabase, tenantId, emp.id, opts.runId)
+  if (arrearsPayout) result = applyArrearsPayout(result, arrearsPayout)
+
+  const variablePayPayout = await fetchVariablePayPayout(supabase, tenantId, emp.id, opts.runId)
+  if (variablePayPayout) result = applyVariablePayPayout(result, variablePayPayout)
+
+  const adjustmentPayout = await fetchAdjustmentPayout(supabase, tenantId, emp.id, opts.runId)
+  if (adjustmentPayout) result = applyAdjustmentPayout(result, adjustmentPayout)
+
   const slipRow  = buildSlipRow(tenantId, opts.runId, result, opts.month)
   const slipValid = validatePayrollSlipPayload(slipRow, { employeeId: emp.id, month: opts.month })
 
@@ -681,6 +700,108 @@ async function fetchEncashmentPayout(
     gross:       round2fn(rows.reduce((s, r) => s + Number(r.gross_amount ?? 0), 0)),
     tds:         round2fn(rows.reduce((s, r) => s + Number(r.tds_amount ?? 0), 0)),
   }
+}
+
+/**
+ * SYSTEM_AUDIT_2026-10-14: fetches any arrears batch payout(s) assigned to
+ * THIS run for this employee (assign_variable_pay_batch_to_run_atomic's
+ * arrears sibling — assign_arrears_batch_to_run_atomic, migration 477).
+ * Queried fresh on every (re)generation — same reason as
+ * fetchEncashmentPayout above. Always taxable: arrears are back-pay of
+ * recurring salary; tds is the flat-marginal withholding on the combined
+ * gross (computeFlatMarginalTds), computed here rather than stored, so it
+ * always reflects the employee's CURRENT projection even if this payout
+ * sits assigned across more than one regeneration.
+ */
+async function fetchArrearsPayout(
+  supabase: any,
+  tenantId: string,
+  employeeId: string,
+  runId: string,
+): Promise<ArrearsPayout | null> {
+  const { data, error } = await supabase
+    .from('arrear_payouts')
+    .select('id, amount')
+    .eq('tenant_id', tenantId)
+    .eq('employee_id', employeeId)
+    .eq('payroll_run_id', runId)
+    .eq('status', 'pending')
+  if (error) {
+    console.warn(`[payroll] fetchArrearsPayout: query failed for employee ${employeeId} (run ${runId}):`, error.message)
+    return null
+  }
+  const rows = (data ?? []) as any[]
+  if (!rows.length) return null
+  const gross = round2fn(rows.reduce((s, r) => s + Number(r.amount ?? 0), 0))
+  const tds   = await computeFlatMarginalTds(supabase, tenantId, employeeId, gross)
+  return { payout_ids: rows.map(r => r.id), gross, tds }
+}
+
+/**
+ * SYSTEM_AUDIT_2026-10-14: fetches any variable-pay/incentive batch
+ * payout(s) assigned to THIS run for this employee
+ * (assign_variable_pay_batch_to_run_atomic, migration 476). Queried fresh
+ * on every (re)generation — same reason as fetchEncashmentPayout above.
+ * Taxability follows the payout's own is_taxable flag (from
+ * incentive_templates.is_taxable at creation time) — the existing
+ * configured policy.
+ */
+async function fetchVariablePayPayout(
+  supabase: any,
+  tenantId: string,
+  employeeId: string,
+  runId: string,
+): Promise<VariablePayPayout | null> {
+  const { data, error } = await supabase
+    .from('variable_payouts')
+    .select('id, amount, is_taxable')
+    .eq('tenant_id', tenantId)
+    .eq('employee_id', employeeId)
+    .eq('payroll_run_id', runId)
+    .eq('status', 'approved')
+  if (error) {
+    console.warn(`[payroll] fetchVariablePayPayout: query failed for employee ${employeeId} (run ${runId}):`, error.message)
+    return null
+  }
+  const rows = (data ?? []) as any[]
+  if (!rows.length) return null
+  const taxableGross = round2fn(rows.filter(r => r.is_taxable !== false).reduce((s, r) => s + Number(r.amount ?? 0), 0))
+  const exemptGross  = round2fn(rows.filter(r => r.is_taxable === false).reduce((s, r) => s + Number(r.amount ?? 0), 0))
+  const gross = round2fn(taxableGross + exemptGross)
+  const tds   = taxableGross > 0 ? await computeFlatMarginalTds(supabase, tenantId, employeeId, taxableGross) : 0
+  return { payout_ids: rows.map(r => r.id), gross, tds }
+}
+
+/**
+ * SYSTEM_AUDIT_2026-10-14: fetches any frozen-period payroll adjustment(s)
+ * assigned to THIS run for this employee (restructured POST /payroll/
+ * adjustments/:id/apply — migration 478). Queried fresh on every
+ * (re)generation — same reason as fetchEncashmentPayout above. amount is a
+ * signed delta already finalized by HR at approval time — no tax
+ * computed; see applyAdjustmentPayout's own doc comment.
+ */
+async function fetchAdjustmentPayout(
+  supabase: any,
+  tenantId: string,
+  employeeId: string,
+  runId: string,
+): Promise<AdjustmentPayout | null> {
+  const { data, error } = await supabase
+    .from('payroll_adjustments')
+    .select('id, amount')
+    .eq('tenant_id', tenantId)
+    .eq('employee_id', employeeId)
+    .eq('applied_run_id', runId)
+    .eq('status', 'approved')
+  if (error) {
+    console.warn(`[payroll] fetchAdjustmentPayout: query failed for employee ${employeeId} (run ${runId}):`, error.message)
+    return null
+  }
+  const rows = (data ?? []) as any[]
+  if (!rows.length) return null
+  const net_delta = round2fn(rows.reduce((s, r) => s + Number(r.amount ?? 0), 0))
+  if (net_delta === 0) return null
+  return { adjustment_ids: rows.map(r => r.id), net_delta }
 }
 
 // Max employees processed concurrently during payroll runs.
@@ -2960,6 +3081,29 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
       if (encPaidErr) req.log.warn({ err: encPaidErr, run_id: id }, 'payroll finalize: leave encashment paid-flip failed (non-fatal)')
     } catch (encErr: any) {
       req.log.warn({ err: encErr, run_id: id }, 'payroll finalize: leave encashment paid-flip failed (non-fatal)')
+    }
+
+    // SYSTEM_AUDIT_2026-10-14: arrears / variable-pay / payroll-adjustments
+    // finalize-time commit — identical non-fatal pattern as the encashment
+    // block above, same reasoning (the slip already reflects the payout;
+    // finalizing is what makes it a real, locked-in payment).
+    try {
+      const { error: arrErr } = await fastify.supabase.rpc('fn_finalize_arrears_for_run', { p_tenant_id: req.tenantId, p_run_id: id })
+      if (arrErr) req.log.warn({ err: arrErr, run_id: id }, 'payroll finalize: arrears processed-flip failed (non-fatal)')
+    } catch (arrErr: any) {
+      req.log.warn({ err: arrErr, run_id: id }, 'payroll finalize: arrears processed-flip failed (non-fatal)')
+    }
+    try {
+      const { error: vpErr } = await fastify.supabase.rpc('fn_finalize_variable_pay_for_run', { p_tenant_id: req.tenantId, p_run_id: id })
+      if (vpErr) req.log.warn({ err: vpErr, run_id: id }, 'payroll finalize: variable pay processed-flip failed (non-fatal)')
+    } catch (vpErr: any) {
+      req.log.warn({ err: vpErr, run_id: id }, 'payroll finalize: variable pay processed-flip failed (non-fatal)')
+    }
+    try {
+      const { error: adjErr } = await fastify.supabase.rpc('fn_finalize_payroll_adjustments_for_run', { p_tenant_id: req.tenantId, p_run_id: id })
+      if (adjErr) req.log.warn({ err: adjErr, run_id: id }, 'payroll finalize: payroll adjustments applied-flip failed (non-fatal)')
+    } catch (adjErr: any) {
+      req.log.warn({ err: adjErr, run_id: id }, 'payroll finalize: payroll adjustments applied-flip failed (non-fatal)')
     }
 
     // SYSTEM_AUDIT_2026-10-14 checkpoint 10: Step 1 (slip finalize) and

@@ -7,7 +7,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
-import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { serverError, notFound, conflictError, ErrorCode } from '../../lib/api-errors.js'
 import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
 
 const ARREAR_TYPES = ['salary_revision', 'bonus_revision', 'component_change', 'correction', 'other'] as const
@@ -390,35 +390,73 @@ export default async function arrearsRoutes(fastify: FastifyInstance) {
   })
 
   // ── POST /payroll/arrears/batches/:id/approve ─────────────────────────────────
-  // Fresh audit finding: this endpoint had no status precondition at all —
-  // unlike the rest of this codebase's universal TOCTOU-guard pattern — and
-  // unconditionally set status='approved' regardless of current state.
+  // SYSTEM_AUDIT_2026-10-14: replaced the plain status-CAS with
+  // approve_arrears_batch_atomic (migration 477), which in the SAME
+  // transaction also generates this batch's arrear_payouts rows — the
+  // per-employee disbursement lines the payroll engine actually reads
+  // (fetchArrearsPayout, runs.ts) — and requires an explicit payout_month
+  // (supplied here, or already set on the batch) rather than letting a
+  // batch reach 'approved' with no target payroll period at all.
   fastify.post('/batches/:id/approve', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
-    const { id } = req.params as { id: string }
-    const now = new Date().toISOString()
+    const schema = z.object({ payout_month: z.string().regex(/^\d{4}-\d{2}$/).optional() })
+    const parsed = schema.safeParse(req.body ?? {})
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
 
-    const { data, error } = await fastify.supabase
-      .from('arrear_batches')
-      .update({
-        status: 'approved',
-        approved_by: req.userId,
-        approved_at: now,
-        updated_at: now,
-      })
-      .eq('id', id)
-      .eq('tenant_id', req.tenantId)
-      .eq('status', 'calculated')
-      .select('id')
-      .maybeSingle()
+    const { data, error } = await fastify.supabase.rpc('approve_arrears_batch_atomic', {
+      p_tenant_id:    req.tenantId,
+      p_batch_id:     req.params.id,
+      p_actor_id:     req.userId,
+      p_payout_month: parsed.data.payout_month ?? null,
+    })
 
-    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to approve arrear batch')
-    if (!data) return reply.code(409).send({ error: 'INVALID_STATUS', message: 'Only calculated batches can be approved' })
-    return reply.send({ message: 'Arrear batch approved' })
+    if (error) {
+      const msg = error.message ?? ''
+      if (msg.includes('NOT_FOUND:'))        return notFound(reply, 'NOT_FOUND', msg.replace(/^.*NOT_FOUND:\s*/, ''))
+      if (msg.includes('INVALID_STATUS:'))   return conflictError(reply, 'INVALID_STATUS', msg.replace(/^.*INVALID_STATUS:\s*/, ''))
+      if (msg.includes('NO_PAYOUT_MONTH:'))  return reply.code(400).send({ error: 'NO_PAYOUT_MONTH', message: msg.replace(/^.*NO_PAYOUT_MONTH:\s*/, '') })
+      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to approve arrear batch')
+    }
+    return reply.send({ data })
+  })
+
+  // ── POST /payroll/arrears/batches/:id/assign-run ──────────────────────────────
+  // SYSTEM_AUDIT_2026-10-14: HR picks a draft payroll run for an approved
+  // batch. Mirrors POST /leave/encashment/:id/assign-payroll-run and
+  // variable-pay's own assign-run exactly — status stays 'approved' (not
+  // yet paid); every (re)generation of that run folds each assigned
+  // employee's arrears into their payslip fresh. Finalizing that run is
+  // what actually flips this to 'processed'.
+  fastify.post('/batches/:id/assign-run', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
+    const schema = z.object({ payroll_run_id: z.string().uuid() })
+    const parsed = schema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    const { data, error } = await fastify.supabase.rpc('assign_arrears_batch_to_run_atomic', {
+      p_tenant_id:      req.tenantId,
+      p_batch_id:       req.params.id,
+      p_payroll_run_id: parsed.data.payroll_run_id,
+    })
+
+    if (error) {
+      const msg = error.message ?? ''
+      if (msg.includes('NOT_FOUND:'))        return notFound(reply, 'NOT_FOUND', msg.replace(/^.*NOT_FOUND:\s*/, ''))
+      if (msg.includes('RUN_NOT_FOUND:'))    return notFound(reply, 'RUN_NOT_FOUND', msg.replace(/^.*RUN_NOT_FOUND:\s*/, ''))
+      if (msg.includes('RUN_NOT_DRAFT:'))    return conflictError(reply, 'RUN_NOT_DRAFT', msg.replace(/^.*RUN_NOT_DRAFT:\s*/, ''))
+      if (msg.includes('MONTH_MISMATCH:'))   return conflictError(reply, 'MONTH_MISMATCH', msg.replace(/^.*MONTH_MISMATCH:\s*/, ''))
+      if (msg.includes('ALREADY_ASSIGNED:')) return conflictError(reply, 'ALREADY_ASSIGNED', msg.replace(/^.*ALREADY_ASSIGNED:\s*/, ''))
+      if (msg.includes('ALREADY_DECIDED:'))  return conflictError(reply, 'ALREADY_DECIDED', msg.replace(/^.*ALREADY_DECIDED:\s*/, ''))
+      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to assign batch to payroll run')
+    }
+    return reply.send({ data })
   })
 
   // ── POST /payroll/arrears/batches/:id/cancel ──────────────────────────────────
   // Fresh audit finding: same missing-precondition issue — this let an
   // already-processed batch be reset to 'cancelled' after arrears were paid.
+  //
+  // SYSTEM_AUDIT_2026-10-14: also now cancels any un-processed arrear_payouts
+  // rows and clears their run assignment — see the matching comment on
+  // variable-pay.ts's own /cancel for why this is required, not optional.
   fastify.post('/batches/:id/cancel', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const { id } = req.params as { id: string }
 
@@ -433,6 +471,15 @@ export default async function arrearsRoutes(fastify: FastifyInstance) {
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to cancel arrear batch')
     if (!data) return reply.code(409).send({ error: 'INVALID_STATUS', message: 'Processed or already-cancelled batches cannot be cancelled' })
+
+    const { error: payoutsErr } = await fastify.supabase
+      .from('arrear_payouts')
+      .update({ status: 'cancelled', payroll_run_id: null })
+      .eq('batch_id', id)
+      .eq('tenant_id', req.tenantId)
+      .neq('status', 'processed')
+    if (payoutsErr) req.log.warn({ err: payoutsErr }, 'Failed to cancel arrear payouts')
+
     return reply.send({ message: 'Arrear batch cancelled' })
   })
 

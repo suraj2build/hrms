@@ -400,6 +400,173 @@ export function applyEncashmentPayout(
 }
 
 /**
+ * A standalone arrears-batch payout (SYSTEM_AUDIT_2026-10-14) assigned to
+ * this run via `arrear_payouts.payroll_run_id` — the already-approved
+ * gross figure from `arrear_records`/`arrear_batches`, not something this
+ * function computes. Always taxable: arrears are definitionally back-pay
+ * of recurring salary, so `tds` is always the flat-marginal withholding
+ * (computeFlatMarginalTds) on the gross, computed by the caller before
+ * this is applied.
+ */
+export interface ArrearsPayout {
+  payout_ids: string[]
+  gross:      number
+  tds:        number
+}
+
+/**
+ * Posts an approved, run-assigned arrears payout into the slip — same
+ * shape and same reason as applyEncashmentPayout above (survives
+ * regeneration by construction; applied AFTER the regular monthly TDS
+ * projection so a one-time lump sum doesn't get multiplied across the
+ * remaining months of that projection). See that function's doc comment
+ * for the full rationale, which applies identically here.
+ */
+export function applyArrearsPayout(
+  slip:   PayrollSlipResult,
+  payout: ArrearsPayout | null | undefined,
+): PayrollSlipResult {
+  if (!payout || payout.gross <= 0) return slip
+
+  const components: PayrollComponentSnapshot[] = [{
+    salary_component_id: payout.payout_ids[0] ?? '',
+    name: 'Arrears', code: 'ARREARS',
+    component_type: 'earning', calc_type: 'fixed',
+    value: payout.gross, monthly_amount: payout.gross, annual_amount: 0, sequence: 960,
+  }]
+  if (payout.tds > 0) {
+    components.push({
+      salary_component_id: payout.payout_ids[0] ?? '',
+      name: 'TDS on Arrears', code: 'TDS',
+      component_type: 'deduction', calc_type: 'fixed',
+      value: payout.tds, monthly_amount: payout.tds, annual_amount: 0, sequence: 961,
+    })
+  }
+
+  const gross_pay          = round2(slip.gross_pay + payout.gross)
+  const uncappedDeductions = round2(slip.total_deductions + payout.tds)
+  const { total_deductions, net_pay, deduction_shortfall } = finalizeDeductionsAndNet(gross_pay, uncappedDeductions)
+
+  return {
+    ...slip,
+    gross_pay,
+    total_deductions,
+    net_pay,
+    deduction_shortfall,
+    component_breakdown: [...slip.component_breakdown, ...components],
+  }
+}
+
+/**
+ * A standalone variable-pay / incentive batch payout (SYSTEM_AUDIT_2026-10-14)
+ * assigned to this run via `variable_payouts.payroll_run_id` — the
+ * already-approved gross figure from `variable_payouts`, not something
+ * this function computes. Taxability follows the payout's OWN `is_taxable`
+ * flag (from `incentive_templates.is_taxable` at creation time) — the
+ * existing configured policy, not a new one: `tds` is the flat-marginal
+ * withholding on the gross when taxable, 0 when not, computed by the
+ * caller before this is applied.
+ */
+export interface VariablePayPayout {
+  payout_ids: string[]
+  gross:      number
+  tds:        number
+}
+
+/**
+ * Posts an approved, run-assigned variable-pay payout into the slip — same
+ * shape and same reason as applyEncashmentPayout/applyArrearsPayout above.
+ */
+export function applyVariablePayPayout(
+  slip:   PayrollSlipResult,
+  payout: VariablePayPayout | null | undefined,
+): PayrollSlipResult {
+  if (!payout || payout.gross <= 0) return slip
+
+  const components: PayrollComponentSnapshot[] = [{
+    salary_component_id: payout.payout_ids[0] ?? '',
+    name: 'Variable Pay', code: 'VARIABLE_PAY',
+    component_type: 'earning', calc_type: 'fixed',
+    value: payout.gross, monthly_amount: payout.gross, annual_amount: 0, sequence: 965,
+  }]
+  if (payout.tds > 0) {
+    components.push({
+      salary_component_id: payout.payout_ids[0] ?? '',
+      name: 'TDS on Variable Pay', code: 'TDS',
+      component_type: 'deduction', calc_type: 'fixed',
+      value: payout.tds, monthly_amount: payout.tds, annual_amount: 0, sequence: 966,
+    })
+  }
+
+  const gross_pay          = round2(slip.gross_pay + payout.gross)
+  const uncappedDeductions = round2(slip.total_deductions + payout.tds)
+  const { total_deductions, net_pay, deduction_shortfall } = finalizeDeductionsAndNet(gross_pay, uncappedDeductions)
+
+  return {
+    ...slip,
+    gross_pay,
+    total_deductions,
+    net_pay,
+    deduction_shortfall,
+    component_breakdown: [...slip.component_breakdown, ...components],
+  }
+}
+
+/**
+ * A run-assigned frozen-period payroll adjustment (SYSTEM_AUDIT_2026-10-14)
+ * — `payroll_adjustments.amount`, a SIGNED delta HR already finalized when
+ * approving the adjustment. Posted as a direct earning (positive) or
+ * deduction (negative) line with NO additional tax computed: these are
+ * corrections to amounts from a PRIOR computation (a missed LOP deduction
+ * on a locked month, a manual correction), not a new taxable event in
+ * their own right. `statutory_correction`-type adjustments specifically
+ * re-triggering EPF/ESI/PT wage-base recomputation instead of a flat
+ * net-pay line is a disclosed, NOT-yet-implemented refinement — needs
+ * tax/compliance sign-off before go-live; see docs/production-readiness/
+ * SYSTEM_AUDIT_2026-10-14-MODULE-COVERAGE.md.
+ */
+export interface AdjustmentPayout {
+  adjustment_ids: string[]
+  net_delta:      number   // signed: positive = employee gets more, negative = less
+}
+
+/**
+ * Posts an approved, run-assigned payroll adjustment into the slip — same
+ * survives-regeneration shape as the other one-time payouts above, applied
+ * AFTER the regular monthly TDS projection so it never affects that
+ * projection's basis.
+ */
+export function applyAdjustmentPayout(
+  slip:   PayrollSlipResult,
+  payout: AdjustmentPayout | null | undefined,
+): PayrollSlipResult {
+  if (!payout || payout.net_delta === 0) return slip
+
+  const amount = round2(Math.abs(payout.net_delta))
+  const isCredit = payout.net_delta > 0
+  const component: PayrollComponentSnapshot = {
+    salary_component_id: payout.adjustment_ids[0] ?? '',
+    name: isCredit ? 'Payroll Adjustment (Credit)' : 'Payroll Adjustment (Debit)',
+    code: isCredit ? 'PAYROLL_ADJUSTMENT_CREDIT' : 'PAYROLL_ADJUSTMENT_DEBIT',
+    component_type: isCredit ? 'earning' : 'deduction',
+    calc_type: 'fixed', value: amount, monthly_amount: amount, annual_amount: 0, sequence: 970,
+  }
+
+  const gross_pay          = isCredit ? round2(slip.gross_pay + amount) : slip.gross_pay
+  const uncappedDeductions = isCredit ? slip.total_deductions : round2(slip.total_deductions + amount)
+  const { total_deductions, net_pay, deduction_shortfall } = finalizeDeductionsAndNet(gross_pay, uncappedDeductions)
+
+  return {
+    ...slip,
+    gross_pay,
+    total_deductions,
+    net_pay,
+    deduction_shortfall,
+    component_breakdown: [...slip.component_breakdown, component],
+  }
+}
+
+/**
  * Component codes `applyEncashmentPayout` (and any future one-time payout
  * of the same shape) injects into gross_pay as a pure one-time addition —
  * never part of an employee's recurring compensation structure.
@@ -414,7 +581,7 @@ export function applyEncashmentPayout(
  * that same inflated slip as its "normal salary" basis and overstating
  * itself in turn.
  */
-export const ONE_TIME_EARNING_CODES = ['LEAVE_ENCASHMENT'] as const
+export const ONE_TIME_EARNING_CODES = ['LEAVE_ENCASHMENT', 'ARREARS', 'VARIABLE_PAY', 'PAYROLL_ADJUSTMENT_CREDIT'] as const
 
 /**
  * Derives a "clean" recurring-salary gross from a slip's raw gross_pay by
@@ -438,6 +605,66 @@ export function computeCleanGrossPay(
 /** Round to 2 decimal places. Exported so callers can use the same rounding. */
 export function round2(n: number): number {
   return Math.round(n * 100) / 100
+}
+
+/**
+ * Flat withholding at the employee's current marginal tax slab — the SAME
+ * computation `accrual-engine.ts`'s `computeEncashmentPayout` already does
+ * for standalone leave encashment (G12), factored out here so every
+ * one-time payroll payout (encashment, arrears, variable pay / incentives)
+ * uses one real, tested implementation instead of three copies drifting
+ * apart. Looks up the employee's latest `tds_monthly_projections` row this
+ * FY to find their marginal taxable income, then the matching
+ * `it_tax_slabs` rate for that income band, and multiplies the one-time
+ * `grossAmount` by it.
+ *
+ * Deliberately NOT a Section 89(1) relief computation, nor (for
+ * encashment specifically) a Section 10(10AA) exemption — the same
+ * conservative scope encashment's original implementation already
+ * disclosed. Returns 0 (not a guessed default rate) when no projection
+ * exists yet this FY for the employee, e.g. payroll hasn't run for them
+ * yet this year — consistent with encashment's existing behavior.
+ */
+export async function computeFlatMarginalTds(
+  supabase:   SupabaseClient,
+  tenantId:   string,
+  employeeId: string,
+  grossAmount: number,
+): Promise<number> {
+  if (grossAmount <= 0) return 0
+
+  const y = new Date().getFullYear()
+  const m = new Date().getMonth() // 0-based; April (3) starts the Indian FY
+  const fyStart = m >= 3 ? y : y - 1
+  const fy = `${fyStart}-${String((fyStart + 1) % 100).padStart(2, '0')}`
+
+  const { data: projection } = await supabase
+    .from('tds_monthly_projections')
+    .select('taxable_income_projected, regime')
+    .eq('tenant_id', tenantId)
+    .eq('employee_id', employeeId)
+    .eq('financial_year', fy)
+    .order('projection_month', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (!projection) return 0
+
+  const taxableIncome = Number((projection as any).taxable_income_projected ?? 0)
+  const { data: slab } = await supabase
+    .from('it_tax_slabs')
+    .select('tax_rate')
+    .eq('financial_year', fy)
+    .eq('regime', (projection as any).regime)
+    .is('superseded_at', null)
+    .lte('income_from', taxableIncome)
+    .or(`income_to.is.null,income_to.gt.${taxableIncome}`)
+    .order('slab_order', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (!slab) return 0
+  return round2(grossAmount * Number((slab as any).tax_rate))
 }
 
 /**

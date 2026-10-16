@@ -11,7 +11,7 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { fetchAllRows } from './supabase-paginate.js'
-import { round2, computeCleanGrossPay } from './payroll-engine.js'
+import { round2, computeCleanGrossPay, computeFlatMarginalTds } from './payroll-engine.js'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -508,12 +508,6 @@ export async function processCarryForward(
 
 // ── Process encashment approval ───────────────────────────────────────────────
 
-function currentFinancialYear(d: Date): string {
-  const y = d.getFullYear()
-  const fyStart = d.getMonth() >= 3 ? y : y - 1 // getMonth() is 0-based — April (3) starts the Indian FY
-  return `${fyStart}-${String((fyStart + 1) % 100).padStart(2, '0')}`
-}
-
 /**
  * G12: the payout and withholding figures the audit found entirely missing
  * ("mark-paid only changes status, no proven disbursement path"). Computed
@@ -561,33 +555,10 @@ async function computeEncashmentPayout(
   const ratePerDay  = round2(cleanGross / 26)
   const grossAmount = round2(days * ratePerDay)
 
-  const fy = currentFinancialYear(new Date())
-  const { data: projection } = await supabase
-    .from('tds_monthly_projections')
-    .select('taxable_income_projected, regime')
-    .eq('tenant_id', tenantId)
-    .eq('employee_id', employeeId)
-    .eq('financial_year', fy)
-    .order('projection_month', { ascending: false })
-    .limit(1)
-    .maybeSingle()
-
-  let tdsAmount = 0
-  if (projection) {
-    const taxableIncome = Number((projection as any).taxable_income_projected ?? 0)
-    const { data: slab } = await supabase
-      .from('it_tax_slabs')
-      .select('tax_rate')
-      .eq('financial_year', fy)
-      .eq('regime', (projection as any).regime)
-      .is('superseded_at', null)
-      .lte('income_from', taxableIncome)
-      .or(`income_to.is.null,income_to.gt.${taxableIncome}`)
-      .order('slab_order', { ascending: false })
-      .limit(1)
-      .maybeSingle()
-    if (slab) tdsAmount = round2(grossAmount * Number((slab as any).tax_rate))
-  }
+  // Factored into payroll-engine.ts's computeFlatMarginalTds (SYSTEM_AUDIT_2026-10-14)
+  // so arrears/variable-pay's one-time payouts reuse this SAME tested
+  // slab-lookup instead of each re-implementing it.
+  const tdsAmount = await computeFlatMarginalTds(supabase, tenantId, employeeId, grossAmount)
 
   return { ratePerDay, grossAmount, tdsAmount, netAmount: round2(grossAmount - tdsAmount) }
 }

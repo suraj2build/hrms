@@ -7,7 +7,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
-import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { serverError, notFound, conflictError, ErrorCode } from '../../lib/api-errors.js'
 
 // incentive_templates.template_type CHECK constraint (migration 102) — the
 // ground truth for valid template types. The zod enum previously used
@@ -395,9 +395,51 @@ export default async function variablePayRoutes(fastify: FastifyInstance) {
     return reply.send({ message: 'Batch approved' })
   })
 
+  // ── POST /payroll/variable-pay/batches/:id/assign-run ────────────────────────
+  // SYSTEM_AUDIT_2026-10-14: HR picks a draft payroll run for an approved
+  // batch. Mirrors POST /leave/encashment/:id/assign-payroll-run exactly —
+  // status stays 'approved' (not yet paid); every (re)generation of that
+  // run folds the payout into each assigned employee's payslip fresh (see
+  // fetchVariablePayPayout/applyVariablePayPayout), so it survives any
+  // number of re-runs. Finalizing that run is what actually flips this to
+  // 'processed' (fn_finalize_variable_pay_for_run, called from runs.ts's
+  // finalize route).
+  fastify.post('/batches/:id/assign-run', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
+    const schema = z.object({ payroll_run_id: z.string().uuid() })
+    const parsed = schema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    const { data, error } = await fastify.supabase.rpc('assign_variable_pay_batch_to_run_atomic', {
+      p_tenant_id:      req.tenantId,
+      p_batch_id:       req.params.id,
+      p_payroll_run_id: parsed.data.payroll_run_id,
+    })
+
+    if (error) {
+      const msg = error.message ?? ''
+      if (msg.includes('NOT_FOUND:'))       return notFound(reply, 'NOT_FOUND', msg.replace(/^.*NOT_FOUND:\s*/, ''))
+      if (msg.includes('RUN_NOT_FOUND:'))   return notFound(reply, 'RUN_NOT_FOUND', msg.replace(/^.*RUN_NOT_FOUND:\s*/, ''))
+      if (msg.includes('RUN_NOT_DRAFT:'))   return conflictError(reply, 'RUN_NOT_DRAFT', msg.replace(/^.*RUN_NOT_DRAFT:\s*/, ''))
+      if (msg.includes('MONTH_MISMATCH:'))  return conflictError(reply, 'MONTH_MISMATCH', msg.replace(/^.*MONTH_MISMATCH:\s*/, ''))
+      if (msg.includes('ALREADY_ASSIGNED:'))return conflictError(reply, 'ALREADY_ASSIGNED', msg.replace(/^.*ALREADY_ASSIGNED:\s*/, ''))
+      if (msg.includes('ALREADY_DECIDED:')) return conflictError(reply, 'ALREADY_DECIDED', msg.replace(/^.*ALREADY_DECIDED:\s*/, ''))
+      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to assign batch to payroll run')
+    }
+
+    return reply.send({ data })
+  })
+
   // ── POST /payroll/variable-pay/batches/:id/cancel ────────────────────────────
   // Fresh audit finding: same missing-precondition issue — this let an
   // already-processed batch be reset to 'cancelled' after payouts were paid.
+  //
+  // SYSTEM_AUDIT_2026-10-14: also now clears any payroll-run assignment —
+  // without this, a batch cancelled AFTER being assigned to a draft run
+  // (but before that run is finalized) would still have its variable_payouts
+  // rows sitting at status='approved' with payroll_run_id set, and the next
+  // regeneration of that run would fold the "cancelled" payout into the
+  // payslip anyway (fetchVariablePayPayout filters only on status='approved'
+  // + payroll_run_id, not on the parent batch's own status).
   fastify.post('/batches/:id/cancel', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const { id } = req.params as { id: string }
     const now = new Date().toISOString()
@@ -416,9 +458,10 @@ export default async function variablePayRoutes(fastify: FastifyInstance) {
 
     const { error: payoutsErr } = await fastify.supabase
       .from('variable_payouts')
-      .update({ status: 'cancelled' })
+      .update({ status: 'cancelled', payroll_run_id: null })
       .eq('batch_id', id)
       .eq('tenant_id', req.tenantId)
+      .neq('status', 'processed')
     if (payoutsErr) req.log.warn({ err: payoutsErr }, 'Failed to cancel payouts')
 
     return reply.send({ message: 'Batch cancelled' })
