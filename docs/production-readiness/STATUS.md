@@ -1549,3 +1549,102 @@ Full writeup: `docs/pilot/SYSTEM_AUDIT_2026-10-14_FINDINGS.md`. Summary:
   sandbox still cannot exercise that layer. Neither is claimed as done,
   sampled, or safe to assume clean. **NO-GO stands.** `main` untouched;
   PR #30 remains unmerged.
+
+## Addendum (2026-10-16) — historical reconciliation: pre-existing arrears/variable-pay/adjustments and loan-EMI records affected by the two gaps checkpoints 18/22/23 fixed
+
+Per explicit standing instruction: *"For historical approved records,
+produce a reconciliation and proposed disposition. Do not silently
+backfill or pay them,"* and separately, *"Reconcile historical affected
+[loan] balances separately."* Both are addressed here, together, since
+the finding for both is the same shape and the same scope limitation
+applies to both.
+
+**What was checked.** The only database reachable from this sandbox is
+the local `hrms_uat` Postgres instance — there is no connection to any
+real staging or production Supabase project (the same limitation
+disclosed in every prior round of this audit; see "Explicitly still
+blocked" in `SYSTEM_AUDIT_2026-10-14-MODULE-COVERAGE.md`). Within that
+one database, every row matching either gap's signature was queried and
+individually traced to its origin:
+
+- **Arrears/variable-pay/adjustments** (the checkpoint-18/22 gap —
+  `arrear_batches`/`arrear_payouts` in `approved`/`processed`,
+  `variable_payout_batches`/`variable_payouts` in `approved`/`cancelled`,
+  `payroll_adjustments` in `approved`/`applied`): 10 batch-level rows and
+  14 payout/adjustment rows exist in `hrms_uat` in these statuses.
+  **All of them** trace to tenants named `Payroll Integration Gap
+  AR1/VP1/VP2/VP3/PA1` created between 18:05:39 and 18:11:08 UTC on
+  2026-10-16 — the exact run of this session's own
+  `scripts/db/verify-payroll-integration-close-the-gap.mjs`, written and
+  executed earlier in this same checkpoint to prove the fix. There are
+  **zero** rows in any of these five tables that predate migrations
+  476-480 (checkpoint 22) going in, and zero rows belonging to any
+  tenant that isn't one of this session's own synthetic verification
+  fixtures.
+- **Loan EMIs stuck by the pre-migration-481 non-atomicity** (the
+  checkpoint-23 gap — `loan_schedules` with `status='paid' AND
+  paid_amount IS NULL`): exactly 1 row in `hrms_uat`, in tenant "Loan
+  Finalize Fail L1" (slug `loanfail-L1-1792174635791`, created
+  2026-10-16 18:17:15 UTC) — the EARLIER (pre-fix) run of this
+  checkpoint's own `scripts/db/verify-loan-finalize-injected-failure.mjs`,
+  before migration 481 was applied and `runs.ts` was rewired. A second
+  tenant from a LATER re-run of the same script (`loanfail-L1-
+  1792175046504`, created 18:24:06 UTC, after the fix) correctly shows no
+  such stuck row — it is the clean re-verification run cited in
+  checkpoint 23. Zero rows belong to any tenant outside this session's
+  own two verification runs.
+
+**Disposition.** None of the 25 matching rows are real approved
+business records — every one is this session's own throwaway test
+fixture, created and left in `hrms_uat` by the very scripts that proved
+each fix. Per the instruction's own logic ("do not silently backfill or
+pay them" protects *real* approved records from being quietly altered),
+there is nothing here that calls for a backfill, a payment, or a
+reversal — these rows have no real-world monetary consequence and exist
+only as evidence artifacts. They are left in place, undisturbed, as
+part of the evidence trail for checkpoints 22/23 rather than deleted,
+since altering evidence after the fact would be worse than leaving
+harmless test data in a local sandbox DB.
+
+**What this does NOT establish, stated plainly.** This is a
+reconciliation of the one database available to this sandbox, not of any
+real tenant's production data — there is no CognixHR production or
+staging database reachable from here to check. **Before deploying
+migrations 476-481 to any environment that has real tenant data**, the
+same five-table/one-column query used here must be re-run against that
+environment's actual database first, with a human reviewing every match
+individually:
+
+```sql
+-- Arrears/variable-pay/adjustments already in a terminal status with no run folded in
+SELECT 'arrear_batches', id, tenant_id, status, processed_payroll_run_id FROM arrear_batches WHERE status IN ('approved','processed')
+UNION ALL SELECT 'arrear_payouts', id, tenant_id, status, payroll_run_id::text FROM arrear_payouts WHERE status IN ('pending','processed')
+UNION ALL SELECT 'variable_payout_batches', id, tenant_id, status, processed_payroll_run_id::text FROM variable_payout_batches WHERE status = 'approved'
+UNION ALL SELECT 'variable_payouts', id, tenant_id, status, payroll_run_id::text FROM variable_payouts WHERE status = 'approved'
+UNION ALL SELECT 'payroll_adjustments', id, tenant_id, status, applied_run_id::text FROM payroll_adjustments WHERE status IN ('approved','applied');
+
+-- Loan EMIs stuck by the pre-migration-481 bug
+SELECT id, tenant_id, loan_id, due_month, status, paid_amount FROM loan_schedules WHERE status = 'paid' AND paid_amount IS NULL;
+```
+
+For any real match the first query returns: a human must decide, per
+row, whether to assign it to the next open payroll run (if the payout
+is still genuinely owed and the target month hasn't closed) or handle it
+as a manual off-cycle correction — the code does not do this
+automatically for exactly the reason the standing instruction gives: a
+pre-existing record was approved under the old (non-integrated) process
+and migrating it into the new one without review could pay someone who
+was already compensated another way, or double-pay someone the
+old process's approval already accounted for by some other means. For
+any real match the second query returns: a human must manually invoke
+`record_loan_payment_atomic(tenant_id, loan_id, principal_paid)` for the
+correct amount (readable from the matched `loan_schedules.principal_
+component`) and then set that same row's `paid_amount`, after confirming
+with the employee/loan records that the EMI was in fact deducted from a
+finalized payslip and simply never reflected in the loan balance — not
+auto-applied, since a loan-balance decrement is itself a financial
+action the same standing instruction's "do not silently backfill" logic
+covers. This reconciliation step is a release-blocking prerequisite for
+any production/staging rollout of migrations 476-481, tracked here so it
+is not missed, not something this sandbox session can complete on the
+account's behalf, since no such database is reachable from it.
