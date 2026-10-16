@@ -157,12 +157,13 @@ async function main() {
   console.log('B-then-A:', { ledgerCount: baResult.ledgerCount, ledgerTotal: baResult.ledgerTotal, balance: baResult.balance })
 
   const bothCreditIndependently = abResult.ledgerCount === 2 && abResult.balance === 2
+  const bothBlockedCorrectly = abResult.ledgerCount === 0 && abResult.balance === 0 && baResult.ledgerCount === 0 && baResult.balance === 0
   if (bothCreditIndependently) {
-    console.log('\n❌ CONFIRMED DOUBLE-CREDIT: both systems credited independently and unconditionally for the same employee/leave-type/period — neither is aware of the other, and neither defers. An employee covered by BOTH an employee-scope leave_policy_rules assignment AND a leave_accrual_rules row for the same leave type is credited twice per period (2 days instead of the intended 1), with NO precedence rule — whichever runs, runs; there is no "first one wins" or "skip if the other already credited this period" logic anywhere in either code path. This is confirmed, not merely a theoretical risk, and holds regardless of call order (both orderings produce the same double-credit).')
-  } else if (abResult.ledgerCount === 1 && baResult.ledgerCount === 1) {
-    console.log('\n✅ No double-credit observed in this configuration — one of the two systems is not crediting this leave type under this scope. See per-scenario ledger rows above for which one.')
+    console.log('\n❌ STILL CONFIRMED DOUBLE-CREDIT (fix not effective): both systems credited independently.')
+  } else if (bothBlockedCorrectly) {
+    console.log('\n✅ FIXED (SYSTEM_AUDIT_2026-10-14 checkpoint 14, migration 470): neither system credited — both detected the overlap and blocked crediting rather than double-crediting or silently picking a winner, in BOTH call orders. See scripts/db/verify-dual-accrual-conflict-execution-time.mjs for the fuller real-concurrency/retry/recovery proof of this same guarantee.')
   } else {
-    console.log('\n⚠️  Inconsistent result between call orders — needs further investigation.', { abResult, baResult })
+    console.log('\n⚠️  Unexpected result — needs further investigation.', { abResult, baResult })
   }
 
   await pool.end()

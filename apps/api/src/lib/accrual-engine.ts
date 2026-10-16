@@ -34,6 +34,15 @@ export interface AccrualResult {
   total_days_credited: number
   skipped:            number
   errors:             string[]
+  /**
+   * Employee+leave-type pairs blocked this run because leave_policy_rules
+   * (System B, leave-entitlement-service.ts) ALSO has an active applicable
+   * rule for them — recorded in leave_accrual_conflicts rather than
+   * credited by either system (SYSTEM_AUDIT_2026-10-14 checkpoint 14; see
+   * migration 470's header). Optional for the same reason as BatchResult.
+   * conflicted in leave-entitlement-service.ts.
+   */
+  conflicted?: number
 }
 
 // ── Helper: pro-rate days for partial months ──────────────────────────────────
@@ -249,6 +258,7 @@ export async function runMonthlyAccrual(
 
     let employeesCredited = 0
     let totalDays = 0
+    let employeesConflicted = 0
     const runErrors: string[] = []
 
     // days_per_period is DECIMAL(5,2) — PostgREST serializes it as a string. Number()
@@ -299,9 +309,15 @@ export async function runMonthlyAccrual(
         continue
       }
       const row = (Array.isArray(batchData) ? batchData[0] : batchData) as
-        { employees_credited?: number; total_days?: number } | null
+        { employees_credited?: number; total_days?: number; employees_conflicted?: number } | null
       employeesCredited += Number(row?.employees_credited ?? 0)
       totalDays = parseFloat((totalDays + Number(row?.total_days ?? 0)).toFixed(2))
+      // SYSTEM_AUDIT_2026-10-14 checkpoint 14 — migration 470's extension
+      // to credit_monthly_accrual_batch: an employee in this chunk whose
+      // leave type ALSO has an active leave_policy_rules (System B) rule
+      // covering them is excluded from this credit and recorded in
+      // leave_accrual_conflicts instead of being double-credited.
+      employeesConflicted += Number(row?.employees_conflicted ?? 0)
     }
 
     // Finalize the claimed run — a plain UPDATE on the row this call alone
@@ -317,6 +333,10 @@ export async function runMonthlyAccrual(
     result.employees_credited += employeesCredited
     result.total_days_credited = parseFloat((result.total_days_credited + totalDays).toFixed(2))
     if (runErrors.length) result.errors.push(...runErrors)
+    if (employeesConflicted > 0) {
+      result.conflicted = (result.conflicted ?? 0) + employeesConflicted
+      result.errors.push(`${employeesConflicted} employee(s) skipped for leave type ${rule.leave_type_id} — also configured in the named-policy accrual system; see leave_accrual_conflicts`)
+    }
   }
 
   return result

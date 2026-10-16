@@ -591,6 +591,16 @@ export async function monthlyAccrualJob(
     total_days_credited  = parseFloat((total_days_credited + engineResult.total_days_credited).toFixed(2))
     skipped             += engineResult.skipped
     errors.push(...engineResult.errors)
+    // SYSTEM_AUDIT_2026-10-14 checkpoint 14 — employee+leave-type pairs
+    // blocked this run because BOTH leave_accrual_rules (System A) and
+    // leave_policy_rules (System B) have an active applicable rule.
+    // Neither system credited them; see leave_accrual_conflicts for the
+    // specific pairs. Surfaced here (not just left in `conflicted`) so an
+    // admin reviewing this job's history in the UI sees it without a
+    // separate query.
+    if (engineResult.conflicted) {
+      errors.push(`${engineResult.conflicted} employee/leave-type pair(s) skipped — configured in both accrual systems; see leave_accrual_conflicts`)
+    }
 
     // Step 1: build an exclusion set from Phase 1 so Phase 2 never double-credits
     const engineProcessed = new Set(engineResult.processed_employee_ids)
