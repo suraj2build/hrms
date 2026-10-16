@@ -383,7 +383,18 @@ export default async function compensationRevisionsRoutes(fastify: FastifyInstan
         const { error: compCompErr } = await fastify.supabase
           .from('employee_compensation_components')
           .insert(newComponentRows)
-        if (compCompErr) req.log.warn({ err: compCompErr }, 'Failed to copy components on revision approval')
+        if (compCompErr) {
+          // Same silent-success bug class this route already fixed twice above
+          // (the supersede failure and the compensation-insert failure both
+          // surface a 500 instead of swallowing) — this step was the one
+          // instance still only req.log.warn'ing. The new employee_compensations
+          // row is already active with the new ctc_annual, but with ZERO
+          // components: fetchActiveCompensation's payroll read would then
+          // compute from an active record with no component breakdown,
+          // producing near-zero/warning pay for this employee — while HR saw
+          // a clean "Revision approved" with no signal anything was wrong.
+          return serverError(req, reply, compCompErr, ErrorCode.INSERT_FAILED, 'Revision status set to approved and the new compensation record was created, but copying its salary components failed — the new compensation has NO component breakdown and payroll will compute incorrectly for this employee until this is fixed. Contact support before running payroll.')
+        }
       }
 
       // Link revision to the resulting compensation record.
