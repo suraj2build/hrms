@@ -1737,7 +1737,7 @@ the repository, not estimated.
 |---|---|---|---|---|---|
 | attendance | 64 | 64 | 0 | 1 open-confirmed (retroactive.ts dedup — low-severity, read-only observability, disclosed not fixed). 14 found-and-FIXED-same-batch (roster-api.ts pagination ×2, roster-calendar.ts rotation-members pagination, leave-reconciliation.ts breakdown-aggregation, writeLedgerEntry idempotency + atomicity, regularisation-policy.ts SLA-breach-reject chain orphaning, scoped-policy accrual gap (migration 470 + `leave-entitlement-service.ts` scope-chain resolver), two-accrual-system double-credit (migration 470 execution-time guard), reconciliation.ts's `/attendance/reconciliation/open` capped-breakdown undercounting, **workforce-optimization.ts missing-authz on 7 routes, health-index.ts department/tenant pagination, 4-file DECIMAL-string-coercion NaN bug, risk.ts `/summary` pagination, risk.ts non-deterministic pagination tie-breaker** — don't count as open) | — |
 | employees | 31 | 31 | 0 | 0 | separation-workflow.ts F&F section (~lines 416-972) relies on prior-round evidence, not re-read this audit |
-| payroll (incl. statutory/) | 52 | 23 | 29 | **1 open-confirmed, HIGH SEVERITY, disclosed-not-fixed, spans 3 files**: arrears.ts, variable-pay.ts, and adjustments.ts each have a complete, well-hardened create→approve workflow whose end state (`arrear_records`/`arrear_payouts`, `variable_payouts`, `payroll_adjustments`) is **never read by `payroll-engine.ts` or `payroll-snapshot-engine.ts`** — approving one changes nothing about what any employee is actually paid. See checkpoint 18 below for the full writeup and decision proposal; blocked pending a product decision, not attempted as a same-batch fix given its design scope (same class of work G12's encashment payout took 3 rounds to get right). 5 found-and-FIXED-same-batch (runs.ts DELETE TOCTOU race; compensation-revisions.ts silent component-copy swallow → rebuilt fully atomic; advances.ts /recover guaranteed-NOT-NULL-violation + stuck-schedule torn write; loans.ts /record-payment identical guaranteed-NOT-NULL-violation + non-idempotent retry; record_loan_payment_atomic (migration 396) column-ambiguity bug that made the function fail on every call since it was created — silently breaking runs.ts's own automatic loan-balance sweep this whole time) — don't count those 5 as open | approval/finalization/F&F/encashment-adjacent correctness relies on PRIOR rounds (G12 etc.), not re-verified by this audit's own checkpoints; the 38 remaining files include all 14 statutory/ files (not yet opened) |
+| payroll (incl. statutory/) | 52 | 28 | 24 | **1 open-confirmed, HIGH SEVERITY, disclosed-not-fixed, spans 3 files**: arrears.ts, variable-pay.ts, and adjustments.ts each have a complete, well-hardened create→approve workflow whose end state (`arrear_records`/`arrear_payouts`, `variable_payouts`, `payroll_adjustments`) is **never read by `payroll-engine.ts` or `payroll-snapshot-engine.ts`** — approving one changes nothing about what any employee is actually paid. See checkpoint 18 below for the full writeup and decision proposal; blocked pending a product decision, not attempted as a same-batch fix given its design scope (same class of work G12's encashment payout took 3 rounds to get right). 5 found-and-FIXED-same-batch (runs.ts DELETE TOCTOU race; compensation-revisions.ts silent component-copy swallow → rebuilt fully atomic; advances.ts /recover guaranteed-NOT-NULL-violation + stuck-schedule torn write; loans.ts /record-payment identical guaranteed-NOT-NULL-violation + non-idempotent retry; record_loan_payment_atomic (migration 396) column-ambiguity bug that made the function fail on every call since it was created — silently breaking runs.ts's own automatic loan-balance sweep this whole time) — don't count those 5 as open | approval/finalization/F&F/encashment-adjacent correctness relies on PRIOR rounds (G12 etc.), not re-verified by this audit's own checkpoints; the 38 remaining files include all 14 statutory/ files (not yet opened) |
 | masters | 29 | 0 | 29 | — | nav-link fixes only; no file-level authz review this audit |
 | ess | 12 | 0 | 12 | — | distinct from the frozen web ESS Context Rail (CLAUDE.md) — this is the unrelated API namespace |
 | onboarding | 8 | 0 | 8 | — | — |
@@ -1789,7 +1789,7 @@ the repository, not estimated.
 | uploads | 1 | 0 | 1 | — | — |
 | whatsapp | 1 | 0 | 1 | — | — |
 | workforce | 1 | 0 | 1 | — | — |
-| **TOTAL (54 rows, 53 namespaces + setup.ts)** | **289** | **125** | **164** | **2 open-confirmed: (1) retroactive.ts dedup — low-severity, read-only observability; (2) arrears/variable-pay/adjustments payroll-engine disconnect — HIGH SEVERITY, see checkpoint 18 — none else currently open; the scoped-policy accrual gap and the two-accrual-system double-credit, both CONFIRMED financial defects as of checkpoint 14, are now FIXED as of checkpoint 15 (migration 470) — see that section below; every other defect found this audit was fixed in the same checkpoint it was found** | **global: hosted Supabase/RLS/storage behavior is never verified anywhere in this tracker — see "Explicitly still blocked" below; PT/TDS/F&F/asset/careers/tenant-licensing rows above rely on evidence from rounds OUTSIDE this specific audit, real but not re-verified here** |
+| **TOTAL (54 rows, 53 namespaces + setup.ts)** | **289** | **130** | **159** | **2 open-confirmed: (1) retroactive.ts dedup — low-severity, read-only observability; (2) arrears/variable-pay/adjustments payroll-engine disconnect — HIGH SEVERITY, see checkpoint 18 — none else currently open; the scoped-policy accrual gap and the two-accrual-system double-credit, both CONFIRMED financial defects as of checkpoint 14, are now FIXED as of checkpoint 15 (migration 470) — see that section below; every other defect found this audit was fixed in the same checkpoint it was found** | **global: hosted Supabase/RLS/storage behavior is never verified anywhere in this tracker — see "Explicitly still blocked" below; PT/TDS/F&F/asset/careers/tenant-licensing rows above rely on evidence from rounds OUTSIDE this specific audit, real but not re-verified here** |
 
 **Checkpoint 14 continuation, second leg**: 4 more files examined —
 `manager-dashboard.ts`, `payroll-summary.ts`, `context.ts` (no defects;
@@ -2760,6 +2760,34 @@ this checkpoint).
 
 **Updated: payroll 23/52 examined (29 remaining). Overall: 125/289
 examined, 164 remaining.**
+
+## Checkpoint 21 — index.ts, approval-stages.ts, snapshots.ts, run-diagnostics.ts, context.ts: no new defects
+
+- **`index.ts`** — pure registration barrel (no logic of its own).
+- **`approval-stages.ts`** — maker-checker log approve/reject, correctly
+  CAS'd (`.eq('status','pending')`), with an explicit special case
+  bouncing a `payroll_run`/`finalize` proposal back to the real finalize
+  endpoint rather than letting this log-only approve silently "complete"
+  a run finalization it can't actually perform.
+- **`snapshots.ts`** — manual snapshot-trigger race is already backstopped
+  by `payroll_run_snapshots.run_id UNIQUE` (migration 145); a concurrent
+  double-trigger would only surface a non-ideal 500 instead of a 409, not
+  a duplicate snapshot — logged as a cosmetic nit, not fixed.
+- **`run-diagnostics.ts`** — pure read-only reconciliation/trace
+  endpoints, correctly tenant-scoped, correct `fetchAllRows` use.
+- **`context.ts`** — read-only dashboard endpoints (blockers, variance
+  spikes, readiness, pending-locks), correct `fetchAllRows` use throughout.
+  One minor non-blocking note: `/payroll/readiness`'s "anomalies_resolved"
+  check is tenant-wide, not scoped to the requested `month` — an old
+  unresolved anomaly from an unrelated month could depress the readiness
+  score shown for the current month. Purely informational (this endpoint
+  gates nothing; the real payroll-blocking checks live in `validation.ts`/
+  the freeze guard), so logged to backlog rather than fixed.
+
+No code changed. tsc --noEmit clean; vitest 79/79 files, 669/669 tests.
+
+**Updated: payroll 28/52 examined (24 remaining). Overall: 130/289
+examined, 159 remaining.**
 
 ### Separate totals: frontend pages, shared services, migrations
 
