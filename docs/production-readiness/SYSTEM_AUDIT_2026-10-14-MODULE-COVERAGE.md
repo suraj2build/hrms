@@ -2258,13 +2258,95 @@ simulation with no DB writes (`simulate-policy.ts`).
 **Updated: attendance 64/64 examined (0 remaining) — namespace complete.
 Overall: 102/289 examined, 187 remaining.**
 
+## Checkpoint 16 — precision qualifications on the attendance baseline, requested before moving to payroll
+
+The user accepted attendance as complete and authorized moving to
+`payroll` without reopening the two accrual defects absent concrete new
+evidence, but required three qualifications be kept explicit in this
+register rather than left implied. Recorded here, verbatim in substance:
+
+1. **"64/64 attendance files examined" is source-review coverage, not a
+   claim that every browser workflow or hosted-Supabase RLS behavior has
+   been tested.** This register already tracks these as separate
+   evidence tracks (see "Separate totals" below and the repeated
+   "Examined is not Tested" caveat earlier in this document), but it is
+   restated here explicitly: the 64/64 number means every attendance
+   route file was read against the item-2 checklist (tenant scoping,
+   authorization, pagination, CAS, storage-path privacy, approval/
+   reversal correctness). A substantial fraction additionally has
+   real-Postgres/real-HTTP script evidence (cited per finding throughout
+   checkpoints 1–16). A much smaller fraction has actual browser-driven
+   UAT evidence (checkpoint 10's bulk-retry panel; the ApprovalInbox
+   screenshots; a handful of others cited in the "Frontend pages" row of
+   "Separate totals"). **No attendance route has been verified against a
+   real hosted Supabase project's actual RLS policy enforcement** — every
+   real-Postgres script in this audit runs against local Postgres 16 with
+   the local test gateway (`scripts/db/local-test-gateway.mjs`), which
+   enforces tenant scoping at the application-query level this audit
+   checks, not via Postgres RLS policies the way the hosted product does.
+   This gap is global (see "Explicitly still blocked" elsewhere in this
+   document) and is not specific to attendance.
+
+2. **The dual-accrual-conflict concurrency proof tested job-vs-job races,
+   not config-write-vs-job races — stated precisely, not just "tested
+   concurrency."** `scripts/db/verify-dual-accrual-conflict-execution-
+   time.mjs`'s 10/10 checks prove: (a) both call orders of the two
+   crediting jobs (System A then B, B then A); (b) genuinely simultaneous
+   execution of the two jobs via `Promise.all`; (c) retry-after-success
+   idempotency; (d) a forced mid-transaction failure proving the conflict
+   check runs before any write. All four are races between **two
+   crediting-job invocations**. None of them is a race between a
+   **CRUD config write** (e.g. an HR admin creating a new
+   `leave_accrual_rules` row via `POST /leave/accrual/rules` while a
+   `leave_policy_rules`-driven crediting transaction for the same
+   employee/leave-type is already in flight) and an in-progress crediting
+   transaction. The execution-time guard's actual protection in that
+   specific race depends on PostgreSQL's READ COMMITTED semantics (the
+   default isolation level this codebase runs at): the conflict-check
+   SELECT inside `credit_engine_accrual_atomic`/`credit_monthly_accrual_
+   batch` sees whatever is committed in the database AT THE TIME THAT
+   STATEMENT RUNS, not a snapshot taken at transaction start — so a config
+   write that commits before the conflict-check statement executes IS
+   seen, but this specific scenario (a true config-write-mid-transaction
+   race) has not been independently constructed and proven with two live
+   connections the way the job-vs-job race was. This is disclosed as an
+   untested race shape, not claimed as proven, and is not being treated as
+   a confirmed defect absent concrete evidence of an actual failure.
+
+3. **SQL/TS resolver alignment is now covered by a dedicated shared test
+   suite**, closing the drift risk the user flagged (two independent
+   implementations of the same scope-resolution logic with no direct
+   cross-check before this). `scripts/db/verify-sql-ts-resolver-parity.mjs`
+   calls `resolve_engine_policy_rule()` (SQL) directly as an oracle, then
+   separately triggers the real HTTP monthly-accrual job (which runs the
+   TS `resolveApplicableRule()` closures) and compares the two resolvers'
+   answers to EACH OTHER, not to a hand-computed expectation. Six cases —
+   department-wins, work_location-wins, site-wins, default-only,
+   employee-override-wins, and the effective-date boundary (a department
+   RULE not yet effective, falling through to default despite an active
+   department ASSIGNMENT) — each with a unique `accrual_days_per_year` per
+   scope so a numeric coincidence can't mask the two resolvers picking
+   different scopes. **12/12 checks PASS**: both resolvers agree on which
+   scope wins and on the resulting credited amount in every case. Not yet
+   addressed, lower priority: the TS resolver is actually duplicated
+   verbatim as two separate closures (inside `runEngineMonthlyAccrual` and
+   `runEngineYearlyCredit`), which is itself a maintenance drift risk
+   independent of SQL/TS parity — flagged for a future dedicated-refactor
+   pass, not fixed inline here since it touches the hot accrual loop.
+
 **Next planned batch**: `payroll` (52 files, the largest remaining
-namespace), then `masters` (29), `ess` (12), then the long tail of
-1–3-file namespaces. Also recommended, not yet done: delete the
-confirmed-100%-dead `AdminDashboard.tsx` / `Dashboard.tsx` (zero route
-registrations, verified in an earlier round) — flagging rather than
-deleting since the session's own destructive-action guard declined the
-delete.
+namespace) — prioritizing, per explicit instruction: salary visibility/
+authorization, calculation inputs, finalization, reversals, statutory
+outputs, payments, accounting, pagination, and cross-module
+reconciliation. Then `masters` (29), `ess` (12), then the long tail of
+1–3-file namespaces. Attendance is NOT being revisited as part of this
+transition — only if a payroll-side change is found to affect an
+attendance code path, or concrete evidence (not re-examination for its
+own sake) surfaces a new attendance defect. Also recommended, not yet
+done: delete the confirmed-100%-dead `AdminDashboard.tsx` / `Dashboard.tsx`
+(zero route registrations, verified in an earlier round) — flagging
+rather than deleting since the session's own destructive-action guard
+declined the delete.
 
 ### Separate totals: frontend pages, shared services, migrations
 
