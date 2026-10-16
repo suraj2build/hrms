@@ -3021,6 +3021,78 @@ kept distinct, and neither is substituted for the other.
 The throwaway `fresh_install_481` database was dropped after
 verification; it was never a target of any application traffic.
 
+## Checkpoint 25 — browser evidence for checkpoint 22's arrears/variable-pay payroll integration; two more real defects found and fixed
+
+Per explicit standing instruction: *"Run real Postgres/HTTP tests,
+persisted financial reconciliation and browser evidence for the affected
+workflows."* Checkpoint 22's proof script covered real Postgres/HTTP;
+this checkpoint adds the browser leg, and in doing so found the backend
+work had no way for HR to actually invoke it from the UI — then two more
+genuine, independent defects underneath that gap.
+
+**Gap found**: checkpoint 22 built `POST .../batches/:id/assign-run` on
+both `arrears.ts` and `variable-pay.ts`, but neither `ArrearEngine.tsx`
+nor `VariablePay.tsx` had ever been wired to call it — the only way to
+actually fold an approved batch into a payroll run was a direct API
+call, the same shape as the already-disclosed `payroll_adjustments`
+"no frontend at all" gap, just less visible since both pages otherwise
+look feature-complete. Fixed by adding an "Assign to Payroll Run"
+button + dialog to both pages, mirroring `LeaveAccrualAdmin.tsx`'s
+existing leave-encashment pattern (G12) exactly — same copy, same
+non-finalized-yet framing, same `<select>` of draft runs for the
+batch's own month.
+
+**Defect 1 (arrears), found by actually using the UI**: migration 477
+made `arrear_batches.payout_month` mandatory at approve time, raising
+`NO_PAYOUT_MONTH` otherwise — but `ArrearEngine.tsx`'s Create Batch
+dialog never collected one. Every batch created through the UI would
+have hit that 400 on Approve. Fixed by adding the missing field.
+
+**Defect 2 (variable pay), found the same way**: `VariablePay.tsx` read
+a flat `b.template_name` / `b.total_payout` off each batch row that
+`GET /batches` has never actually sent (it embeds `incentive_templates
+(id, name, code, template_type)`, and the real column is
+`total_amount`) — every variable-pay batch, on every tenant, has always
+rendered `—` / `₹NaN` in this table. Pre-existing, unrelated to
+checkpoint 22's own work, found only because this checkpoint actually
+opened the page in a browser instead of reasoning about the API in
+isolation. Fixed to read the real shape.
+
+**Proof, step by step, real Postgres + real HTTP + a real Chromium
+session (Playwright) + the real async payroll-run job** — not a mock at
+any layer: seeded one tenant, an HR admin, an employee with a
+₹50,000/month compensation, and an approved `compensation_revisions` row
+(a genuine +₹10,000/month increment effective in the batch's period).
+Logged into the actual web app, created an arrears batch with an
+explicit payout month, clicked Calculate (produced one real
+`arrear_records` row, ₹10,000), Approve, then the new Assign to Payroll
+Run dialog against a real draft run for that month. Re-triggered payroll
+generation over HTTP; confirmed via a direct `payroll_slips` query that
+the regenerated slip's `component_breakdown` now carries an `ARREARS`
+line and `gross_pay`/`net_pay` are exactly ₹60,000 (₹50,000 base +
+₹10,000 arrears) — then confirmed the SAME number on the actual Payroll
+Runs screen's run card (Gross ₹60,000 / Net Pay ₹60,000, 1 employee),
+screenshotted. The fix demonstrably reaches a real payroll run through
+the real UI a human HR admin would use, not just through the API this
+audit's own scripts call directly.
+
+`apps/web` `tsc --noEmit` and `eslint` on both changed files clean.
+
+**Disclosed, not fixed this checkpoint**: while tracing `VariablePay.tsx`
+end-to-end, found that the page has no control anywhere to populate a
+batch's actual payout rows (`POST /batches/:id/payouts` exists server-
+side; nothing in the UI calls it) — a batch can be created and a
+template selected, but there is no way through this page alone to get
+employees into it, so a freshly created batch stays at 0 employees /
+₹0 forever unless something populates `variable_payouts` through a path
+this audit hasn't found. This sits in the same bucket as the already-
+disclosed `payroll_adjustments` frontend gap (checkpoint 22): the
+backend money-safety work (assign/finalize/rollback) is sound and
+proven; a further frontend build-out is a separate, explicitly flagged
+follow-up, not silently claimed as done here.
+
+## Checkpoint 14 qualifications — both closed with a real fix, not a restated assumption
+
 Two qualifications were raised against checkpoint 14's own work before it
 could be treated as closed. Both are genuine defects, not documentation
 gaps, now fixed (migration 467, applied to `hrms_uat` and verified against
