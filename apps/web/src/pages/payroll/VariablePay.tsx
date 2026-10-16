@@ -5,11 +5,11 @@
  * Access: admin only (super_admin, hr_admin).
  */
 
-import { useState }                                from 'react'
+import { useState, useEffect }                     from 'react'
 import { useQuery, useMutation, useQueryClient }   from '@tanstack/react-query'
 import {
   Loader2, RefreshCw, Plus, CheckCircle2,
-  Eye,
+  Eye, BadgeCheck,
 } from 'lucide-react'
 
 import { PageContainer }  from '@/components/layout/PageContainer'
@@ -19,11 +19,13 @@ import { SectionCard }    from '@/components/layout/SectionCard'
 import { Button }         from '@/components/ui/button'
 import { Badge }          from '@/components/ui/badge'
 import { Input }          from '@/components/ui/input'
+import { Label }          from '@/components/ui/label'
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogFooter,
 } from '@/components/ui/dialog'
 import { api }            from '@/lib/api/client'
 import { useAuthStore }   from '@/stores/authStore'
@@ -43,15 +45,27 @@ interface IncentiveTemplate {
 }
 
 interface VariableBatch {
-  id:             string
-  batch_name:     string
-  payout_month:   string
-  template_id:    string
-  status:         'draft' | 'in_review' | 'approved' | 'processing' | 'processed' | 'cancelled'
-  total_payout:   number
-  employee_count: number
-  created_at:     string
-  template_name?: string
+  id:                      string
+  batch_name:              string
+  payout_month:            string
+  template_id:             string
+  status:                  'draft' | 'in_review' | 'approved' | 'processing' | 'processed' | 'cancelled'
+  total_amount:            number
+  employee_count:          number
+  processed_payroll_run_id: string | null
+  created_at:              string
+  // Embedded by GET /batches's `select('*, incentive_templates(...)')` —
+  // SYSTEM_AUDIT_2026-10-14 found this page previously read a flat
+  // `template_name`/`total_payout` that the API has never actually sent
+  // (real columns: the embedded `incentive_templates.name` and
+  // `total_amount`), so every batch always showed "—" / "₹NaN" here.
+  incentive_templates?:    { id: string; name: string; code: string; template_type: string } | null
+}
+
+interface PayrollRunOption {
+  id:     string
+  month:  string
+  status: string
 }
 
 interface VariablePayout {
@@ -288,6 +302,84 @@ function PayoutsDialog({
   )
 }
 
+// ── Assign to Payroll Run Dialog ───────────────────────────────────────────────
+// Mirrors ArrearEngine.tsx / LeaveAccrualAdmin.tsx's "Assign to Payroll Run"
+// dialog exactly — reserves a draft run for an approved batch without marking
+// it processed yet. Every (re)generation of that run folds each assigned
+// employee's variable pay into their payslip fresh; finalizing that run is
+// what actually flips this batch to 'processed'.
+
+function AssignRunDialog({
+  open,
+  batch,
+  draftRuns,
+  onClose,
+}: {
+  open: boolean
+  batch: VariableBatch | null
+  draftRuns: PayrollRunOption[]
+  onClose: () => void
+}) {
+  const qc = useQueryClient()
+  const [runId, setRunId] = useState('')
+
+  useEffect(() => { if (open) setRunId('') }, [open])
+
+  const mutation = useMutation({
+    mutationFn: () => api.post(`/payroll/variable-pay/batches/${batch!.id}/assign-run`, { payroll_run_id: runId }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['vp-batches'] })
+      toast.success('Assigned to payroll run — not yet paid. Run (or re-run) payroll for this month, then finalize to mark processed.')
+      onClose()
+    },
+    onError: (e: Error) => toast.error('Failed to assign batch to payroll run', { description: e.message }),
+  })
+
+  const eligibleRuns = draftRuns.filter(r => !batch?.payout_month || r.month === batch.payout_month)
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader><DialogTitle>Assign to Payroll Run — {batch?.batch_name}</DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Total payout <strong className="text-foreground">{batch ? fmt(batch.total_amount) : ''}</strong> across{' '}
+            {batch?.employee_count} employee(s) will be reserved for the selected draft run — this does not mark the
+            batch processed yet. Run (or re-run) payroll for {batch?.payout_month} so each payslip reflects it, then
+            finalize that run to mark this batch processed.
+          </p>
+          <div className="space-y-1.5">
+            <Label className="text-xs">Draft payroll run ({batch?.payout_month})</Label>
+            {eligibleRuns.length === 0 ? (
+              <p className="text-xs text-warning">
+                No draft payroll run for {batch?.payout_month} — create or reopen one for that month first.
+              </p>
+            ) : (
+              <select
+                value={runId}
+                onChange={e => setRunId(e.target.value)}
+                className="w-full h-9 text-xs rounded-md border border-input bg-background px-2 text-foreground outline-none focus:ring-1 ring-primary/50"
+              >
+                <option value="">Select a run…</option>
+                {eligibleRuns.map(r => (
+                  <option key={r.id} value={r.id}>{r.month} (draft)</option>
+                ))}
+              </select>
+            )}
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
+          <Button size="sm" disabled={mutation.isPending || !runId} onClick={() => mutation.mutate()}>
+            {mutation.isPending && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
+            Assign
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 // ── Add Template Dialog ────────────────────────────────────────────────────────
 
 const DEFAULT_TEMPLATE_FORM = {
@@ -388,11 +480,20 @@ export function VariablePay() {
   const [showCreate, setShowCreate]     = useState(false)
   const [showAddTpl, setShowAddTpl]     = useState(false)
   const [viewBatch, setViewBatch]       = useState<VariableBatch | null>(null)
+  const [assignBatch, setAssignBatch]   = useState<VariableBatch | null>(null)
 
   const { data: batches = [], isLoading: batchesLoading, refetch } = useQuery<VariableBatch[]>({
     queryKey: ['vp-batches'],
     queryFn:  () => api.get<{ data: VariableBatch[] }>('/payroll/variable-pay/batches').then(r => r.data),
   })
+
+  const { data: payrollRunsResp } = useQuery<{ data: PayrollRunOption[] }>({
+    queryKey: ['payroll-runs-for-variable-pay'],
+    queryFn:  () => api.get('/payroll/runs?limit=50'),
+    enabled:  isAdmin,
+    staleTime: 30_000,
+  })
+  const draftPayrollRuns = (payrollRunsResp?.data ?? []).filter(r => r.status === 'draft')
 
   const { data: templates = [], isLoading: tplLoading } = useQuery<IncentiveTemplate[]>({
     queryKey: ['vp-templates'],
@@ -465,24 +566,38 @@ export function VariablePay() {
                     <tr key={b.id} className="border-b border-border hover:bg-muted/40 transition-colors">
                       <td className="py-3 px-4 font-medium text-foreground">{b.batch_name}</td>
                       <td className="py-3 px-4 text-muted-foreground">{b.payout_month}</td>
-                      <td className="py-3 px-4 text-foreground">{b.template_name ?? '—'}</td>
+                      <td className="py-3 px-4 text-foreground">{b.incentive_templates?.name ?? '—'}</td>
                       <td className="py-3 px-4">
                         <Badge variant={BATCH_BADGE[b.status] ?? 'secondary'}>
                           {labelify(b.status)}
                         </Badge>
                       </td>
                       <td className="py-3 px-4 text-right text-foreground">{b.employee_count}</td>
-                      <td className="py-3 px-4 text-right text-foreground">{fmt(b.total_payout)}</td>
+                      <td className="py-3 px-4 text-right text-foreground">{fmt(b.total_amount)}</td>
                       <td className="py-3 px-4 text-muted-foreground">{fmtDate(b.created_at)}</td>
                       {isAdmin && (
                         <td className="py-3 px-4">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => setViewBatch(b)}
-                          >
-                            <Eye className="mr-1 h-3 w-3" /> View Payouts
-                          </Button>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => setViewBatch(b)}
+                            >
+                              <Eye className="mr-1 h-3 w-3" /> View Payouts
+                            </Button>
+                            {b.status === 'approved' && !b.processed_payroll_run_id && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => setAssignBatch(b)}
+                              >
+                                <BadgeCheck className="mr-1 h-3 w-3" /> Assign to Payroll Run
+                              </Button>
+                            )}
+                            {b.status === 'approved' && b.processed_payroll_run_id && (
+                              <span className="text-xs text-muted-foreground">Assigned — awaiting finalize</span>
+                            )}
+                          </div>
                         </td>
                       )}
                     </tr>
@@ -548,6 +663,12 @@ export function VariablePay() {
         onClose={() => setViewBatch(null)}
       />
       <AddTemplateDialog open={showAddTpl} onClose={() => setShowAddTpl(false)} />
+      <AssignRunDialog
+        open={!!assignBatch}
+        batch={assignBatch}
+        draftRuns={draftPayrollRuns}
+        onClose={() => setAssignBatch(null)}
+      />
     </PageContainer>
   )
 }

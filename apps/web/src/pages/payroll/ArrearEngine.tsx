@@ -9,7 +9,7 @@ import { useState, useRef, useEffect }             from 'react'
 import { useQuery, useMutation, useQueryClient }   from '@tanstack/react-query'
 import {
   Loader2, RefreshCw, Plus, Calculator,
-  CheckCircle2, Eye,
+  CheckCircle2, Eye, BadgeCheck,
 } from 'lucide-react'
 
 import { PageContainer }  from '@/components/layout/PageContainer'
@@ -18,11 +18,13 @@ import { SectionCard }    from '@/components/layout/SectionCard'
 import { Button }         from '@/components/ui/button'
 import { Badge }          from '@/components/ui/badge'
 import { Input }          from '@/components/ui/input'
+import { Label }          from '@/components/ui/label'
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogFooter,
 } from '@/components/ui/dialog'
 import { api }            from '@/lib/api/client'
 import { useAuthStore }   from '@/stores/authStore'
@@ -32,15 +34,23 @@ import { fmtDate, formatCurrency } from '@/lib/utils'
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 interface ArrearBatch {
-  id:                  string
-  batch_name:          string
-  from_period:         string
-  to_period:           string
-  arrear_type:         string
-  status:              'draft' | 'calculated' | 'approved' | 'processing' | 'processed' | 'cancelled'
-  total_arrear_amount: number
-  employee_count:      number
-  created_at:          string
+  id:                      string
+  batch_name:              string
+  from_period:             string
+  to_period:               string
+  payout_month:            string | null
+  arrear_type:             string
+  status:                  'draft' | 'calculated' | 'approved' | 'processing' | 'processed' | 'cancelled'
+  total_arrear_amount:     number
+  employee_count:          number
+  processed_payroll_run_id: string | null
+  created_at:              string
+}
+
+interface PayrollRunOption {
+  id:     string
+  month:  string
+  status: string
 }
 
 interface ArrearRecord {
@@ -83,11 +93,12 @@ const labelify = (s: string) =>
 function CreateBatchDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const qc = useQueryClient()
   const [form, setForm] = useState({
-    batch_name:  '',
-    from_period: '',
-    to_period:   '',
-    arrear_type: 'salary_revision',
-    notes:       '',
+    batch_name:   '',
+    from_period:  '',
+    to_period:    '',
+    payout_month: '',
+    arrear_type:  'salary_revision',
+    notes:        '',
   })
 
   // New key each time the dialog opens, so a double-click on "Create Batch"
@@ -106,14 +117,14 @@ function CreateBatchDialog({ open, onClose }: { open: boolean; onClose: () => vo
       toast.success('Arrear batch created')
       qc.invalidateQueries({ queryKey: ['arrear-batches'] })
       onClose()
-      setForm({ batch_name: '', from_period: '', to_period: '', arrear_type: 'salary_revision', notes: '' })
+      setForm({ batch_name: '', from_period: '', to_period: '', payout_month: '', arrear_type: 'salary_revision', notes: '' })
     },
     onError: (e: Error) => {
       toast.error('Failed to create arrear batch', { description: e.message })
     },
   })
 
-  const valid = form.batch_name && form.from_period && form.to_period
+  const valid = form.batch_name && form.from_period && form.to_period && form.payout_month
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
@@ -147,6 +158,17 @@ function CreateBatchDialog({ open, onClose }: { open: boolean; onClose: () => vo
                 onChange={e => set('to_period', e.target.value)}
               />
             </div>
+          </div>
+          <div className="space-y-1">
+            <label className="text-sm font-medium text-foreground">Payout Month (YYYY-MM)</label>
+            <Input
+              type="month"
+              value={form.payout_month}
+              onChange={e => set('payout_month', e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">
+              The payroll run this arrear will be paid through. Must be a draft run's month.
+            </p>
           </div>
           <div className="space-y-1">
             <label className="text-sm font-medium text-foreground">Arrear Type</label>
@@ -270,6 +292,85 @@ function RecordsDialog({
   )
 }
 
+// ── Assign to Payroll Run Dialog ───────────────────────────────────────────────
+// Mirrors LeaveAccrualAdmin.tsx's leave-encashment "Assign to Payroll Run"
+// dialog exactly — this reserves a draft run for an approved batch; it does
+// NOT mark anything paid yet. Every (re)generation of that run folds each
+// assigned employee's arrears into their payslip fresh, so it survives any
+// number of re-runs; finalizing that run is what actually flips this batch
+// (and its arrear_payouts) to 'processed'/'paid'.
+
+function AssignRunDialog({
+  open,
+  batch,
+  draftRuns,
+  onClose,
+}: {
+  open: boolean
+  batch: ArrearBatch | null
+  draftRuns: PayrollRunOption[]
+  onClose: () => void
+}) {
+  const qc = useQueryClient()
+  const [runId, setRunId] = useState('')
+
+  useEffect(() => { if (open) setRunId('') }, [open])
+
+  const mutation = useMutation({
+    mutationFn: () => api.post(`/payroll/arrears/batches/${batch!.id}/assign-run`, { payroll_run_id: runId }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['arrear-batches'] })
+      toast.success('Assigned to payroll run — not yet paid. Run (or re-run) payroll for this month, then finalize to mark processed.')
+      onClose()
+    },
+    onError: (e: Error) => toast.error('Failed to assign batch to payroll run', { description: e.message }),
+  })
+
+  const eligibleRuns = draftRuns.filter(r => !batch?.payout_month || r.month === batch.payout_month)
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader><DialogTitle>Assign to Payroll Run — {batch?.batch_name}</DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Total arrear <strong className="text-foreground">{batch ? fmt(batch.total_arrear_amount) : ''}</strong> across{' '}
+            {batch?.employee_count} employee(s) will be reserved for the selected draft run — this does not mark the
+            batch processed yet. Run (or re-run) payroll for {batch?.payout_month} so each payslip reflects it, then
+            finalize that run to mark this batch processed.
+          </p>
+          <div className="space-y-1.5">
+            <Label className="text-xs">Draft payroll run ({batch?.payout_month})</Label>
+            {eligibleRuns.length === 0 ? (
+              <p className="text-xs text-warning">
+                No draft payroll run for {batch?.payout_month} — create or reopen one for that month first.
+              </p>
+            ) : (
+              <select
+                value={runId}
+                onChange={e => setRunId(e.target.value)}
+                className="w-full h-9 text-xs rounded-md border border-input bg-background px-2 text-foreground outline-none focus:ring-1 ring-primary/50"
+              >
+                <option value="">Select a run…</option>
+                {eligibleRuns.map(r => (
+                  <option key={r.id} value={r.id}>{r.month} (draft)</option>
+                ))}
+              </select>
+            )}
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
+          <Button size="sm" disabled={mutation.isPending || !runId} onClick={() => mutation.mutate()}>
+            {mutation.isPending && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
+            Assign
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 // ── Main Component ─────────────────────────────────────────────────────────────
 
 export function ArrearEngine() {
@@ -279,11 +380,20 @@ export function ArrearEngine() {
 
   const [showCreate, setShowCreate]   = useState(false)
   const [viewBatch, setViewBatch]     = useState<ArrearBatch | null>(null)
+  const [assignBatch, setAssignBatch] = useState<ArrearBatch | null>(null)
 
   const { data: batches = [], isLoading, refetch } = useQuery<ArrearBatch[]>({
     queryKey: ['arrear-batches'],
     queryFn:  () => api.get<{ data: ArrearBatch[] }>('/payroll/arrears/batches').then((r) => r.data),
   })
+
+  const { data: payrollRunsResp } = useQuery<{ data: PayrollRunOption[] }>({
+    queryKey: ['payroll-runs-for-arrears'],
+    queryFn:  () => api.get('/payroll/runs?limit=50'),
+    enabled:  isAdmin,
+    staleTime: 30_000,
+  })
+  const draftPayrollRuns = (payrollRunsResp?.data ?? []).filter(r => r.status === 'draft')
 
   const calculateMutation = useMutation({
     mutationFn: (id: string) => api.post(`/payroll/arrears/batches/${id}/calculate`),
@@ -384,6 +494,18 @@ export function ArrearEngine() {
                               <CheckCircle2 className="mr-1 h-3 w-3" /> Approve
                             </Button>
                           )}
+                          {b.status === 'approved' && !b.processed_payroll_run_id && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => setAssignBatch(b)}
+                            >
+                              <BadgeCheck className="mr-1 h-3 w-3" /> Assign to Payroll Run
+                            </Button>
+                          )}
+                          {b.status === 'approved' && b.processed_payroll_run_id && (
+                            <span className="text-xs text-muted-foreground">Assigned — awaiting finalize</span>
+                          )}
                           <Button
                             size="sm"
                             variant="outline"
@@ -408,6 +530,12 @@ export function ArrearEngine() {
         open={!!viewBatch}
         batch={viewBatch}
         onClose={() => setViewBatch(null)}
+      />
+      <AssignRunDialog
+        open={!!assignBatch}
+        batch={assignBatch}
+        draftRuns={draftPayrollRuns}
+        onClose={() => setAssignBatch(null)}
       />
     </PageContainer>
   )
