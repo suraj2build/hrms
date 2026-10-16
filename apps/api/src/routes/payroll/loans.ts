@@ -8,7 +8,7 @@ import { z } from 'zod'
 import { gateApprove, gateReject } from '../../lib/approval-orchestrator.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
-import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { serverError, notFound, conflictError, ErrorCode } from '../../lib/api-errors.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import { blockIfPilotTenant } from '../../lib/pilot-guard.js'
 
@@ -584,8 +584,6 @@ export default async function loansRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
-    const now = new Date().toISOString()
-
     // loan_id is caller-supplied — verify it belongs to this tenant before
     // inserting. The FK only checks the loan row exists somewhere, not that
     // it's this tenant's; without this a payment could be permanently
@@ -612,57 +610,37 @@ export default async function loansRoutes(fastify: FastifyInstance) {
       if (!targetRun) return reply.code(404).send({ error: 'PAYROLL_RUN_NOT_FOUND', message: 'Payroll run not found' })
     }
 
-    // Insert payment record
-    const { data: payment, error: payErr } = await fastify.supabase
-      .from('loan_payments')
-      .insert({
-        ...parsed.data,
-        tenant_id: req.tenantId,
-        created_by: req.userId,
-      })
-      .select()
-      .single()
-
-    if (payErr) return serverError(req, reply, payErr, ErrorCode.INSERT_FAILED, 'Failed to record loan payment')
-
-    // Update schedule if provided — guarded to 'pending' so a duplicate/racing
-    // record-payment call for the same installment can't re-stamp an
-    // already-paid schedule row.
-    if (parsed.data.schedule_id) {
-      const { error: schedErr } = await fastify.supabase
-        .from('loan_schedules')
-        .update({
-          status: 'paid',
-          paid_amount: parsed.data.amount,
-          paid_at: now,
-        })
-        .eq('id', parsed.data.schedule_id)
-        .eq('loan_id', parsed.data.loan_id)
-        .eq('tenant_id', req.tenantId)
-        .eq('status', 'pending')
-      if (schedErr) {
-        req.log.error({ err: schedErr, schedule_id: parsed.data.schedule_id }, 'record-payment: failed to mark loan_schedules row paid — payment row was inserted but schedule was NOT updated')
-      }
-    }
-
-    // Update loan outstanding balance atomically (fresh audit finding): this
-    // was previously a plain read-then-write — SELECT outstanding_balance,
-    // compute the new value in application code, UPDATE — a classic
-    // lost-update race. Two concurrent (or accidentally duplicate)
-    // record-payment calls for the same loan both read the same
-    // outstanding_balance and the second write silently overwrote the
-    // first's deduction, even though two loan_payments audit rows exist.
-    // record_loan_payment_atomic() (migration 396) does the read-modify-write
-    // in one UPDATE statement instead.
-    const { error: balErr } = await fastify.supabase.rpc('record_loan_payment_atomic', {
+    // Record the payment, mark the schedule paid, and apply the balance
+    // deduction in one atomic transaction (fresh audit finding,
+    // SYSTEM_AUDIT_2026-10-14 checkpoint 17): the previous code ran these as
+    // three separate statements and never supplied loan_payments'
+    // NOT NULL payment_month column at all, so every real call failed
+    // outright — and even past that, a retry after a partial failure could
+    // insert a duplicate payment row and double-apply the balance
+    // deduction, since nothing guarded the insert itself against being
+    // called twice for the same schedule. record_loan_payment_manual_atomic()
+    // (migration 473) closes both: the schedule's CAS to 'paid' is the
+    // idempotency gate — a schedule that already reads non-'pending' raises
+    // ALREADY_PAID and nothing is written, so retrying is safe.
+    const { data: result, error: rpcErr } = await fastify.supabase.rpc('record_loan_payment_manual_atomic', {
       p_tenant_id:      req.tenantId,
       p_loan_id:        parsed.data.loan_id,
+      p_schedule_id:    parsed.data.schedule_id ?? null,
+      p_payroll_run_id: parsed.data.payroll_run_id ?? null,
+      p_amount:         parsed.data.amount,
       p_principal_paid: parsed.data.principal_paid,
+      p_interest_paid:  parsed.data.interest_paid,
+      p_payment_type:   parsed.data.payment_type,
+      p_notes:          parsed.data.notes ?? null,
+      p_actor_id:       req.userId,
     })
-    if (balErr) {
-      req.log.error({ err: balErr, loan_id: parsed.data.loan_id }, 'record-payment: failed to update loan outstanding_balance — payment row was inserted but balance was NOT updated')
+    if (rpcErr) {
+      const msg = rpcErr.message ?? ''
+      if (msg.includes('NOT_FOUND:')) return notFound(reply, 'LOAN_NOT_FOUND', 'Loan not found')
+      if (msg.includes('ALREADY_PAID:')) return conflictError(reply, 'ALREADY_PAID', 'This installment has already been recorded as paid')
+      return serverError(req, reply, rpcErr, ErrorCode.INSERT_FAILED, 'Failed to record loan payment — no changes were made; retry is safe.')
     }
 
-    return reply.code(201).send({ data: payment })
+    return reply.code(201).send({ data: result })
   })
 }

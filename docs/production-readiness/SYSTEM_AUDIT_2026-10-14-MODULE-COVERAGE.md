@@ -1737,7 +1737,7 @@ the repository, not estimated.
 |---|---|---|---|---|---|
 | attendance | 64 | 64 | 0 | 1 open-confirmed (retroactive.ts dedup — low-severity, read-only observability, disclosed not fixed). 14 found-and-FIXED-same-batch (roster-api.ts pagination ×2, roster-calendar.ts rotation-members pagination, leave-reconciliation.ts breakdown-aggregation, writeLedgerEntry idempotency + atomicity, regularisation-policy.ts SLA-breach-reject chain orphaning, scoped-policy accrual gap (migration 470 + `leave-entitlement-service.ts` scope-chain resolver), two-accrual-system double-credit (migration 470 execution-time guard), reconciliation.ts's `/attendance/reconciliation/open` capped-breakdown undercounting, **workforce-optimization.ts missing-authz on 7 routes, health-index.ts department/tenant pagination, 4-file DECIMAL-string-coercion NaN bug, risk.ts `/summary` pagination, risk.ts non-deterministic pagination tie-breaker** — don't count as open) | — |
 | employees | 31 | 31 | 0 | 0 | separation-workflow.ts F&F section (~lines 416-972) relies on prior-round evidence, not re-read this audit |
-| payroll (incl. statutory/) | 52 | 9 | 43 | 0 open-confirmed. 2 found-and-FIXED-same-batch (runs.ts DELETE TOCTOU race; compensation-revisions.ts silent component-copy swallow on approve) — don't count as open | approval/finalization/F&F/encashment-adjacent correctness relies on PRIOR rounds (G12 etc.), not re-verified by this audit's own checkpoints; the 43 remaining files include all 14 statutory/ files (not yet opened) |
+| payroll (incl. statutory/) | 52 | 11 | 41 | 0 open-confirmed. 5 found-and-FIXED-same-batch (runs.ts DELETE TOCTOU race; compensation-revisions.ts silent component-copy swallow → rebuilt fully atomic; advances.ts /recover guaranteed-NOT-NULL-violation + stuck-schedule torn write; loans.ts /record-payment identical guaranteed-NOT-NULL-violation + non-idempotent retry; **record_loan_payment_atomic (migration 396) column-ambiguity bug that made the function fail on every call since it was created — silently breaking runs.ts's own automatic loan-balance sweep this whole time**) — don't count as open | approval/finalization/F&F/encashment-adjacent correctness relies on PRIOR rounds (G12 etc.), not re-verified by this audit's own checkpoints; the 41 remaining files include all 14 statutory/ files (not yet opened) |
 | masters | 29 | 0 | 29 | — | nav-link fixes only; no file-level authz review this audit |
 | ess | 12 | 0 | 12 | — | distinct from the frozen web ESS Context Rail (CLAUDE.md) — this is the unrelated API namespace |
 | onboarding | 8 | 0 | 8 | — | — |
@@ -1789,7 +1789,7 @@ the repository, not estimated.
 | uploads | 1 | 0 | 1 | — | — |
 | whatsapp | 1 | 0 | 1 | — | — |
 | workforce | 1 | 0 | 1 | — | — |
-| **TOTAL (54 rows, 53 namespaces + setup.ts)** | **289** | **111** | **178** | **1 open-confirmed (retroactive.ts dedup — low-severity, read-only observability) — none else currently open; the scoped-policy accrual gap and the two-accrual-system double-credit, both CONFIRMED financial defects as of checkpoint 14, are now FIXED as of checkpoint 15 (migration 470) — see that section below; every other defect found this audit was fixed in the same checkpoint it was found** | **global: hosted Supabase/RLS/storage behavior is never verified anywhere in this tracker — see "Explicitly still blocked" below; PT/TDS/F&F/asset/careers/tenant-licensing rows above rely on evidence from rounds OUTSIDE this specific audit, real but not re-verified here** |
+| **TOTAL (54 rows, 53 namespaces + setup.ts)** | **289** | **113** | **176** | **1 open-confirmed (retroactive.ts dedup — low-severity, read-only observability) — none else currently open; the scoped-policy accrual gap and the two-accrual-system double-credit, both CONFIRMED financial defects as of checkpoint 14, are now FIXED as of checkpoint 15 (migration 470) — see that section below; every other defect found this audit was fixed in the same checkpoint it was found** | **global: hosted Supabase/RLS/storage behavior is never verified anywhere in this tracker — see "Explicitly still blocked" below; PT/TDS/F&F/asset/careers/tenant-licensing rows above rely on evidence from rounds OUTSIDE this specific audit, real but not re-verified here** |
 
 **Checkpoint 14 continuation, second leg**: 4 more files examined —
 `manager-dashboard.ts`, `payroll-summary.ts`, `context.ts` (no defects;
@@ -2433,6 +2433,113 @@ registrations, verified in an earlier round) — flagging rather than
 deleting since the session's own destructive-action guard declined the
 delete.
 
+## Checkpoint 17 — advances.ts + loans.ts, and a pre-existing cross-cutting defect found along the way
+
+Per the standing authorization's explicit requirement ("Do not mark a
+financial defect resolved merely because an endpoint now returns an
+error. Prove failed operations do not leave partial state and retries
+cannot duplicate effects."), first went back and made
+`compensation-revisions.ts`'s `POST /:id/approve` (only error-surfacing-
+fixed in checkpoint 16) **fully atomic**: `approve_compensation_revision_
+atomic` (migration 471) fuses the status transition, the new-compensation
+insert (relying on the pre-existing `fn_close_prev_compensation` trigger
+to auto-deactivate the prior row), and the component-copy insert into one
+transaction. Proven with the required 4-part standard — previous
+compensation stays valid on a forced failure (19/19 checks,
+`scripts/db/verify-compensation-revision-approve-atomic.mjs`): Part A
+forces a real CHECK-constraint violation and confirms the revision stays
+`pending` with the original compensation still the sole active row; Part B
+retries with valid data and succeeds exactly once; a second retry after
+genuine success is rejected (`INVALID_STATUS`), not reapplied; Part C is
+genuine `Promise.all` concurrency over real HTTP — exactly one of two
+simultaneous approvals wins, the unique-active-compensation invariant
+holds.
+
+Then opened `advances.ts` (620 lines, full file) and `loans.ts` (668
+lines, full file) — the two remaining sibling "payments" files in the
+priority list. Both have the same shape: a manual, HR-triggered
+record-a-payment endpoint, structurally distinct from (and not called by)
+the automatic payroll-finalize sweep in `runs.ts`.
+
+1. **`advances.ts` — `POST /payroll/advances/recover`.** `advance_
+   recoveries.employee_id`/`recovery_month` are NOT NULL with no default;
+   the route's insert never supplied either — every real call failed
+   outright — and the failure landed AFTER the recovery schedule had
+   already been CAS'd to `'recovered'` in an earlier, separate statement,
+   permanently stranding it recovered with no recovery record and no way
+   to retry (its own CAS guard requires `status='pending'`). Confirmed via
+   grep that this route is unreferenced by the frontend and by the
+   automatic recovery logic — live, reachable, and unconditionally broken.
+   Fixed with `record_advance_recovery_atomic` (migration 472): the
+   schedule's CAS to `'recovered'` is now the idempotency gate (0-row
+   match raises `ALREADY_RECOVERED`, nothing else is written), the insert
+   now supplies both columns, and the advance's aggregate status update
+   happens in the same transaction. **15/15 checks**
+   (`scripts/db/verify-advance-recovery-atomic.mjs`): Part A replicates
+   the OLD code's exact two-statement sequence directly in SQL and
+   confirms the real NOT NULL violation and the resulting torn state
+   (schedule stuck `'recovered'`, zero recovery rows) — the bug was real,
+   not theoretical. Part B is the fixed real-HTTP happy path. Part C: a
+   retry against an already-recovered schedule is rejected 409, not
+   reapplied (still exactly 1 recovery row). Part D: genuine `Promise.all`
+   concurrency over real HTTP — exactly one 201, one 409, exactly 1
+   recovery row.
+
+2. **`loans.ts` — `POST /payroll/loans/record-payment`.** The exact same
+   bug class, independently present in the sibling file: `loan_
+   payments.payment_month` is NOT NULL with no default; the route's zod
+   schema never accepted it and the insert never supplied it — every real
+   call failed outright. Confirmed unreferenced by the frontend (only the
+   `pending-recoveries`-equivalent GET paths are called from
+   `LoansAndAdvances.tsx`). Separately, even past that insert failure, the
+   3-step sequence (insert payment → CAS `loan_schedules` to `'paid'` →
+   separately call `record_loan_payment_atomic` for the balance) had no
+   idempotency guard on the insert itself — a retry after a step-2/3
+   failure could have inserted a second payment row and double-applied the
+   balance deduction; both failure paths were already disclosed via
+   `req.log.error` in a prior round but never actually fixed. Fixed with
+   `record_loan_payment_manual_atomic` (migration 473), same shape as
+   `record_advance_recovery_atomic`: the schedule's CAS to `'paid'` is the
+   idempotency gate (0-row match raises `ALREADY_PAID`).
+
+   **While building this fix, found a second, independent, and more
+   severe defect**: `record_loan_payment_atomic` itself (migration 396 —
+   previously credited by an earlier audit round with closing a
+   lost-update race on `outstanding_balance`) has **never actually been
+   able to run**. Its own `RETURNS TABLE (outstanding_balance NUMERIC,
+   status TEXT)` declares OUT parameters with those exact names, which
+   PL/pgSQL treats as variables in scope for the whole function body —
+   colliding with `employee_loans`' own `outstanding_balance`/`status`
+   columns referenced inside its own UPDATE. Every call raises `column
+   reference "outstanding_balance" is ambiguous`, confirmed by invoking it
+   directly against real Postgres with no caller involved at all. This is
+   the SAME function `runs.ts`'s automatic payroll-finalize loan-balance
+   sweep calls on every run with a paid loan EMI (the "Loan outstanding
+   balance sweep" block, already examined and passed as correct in
+   checkpoint 16's first leg) — that call site treats the RPC's error as
+   non-fatal and silently skips the `paid_amount` marker, so this has been
+   failing silently on every finalized run, meaning **no loan's
+   `outstanding_balance` has ever actually been decremented by the
+   automatic sweep**, in this codebase's entire history, independent of
+   anything checkpoint 16 found or missed about that call site's
+   idempotency shape. Checkpoint 16's examination of `runs.ts` checked the
+   sweep's OWN idempotency pattern (the `paid_amount IS NULL` filter) and
+   correctly found that pattern sound — it did not re-verify that the RPC
+   it calls actually executes, which is exactly the kind of blind spot
+   "examined, not tested" is supposed to flag. Fixed by qualifying the
+   UPDATE's column reads with a table alias (migration 474) — confirmed
+   fixed by calling the function directly against real Postgres, then
+   re-run through the full 4-part proof above (which depends on it) all
+   passing. This is disclosed as its own finding, not folded silently into
+   the loans.ts fix, because its blast radius is independent of
+   `record-payment` and extends to `runs.ts`'s automatic sweep, which was
+   previously marked examined-and-correct.
+
+tsc --noEmit clean; vitest 79/79 files, 669/669 tests, zero regressions.
+
+**Updated: payroll 11/52 examined (41 remaining) — all 14 `statutory/`
+files are still unopened. Overall: 113/289 examined, 176 remaining.**
+
 ### Separate totals: frontend pages, shared services, migrations
 
 The backend route tracker above (289 files) is explicitly **not** the
@@ -2445,7 +2552,7 @@ as whole-system progress:
 | **Frontend pages** (`apps/web/src/pages/**/*.tsx`) | **306** (41 directories) | **~26** distinct files named in this register's checkpoint history (nav-link target fixed or logic referenced) | **Mixed, and shallower than the backend bar** — of those ~26, only **5** have actual browser evidence (real login, real click, screenshot): `Attendance.tsx`, `ControlCenter.tsx`, `CommandPalette.tsx` (attendance-processing flow), `ApprovalInbox.tsx` (3 screenshots, scope-verify), `ManagerTeamRegularisation.tsx` (bulk-retry panel). The other ~21 are nav-link-target fixes only — the file was read to confirm/correct a `<Link>`/`navigate()` target, not reviewed for business logic, authorization, or data correctness. **"Examined" here means "a stale link was found and fixed," not "this page's logic was audited."** | ~280-301 depending on which bar is applied |
 | **Shared services, API** (`apps/api/src/lib/**/*.ts`, excl. `__tests__`) | **171** | **~16**: `accrual-engine.ts`, `approval-orchestrator.ts`, `approval-service.ts`, `approval-guards.ts`, `workflow-service.ts`, `idempotency.ts`, `period-lock.ts`, `manager-scope.ts`, `audit-service.ts`, `event-bus.ts`, `ot-engine.ts`, `api-errors.ts`, `pilot-guard.ts`, `user-account-service.ts`, `manager-compensation.ts`, `workforce-orchestrator.ts` | Read in full against the logic a calling route needed, not independently re-derived against a standalone checklist the way routes are — correct for what each route-level finding needed, not a claim that the rest of each file (or any untouched function in an examined file) is clean | ~155 |
 | **Shared services, web** (`apps/web/src/lib/**/*.ts*`) | **70** | **0** | — not examined this audit | 70 |
-| **Database migrations** (`supabase/migrations/*.sql`) | **463** | **Verified by a DIFFERENT method, not comparable to "examined"**: every migration through 467 has been applied, in order, to a fresh Postgres 16 instance with zero errors (most recently confirmed this checkpoint) — this proves the migration HISTORY is internally consistent and reproducible, not that each migration's SQL was individually read against a correctness checklist. A handful (446/447/448/450/461/462/463/464/465/466/467) were individually authored and read in depth as part of a specific fix this audit; the rest were pre-existing and have NOT been read line-by-line this audit. | n/a — different evidence type, not file-counted the same way |
+| **Database migrations** (`supabase/migrations/*.sql`) | **474** | **Verified by a DIFFERENT method, not comparable to "examined"**: every migration through 467 has been applied, in order, to a fresh Postgres 16 instance with zero errors (most recently confirmed earlier this audit) — this proves the migration HISTORY up to that point is internally consistent and reproducible, not that each migration's SQL was individually read against a correctness checklist. 471-474 (checkpoint 17) were each individually authored, applied directly and cleanly to `hrms_uat`'s existing 000→470 history, and proven under the real-Postgres/real-HTTP scripts cited in checkpoint 17 — **not yet re-swept through a fresh-install 000→474 run**, so their interaction with a from-scratch install is unverified (the same gap already disclosed for 446-450/461-467 when they were added). 446/447/448/450/461-467/471-474 were individually authored and read in depth as part of a specific fix this audit; the rest were pre-existing and have NOT been read line-by-line this audit. | n/a — different evidence type, not file-counted the same way |
 
 **Reading this correctly**: "54 of 289 backend route files examined" is
 real, specific progress on the ONE surface this audit has gone deepest
