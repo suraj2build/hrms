@@ -3971,16 +3971,40 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
       return conflictError(reply, 'PROCESSING', 'Cannot delete a run that is currently processing')
     }
 
-    // Audit BEFORE deletion — the event FK is ON DELETE SET NULL, so the row
-    // survives (with run_id nulled) once the run is gone.
+    // CAS, not check-then-write: the pre-check above reads `status` in a
+    // SEPARATE statement from the DELETE below — between the two, a
+    // concurrent POST /payroll/runs/:id/finalize could transition this run
+    // to 'finalized', after which this DELETE (keyed only on id/tenant_id,
+    // with no status filter) would hard-delete a now-finalized run and its
+    // real payslips, bypassing the "finalized runs cannot be deleted" rule
+    // entirely. Folding the SAME status exclusion into the DELETE's own
+    // WHERE clause makes the guard authoritative at the moment of deletion,
+    // not at the moment of the earlier read — the same fix shape already
+    // applied to this file's rollback (rollback_payroll_run_atomic) and
+    // finalize (finalize_payroll_run_atomic) paths, and to work-sessions.ts's
+    // lock/unlock routes elsewhere in this audit.
+    const { data: deleted, error: delErr } = await fastify.supabase
+      .from('payroll_runs')
+      .delete()
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .neq('status', 'finalized')
+      .neq('status', 'processing')
+      .select('id')
+      .maybeSingle()
+    if (delErr) return serverError(req, reply, delErr, ErrorCode.DELETE_FAILED, 'Failed to delete payroll run')
+    if (!deleted) {
+      return conflictError(reply, 'RUN_STATE_CHANGED', 'This run was finalized or started processing by another request. Refresh and check its current status before retrying.')
+    }
+
+    // Audit AFTER a confirmed deletion — the event FK is ON DELETE SET
+    // NULL, so the row survives (with run_id nulled) once the run is gone.
+    // Logging only on confirmed success avoids recording a "run_deleted"
+    // event for a delete the CAS guard above actually rejected.
     await logRunEvent(fastify.supabase, req.log, {
       tenant_id: tenantId, run_id: id, event_type: 'run_deleted',
       month: run.month, payload: { deleted_by: req.userId, prior_status: run.status },
     })
-
-    const { error: delErr } = await fastify.supabase
-      .from('payroll_runs').delete().eq('id', id).eq('tenant_id', tenantId)
-    if (delErr) return serverError(req, reply, delErr, ErrorCode.DELETE_FAILED, 'Failed to delete payroll run')
 
     return reply.send({ message: `Run for ${run.month} deleted`, run_id: id })
   })
