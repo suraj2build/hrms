@@ -1737,7 +1737,7 @@ the repository, not estimated.
 |---|---|---|---|---|---|
 | attendance | 64 | 64 | 0 | 1 open-confirmed (retroactive.ts dedup — low-severity, read-only observability, disclosed not fixed). 14 found-and-FIXED-same-batch (roster-api.ts pagination ×2, roster-calendar.ts rotation-members pagination, leave-reconciliation.ts breakdown-aggregation, writeLedgerEntry idempotency + atomicity, regularisation-policy.ts SLA-breach-reject chain orphaning, scoped-policy accrual gap (migration 470 + `leave-entitlement-service.ts` scope-chain resolver), two-accrual-system double-credit (migration 470 execution-time guard), reconciliation.ts's `/attendance/reconciliation/open` capped-breakdown undercounting, **workforce-optimization.ts missing-authz on 7 routes, health-index.ts department/tenant pagination, 4-file DECIMAL-string-coercion NaN bug, risk.ts `/summary` pagination, risk.ts non-deterministic pagination tie-breaker** — don't count as open) | — |
 | employees | 31 | 31 | 0 | 0 | separation-workflow.ts F&F section (~lines 416-972) relies on prior-round evidence, not re-read this audit |
-| payroll (incl. statutory/) | 52 | 28 | 24 | **0 open-confirmed.** The HIGH SEVERITY arrears/variable-pay/adjustments payroll-integration gap (checkpoint 18) is now FIXED as of checkpoint 22 (migrations 476-480) — see that section below; not left disclosed-only, per explicit instruction not to de-scope it. 6 found-and-FIXED-same-batch total (runs.ts DELETE TOCTOU race; compensation-revisions.ts silent component-copy swallow → rebuilt fully atomic; advances.ts /recover guaranteed-NOT-NULL-violation + stuck-schedule torn write; loans.ts /record-payment identical guaranteed-NOT-NULL-violation + non-idempotent retry; record_loan_payment_atomic (migration 396) column-ambiguity bug that made the function fail on every call since it was created — silently breaking runs.ts's own automatic loan-balance sweep this whole time; the arrears/variable-pay/adjustments payroll-integration gap itself) — don't count as open | approval/finalization/F&F/encashment-adjacent correctness relies on PRIOR rounds (G12 etc.), not re-verified by this audit's own checkpoints; the 24 remaining files include all 14 statutory/ files (not yet opened) |
+| payroll (incl. statutory/) | 52 | 28 | 24 | **0 open-confirmed.** The HIGH SEVERITY arrears/variable-pay/adjustments payroll-integration gap (checkpoint 18) is now FIXED as of checkpoint 22 (migrations 476-480) — see that section below; not left disclosed-only, per explicit instruction not to de-scope it. The loan-EMI finalize non-atomicity (found via injected-failure testing of the checkpoint-17 RPC fix, per explicit instruction to verify it through an actual finalize) is FIXED as of checkpoint 23 (migration 481) — see that section below. 7 found-and-FIXED-same-batch total (runs.ts DELETE TOCTOU race; compensation-revisions.ts silent component-copy swallow → rebuilt fully atomic; advances.ts /recover guaranteed-NOT-NULL-violation + stuck-schedule torn write; loans.ts /record-payment identical guaranteed-NOT-NULL-violation + non-idempotent retry; record_loan_payment_atomic (migration 396) column-ambiguity bug that made the function fail on every call since it was created — silently breaking runs.ts's own automatic loan-balance sweep this whole time; the arrears/variable-pay/adjustments payroll-integration gap itself; runs.ts's loan-EMI finalize sweep's own mark-paid/balance-decrement non-atomicity, checkpoint 23) — don't count as open | approval/finalization/F&F/encashment-adjacent correctness relies on PRIOR rounds (G12 etc.), not re-verified by this audit's own checkpoints; the 24 remaining files include all 14 statutory/ files (not yet opened); historical `loan_schedules` rows already stuck in the pre-checkpoint-23 shape (`status='paid' AND paid_amount IS NULL`) in real tenant data are not yet reconciled — tracked separately, per instruction not to silently backfill |
 | masters | 29 | 0 | 29 | — | nav-link fixes only; no file-level authz review this audit |
 | ess | 12 | 0 | 12 | — | distinct from the frozen web ESS Context Rail (CLAUDE.md) — this is the unrelated API namespace |
 | onboarding | 8 | 0 | 8 | — | — |
@@ -2890,6 +2890,79 @@ on. It says nothing about the other ~310 lib files, ~306 web pages, or
 whether an unexamined migration has a defect — those are separate,
 largely-unstarted surfaces with their own totals above, not implicitly
 covered by the backend number.
+
+## Checkpoint 23 — FIXED: loan-EMI finalize was not atomic; a failed balance recovery was silently left looking paid
+
+Per explicit standing instruction: "Fixing the loan-payment RPC does not
+establish that payroll finalization now handles its failure correctly or
+that historical loan balances reconcile. ... Also verify the repaired
+loan RPC through actual payroll finalization, including injected
+failure. A failed recovery must not be silently treated as completed."
+
+`record_loan_payment_atomic` itself was fixed at checkpoint 17 (migration
+474, a column-ambiguity bug that made every call fail). That fix was
+never actually exercised through a real finalize with a real injected
+failure until now. Doing so surfaced a SECOND, independent defect in the
+caller, not the RPC: `runs.ts`'s automatic loan-EMI finalize sweep marked
+`loan_schedules.status = 'paid'` in one bulk `UPDATE`, then — in a
+separate, later statement — called `record_loan_payment_atomic` to
+decrement the loan's `outstanding_balance`, using `paid_amount IS NULL`
+as an "already applied" marker intended to make a retry safe. Nothing
+ever retries it: the sweep that reads that marker is scoped to the one
+run's fixed month, and the existing manual recovery endpoint (`POST
+/payroll/loans/record-payment`, checkpoint 17) requires `status='pending'`
+to act — which a `'paid'` row no longer satisfies.
+
+**Verification method**: `scripts/db/verify-loan-finalize-injected-failure.mjs`
+— real Postgres, real HTTP, the real async payroll-run durable job, and a
+real finalize through the actual two-user maker-checker four-eyes gate
+(`force_finalize` + a second distinct `super_admin` as checker). The
+failure is injected via a genuine Postgres `BEFORE UPDATE` trigger that
+`RAISE EXCEPTION`s only when updating one specific, pre-identified loan
+row — not a mock, not an application-level stub. A second, unpoisoned
+control loan in the same finalize call proves the failure stays isolated
+(the rest of the run still finalizes correctly) rather than masking a
+wider problem.
+
+**Confirmed, before the fix**: the control loan resolved correctly
+end-to-end (`outstanding_balance` → 0, `status` → `'completed'`,
+schedule `paid_amount` set). The poisoned loan's `outstanding_balance`
+correctly stayed untouched (no money lost, no corruption) — but its
+`loan_schedules.status` incorrectly flipped to `'paid'` anyway, with
+`paid_amount` staying `NULL`: a row that looks done and permanently
+blocks re-deduction of that EMI, with no supported path to actually
+complete the balance decrement. This is exactly the "failed recovery
+silently treated as completed" shape named in the standing instruction —
+now reproduced with real evidence, not asserted.
+
+**Fix**: migration 481, `finalize_loan_emi_atomic` — fuses the schedule
+mark-paid CAS (`WHERE status = 'pending'`, raising `ALREADY_PROCESSED` if
+no row matches — so a retried/duplicate finalize call is a safe no-op,
+not a double-decrement) and the `record_loan_payment_atomic` balance
+call into one atomic transaction. `runs.ts` now calls it once per
+recovered loan schedule, non-fatally per schedule (one schedule's
+failure doesn't block the others, preserving the existing isolation
+design), in place of the old bulk-UPDATE-then-separate-sweep shape. The
+`paid_amount`-as-marker mechanism this replaced is gone entirely — the
+CAS on `status` is now the only guard needed, and it is real (inside the
+same transaction as the write it guards), not a best-effort signal a
+second, independent statement could silently fail to honor.
+
+**Re-verified against the fix**: same script, same injected trigger — the
+control loan still resolves identically; the poisoned schedule now
+correctly stays at `status='pending'` (not falsely `'paid'`), remaining
+reachable by the existing manual recovery endpoint. All checks pass.
+
+tsc --noEmit clean; vitest 79/79 files, 669/669 tests.
+
+**Scope note on "historical loan balances reconcile"**: this checkpoint
+fixes the code path going forward. It does not by itself establish that
+real (pilot/UAT) tenant data has no pre-existing rows already stuck in
+the shape this bug produced — `loan_schedules.status='paid' AND
+paid_amount IS NULL` predating this fix. That is a separate reconciliation
+task (tracked in `docs/production-readiness/STATUS.md`), deliberately not
+auto-corrected here per the standing instruction: "Reconcile historical
+affected balances separately" / "Do not silently backfill or pay them."
 
 ## Checkpoint 14 qualifications — both closed with a real fix, not a restated assumption
 
