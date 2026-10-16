@@ -1737,7 +1737,7 @@ the repository, not estimated.
 |---|---|---|---|---|---|
 | attendance | 64 | 64 | 0 | 1 open-confirmed (retroactive.ts dedup — low-severity, read-only observability, disclosed not fixed). 14 found-and-FIXED-same-batch (roster-api.ts pagination ×2, roster-calendar.ts rotation-members pagination, leave-reconciliation.ts breakdown-aggregation, writeLedgerEntry idempotency + atomicity, regularisation-policy.ts SLA-breach-reject chain orphaning, scoped-policy accrual gap (migration 470 + `leave-entitlement-service.ts` scope-chain resolver), two-accrual-system double-credit (migration 470 execution-time guard), reconciliation.ts's `/attendance/reconciliation/open` capped-breakdown undercounting, **workforce-optimization.ts missing-authz on 7 routes, health-index.ts department/tenant pagination, 4-file DECIMAL-string-coercion NaN bug, risk.ts `/summary` pagination, risk.ts non-deterministic pagination tie-breaker** — don't count as open) | — |
 | employees | 31 | 31 | 0 | 0 | separation-workflow.ts F&F section (~lines 416-972) relies on prior-round evidence, not re-read this audit |
-| payroll (incl. statutory/) | 52 | 0 | 52 | — | approval/finalization/F&F/encashment-adjacent correctness relies on PRIOR rounds (G12 etc.), not re-verified by this audit's own checkpoints |
+| payroll (incl. statutory/) | 52 | 9 | 43 | 0 open-confirmed. 2 found-and-FIXED-same-batch (runs.ts DELETE TOCTOU race; compensation-revisions.ts silent component-copy swallow on approve) — don't count as open | approval/finalization/F&F/encashment-adjacent correctness relies on PRIOR rounds (G12 etc.), not re-verified by this audit's own checkpoints; the 43 remaining files include all 14 statutory/ files (not yet opened) |
 | masters | 29 | 0 | 29 | — | nav-link fixes only; no file-level authz review this audit |
 | ess | 12 | 0 | 12 | — | distinct from the frozen web ESS Context Rail (CLAUDE.md) — this is the unrelated API namespace |
 | onboarding | 8 | 0 | 8 | — | — |
@@ -1789,7 +1789,7 @@ the repository, not estimated.
 | uploads | 1 | 0 | 1 | — | — |
 | whatsapp | 1 | 0 | 1 | — | — |
 | workforce | 1 | 0 | 1 | — | — |
-| **TOTAL (54 rows, 53 namespaces + setup.ts)** | **289** | **102** | **187** | **1 open-confirmed (retroactive.ts dedup — low-severity, read-only observability) — none else currently open; the scoped-policy accrual gap and the two-accrual-system double-credit, both CONFIRMED financial defects as of checkpoint 14, are now FIXED as of checkpoint 15 (migration 470) — see that section below; every other defect found this audit was fixed in the same checkpoint it was found** | **global: hosted Supabase/RLS/storage behavior is never verified anywhere in this tracker — see "Explicitly still blocked" below; PT/TDS/F&F/asset/careers/tenant-licensing rows above rely on evidence from rounds OUTSIDE this specific audit, real but not re-verified here** |
+| **TOTAL (54 rows, 53 namespaces + setup.ts)** | **289** | **111** | **178** | **1 open-confirmed (retroactive.ts dedup — low-severity, read-only observability) — none else currently open; the scoped-policy accrual gap and the two-accrual-system double-credit, both CONFIRMED financial defects as of checkpoint 14, are now FIXED as of checkpoint 15 (migration 470) — see that section below; every other defect found this audit was fixed in the same checkpoint it was found** | **global: hosted Supabase/RLS/storage behavior is never verified anywhere in this tracker — see "Explicitly still blocked" below; PT/TDS/F&F/asset/careers/tenant-licensing rows above rely on evidence from rounds OUTSIDE this specific audit, real but not re-verified here** |
 
 **Checkpoint 14 continuation, second leg**: 4 more files examined —
 `manager-dashboard.ts`, `payroll-summary.ts`, `context.ts` (no defects;
@@ -2334,19 +2334,104 @@ register rather than left implied. Recorded here, verbatim in substance:
    independent of SQL/TS parity — flagged for a future dedicated-refactor
    pass, not fixed inline here since it touches the hot accrual loop.
 
-**Next planned batch**: `payroll` (52 files, the largest remaining
-namespace) — prioritizing, per explicit instruction: salary visibility/
-authorization, calculation inputs, finalization, reversals, statutory
-outputs, payments, accounting, pagination, and cross-module
-reconciliation. Then `masters` (29), `ess` (12), then the long tail of
-1–3-file namespaces. Attendance is NOT being revisited as part of this
-transition — only if a payroll-side change is found to affect an
-attendance code path, or concrete evidence (not re-examination for its
-own sake) surfaces a new attendance defect. Also recommended, not yet
-done: delete the confirmed-100%-dead `AdminDashboard.tsx` / `Dashboard.tsx`
-(zero route registrations, verified in an earlier round) — flagging
-rather than deleting since the session's own destructive-action guard
-declined the delete.
+## Checkpoint 16 — payroll audit begins
+
+Per explicit instruction, moved to the `payroll` namespace (52 files),
+prioritizing in order: salary visibility/authorization, calculation
+inputs, finalization, reversals, statutory outputs, payments, accounting,
+pagination, cross-module reconciliation. Attendance's 64/64 baseline is
+preserved, not revisited (see the precision qualifications recorded
+above). First leg: 9 files examined against the same item-2 checklist —
+`runs.ts` (the central 3991-line run-lifecycle file: finalize, rollback,
+delete, retry-failed, list, export), `slips.ts` (salary visibility/
+authorization), `compensation-master.ts` and `compensation-revisions.ts`
+(salary visibility/authorization + calculation inputs), `accounting.ts`,
+`ledger.ts`, `run-ledgers.ts` (accounting), `reconciliation.ts`
+(cross-module reconciliation action log — the actual compute logic lives
+in `workspace/stats.ts`, outside this namespace, per this file's own
+docstring), `integrity.ts` (snapshot-hash verification + deterministic
+replay — no defect found, already delegates its core logic to
+`payroll-snapshot-engine.ts`).
+
+Two real defects found and fixed, both in the "finalization/reversals"
+and "calculation inputs" priority areas respectively:
+
+1. **`runs.ts` — TOCTOU race in `DELETE /payroll/runs/:id`.** The route's
+   pre-check read `status` in a statement separate from the DELETE, and
+   the DELETE itself filtered only on `id`/`tenant_id` — no status in its
+   WHERE clause. A concurrent finalize landing between the two could let
+   this route hard-delete a now-finalized run and its real payslips,
+   completely bypassing the "finalized runs cannot be deleted" rule the
+   pre-check exists to enforce. Fixed by folding the same status
+   exclusion into the DELETE's own WHERE clause (CAS, not check-then-
+   write) — the identical fix shape this file already applies to its own
+   `finalize_payroll_run_atomic`/`rollback_payroll_run_atomic` paths.
+   **Real-Postgres, genuinely-concurrent proof**
+   (`scripts/db/verify-payroll-run-delete-cas.mjs`, 9/9 checks): Part A
+   holds an uncommitted finalize transaction open on the run row via one
+   live connection while firing the real HTTP DELETE on a second
+   connection — confirmed still blocked ~450ms in, then correctly returns
+   409 once the finalize commits, with the run intact and still
+   'finalized' afterward. Part B is the deterministic counterpart; Part C
+   confirms the happy path (deleting a genuine draft) is unaffected.
+2. **`compensation-revisions.ts` — silent component-copy swallow on
+   `POST /:id/approve`.** This exact function already fixed this precise
+   bug class twice (the supersede-prior-compensation failure and the
+   new-compensation-insert failure both correctly surface a 500, per the
+   file's own comments quoting the user's prior correction: "Previously
+   silently warned + returned success — HR would see 'Revision approved'
+   with the employee's compensation never actually updated"). The THIRD
+   write in the same sequence — copying the new compensation's salary
+   components, scaled for the new CTC — was still only `req.log.warn`-ing
+   on failure and returning a clean success. Left as-is, a failure there
+   leaves the employee's new `employee_compensations` row active with the
+   new CTC but ZERO components; the payroll engine's
+   `fetchActiveCompensation` read would then compute near-zero/warning pay
+   for that employee at the next run, with HR never told anything was
+   wrong. Fixed identically to the two sibling cases. **Verification**:
+   `tsc --noEmit` clean, `vitest` 79/79 files unaffected. Disclosed
+   honestly, not overclaimed: this fix is verified by code inspection and
+   exact pattern-parity with the two adjacent, already-proven error paths
+   in the same function — not by an independent forced-failure real-HTTP
+   proof, since the specific DB constraint needed to deterministically
+   trigger this exact insert failure could not be practically constructed
+   through the black-box API (no client-mocking harness exists for this
+   route) in the time available for this batch.
+
+All other files in this first leg read and found already correct and, in
+several cases, visibly already hardened by prior audit rounds (the
+`finalize`/`rollback` paths in particular: atomic RPCs with advisory
+locking, maker-checker four-eyes approval, explicit documented history of
+prior bugs found and fixed in this exact file). Tenant-scoped, role-gated,
+`fetchAllRows` used wherever unbounded data could exceed PostgREST's
+1,000-row cap, bounded top-N queries correctly left as `.limit()` per
+CLAUDE.md's exception, self-vs-admin salary visibility correctly enforced
+in `slips.ts`/`ledger.ts`/`compensation-master.ts`, cross-tenant FK
+verification already present for every caller-supplied foreign key in
+`compensation-master.ts`'s compensation-assignment write path.
+
+tsc --noEmit clean; vitest 79/79 files, 669/669 tests, zero regressions
+across both fixes in this leg.
+
+**Updated: payroll 9/52 examined (43 remaining) — all 14 `statutory/`
+files are still unopened. Overall: 111/289 examined, 178 remaining.**
+
+**Next planned batch**: continue `payroll` — `statutory-recon.ts`,
+`statutory/*` (14 files — epf, esi, ptax, lwf, tds*, it-statement,
+ytd-statement, hra-declarations, previous-employment, tax-governance,
+governance), `advances.ts`, `loans.ts`, `ess-loans.ts`, `arrears.ts`,
+`adjustments.ts`, `variable-pay.ts`, `fbp.ts`, `reimbursements.ts`,
+`payout-batches.ts`, `bulk-ops.ts`, `forensics.ts`, `investigate.ts`,
+`validation.ts`, `validation-rules.ts`, and the remaining smaller files
+(`context.ts`, `cost.ts`, `forecast.ts`, `governance.ts`,
+`ops-dashboard.ts`, `run-diagnostics.ts`, `scheduler-monitor.ts`,
+`simulate.ts`, `snapshots.ts`, `approval-stages.ts`, `exports.ts`,
+`filing-pack.ts`, `index.ts`). Then `masters` (29), `ess` (12), then the
+long tail of 1–3-file namespaces. Also recommended, not yet done: delete
+the confirmed-100%-dead `AdminDashboard.tsx` / `Dashboard.tsx` (zero route
+registrations, verified in an earlier round) — flagging rather than
+deleting since the session's own destructive-action guard declined the
+delete.
 
 ### Separate totals: frontend pages, shared services, migrations
 
