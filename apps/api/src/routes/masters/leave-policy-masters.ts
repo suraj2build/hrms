@@ -152,24 +152,21 @@ export default async function leavePolicyMastersRoutes(fastify: FastifyInstance)
       })
     }
 
-    // If setting is_default=true, clear existing default first (atomic via trigger
-    // would be ideal, but here we do it manually in a transaction-like pattern).
-    if (parsed.data.is_default) {
-      await fastify.supabase
-        .from('leave_policy_masters')
-        .update({ is_default: false, updated_at: new Date().toISOString() })
-        .eq('tenant_id', req.tenantId)
-        .eq('is_default', true)
-    }
-
+    // SYSTEM_AUDIT_2026-10-14 (checkpoint 27): demoting the current default
+    // and inserting the new row used to be two separate, unguarded calls —
+    // if the insert then failed (most plausibly a duplicate name), the
+    // demote had already committed, leaving the tenant with ZERO default
+    // policies. Fused into one atomic transaction (migration 482): the
+    // function's own INSERT failing rolls back its own demote UPDATE too.
     const { data, error } = await fastify.supabase
-      .from('leave_policy_masters')
-      .insert({
-        tenant_id:   req.tenantId,
-        ...parsed.data,
+      .rpc('create_leave_policy_master_atomic', {
+        p_tenant_id:   req.tenantId,
+        p_name:        parsed.data.name,
+        p_description: parsed.data.description ?? null,
+        p_is_default:  parsed.data.is_default,
+        p_year_type:   parsed.data.year_type,
+        p_is_active:   parsed.data.is_active,
       })
-      .select('id, name, description, is_default, year_type, is_active, cas_version, created_at')
-      .single()
 
     if (error) {
       if (error.code === '23505') {
@@ -193,16 +190,22 @@ export default async function leavePolicyMastersRoutes(fastify: FastifyInstance)
       return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create policy')
     }
 
+    const row: any = data
+    const responseData = {
+      id: row.id, name: row.name, description: row.description, is_default: row.is_default,
+      year_type: row.year_type, is_active: row.is_active, cas_version: row.cas_version, created_at: row.created_at,
+    }
+
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
       tableName:   'leave_policy_masters',
-      recordId:    (data as any).id,
+      recordId:    row.id,
       action:      'INSERT',
       performedBy: req.userId,
-      newData:     data,
+      newData:     responseData,
     })
 
-    return reply.code(201).send({ data })
+    return reply.code(201).send({ data: responseData })
   })
 
   // ── PUT /:id ───────────────────────────────────────────────────────────────
@@ -232,31 +235,22 @@ export default async function leavePolicyMastersRoutes(fastify: FastifyInstance)
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Policy not found' })
     }
 
-    // If promoting to default, demote the current default
-    if (fields.is_default === true) {
-      await fastify.supabase
-        .from('leave_policy_masters')
-        .update({ is_default: false, updated_at: new Date().toISOString() })
-        .eq('tenant_id', req.tenantId)
-        .eq('is_default', true)
-        .neq('id', id)
-    }
-
-    let query = fastify.supabase
-      .from('leave_policy_masters')
-      .update({ ...fields, updated_at: new Date().toISOString() })
-      .eq('id', id)
-      .eq('tenant_id', req.tenantId)
-    // PEND-105: optimistic-concurrency check — only applied when the caller
-    // sends expected_version (see updateSchema comment above). This table's
-    // CAS token is `cas_version`, NOT the pre-existing `version` column
-    // (that one is the draft→published governance counter — see updateSchema
-    // comment).
-    if (expected_version !== undefined) query = query.eq('cas_version', expected_version)
-
-    const { data, error } = await query
-      .select('id, name, description, is_default, year_type, is_active, cas_version, updated_at')
-      .maybeSingle()
+    // SYSTEM_AUDIT_2026-10-14 (checkpoint 27): demoting the current default
+    // and updating the target row used to be two separate, unguarded calls —
+    // if the update then failed (duplicate name, or a CAS mismatch matching
+    // 0 rows), the demote had already committed, leaving the tenant with
+    // ZERO default policies. Fused into one atomic transaction (migration
+    // 482) — the function's own UPDATE failing (exception) or matching 0
+    // rows (no exception, just an all-null return) both leave the demote
+    // step's effects intact only when the demote itself was the one that
+    // mattered, i.e. never silently orphaned.
+    const { data, error } = await fastify.supabase
+      .rpc('update_leave_policy_master_atomic', {
+        p_tenant_id:        req.tenantId,
+        p_id:               id,
+        p_fields:           fields,
+        p_expected_version: expected_version ?? null,
+      })
 
     if (error) {
       if (error.code === '23505') {
@@ -268,26 +262,34 @@ export default async function leavePolicyMastersRoutes(fastify: FastifyInstance)
         }
         return reply.code(409).send({ error: 'DUPLICATE', message: 'A policy with that name already exists' })
       }
+      if (error.message?.includes('NO_ROWS_MATCHED:')) {
+        // The RPC raises this (instead of just returning an empty result)
+        // specifically so a CAS mismatch rolls back its own demote step too
+        // — see migration 482. 0 rows matched — either the record doesn't
+        // exist, or it does but `cas_version` moved on since expected_version
+        // was read. Disambiguate with a plain existence check so a
+        // genuinely-deleted record still reports 404, not a confusing 409.
+        if (expected_version !== undefined) {
+          const { data: exists } = await fastify.supabase
+            .from('leave_policy_masters')
+            .select('id')
+            .eq('id', id)
+            .eq('tenant_id', req.tenantId)
+            .maybeSingle()
+          if (exists) {
+            return conflictError(reply, ErrorCode.VERSION_CONFLICT,
+              'This policy was changed by someone else. Reload and try again.')
+          }
+        }
+        return reply.code(404).send({ error: 'NOT_FOUND', message: 'Policy not found' })
+      }
       return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update policy')
     }
-    if (!data) {
-      // 0 rows matched — either the record doesn't exist, or it does but
-      // `cas_version` moved on since expected_version was read. Disambiguate
-      // with a plain existence check so a genuinely-deleted record still
-      // reports 404, not a confusing 409.
-      if (expected_version !== undefined) {
-        const { data: exists } = await fastify.supabase
-          .from('leave_policy_masters')
-          .select('id')
-          .eq('id', id)
-          .eq('tenant_id', req.tenantId)
-          .maybeSingle()
-        if (exists) {
-          return conflictError(reply, ErrorCode.VERSION_CONFLICT,
-            'This policy was changed by someone else. Reload and try again.')
-        }
-      }
-      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Policy not found' })
+
+    const row: any = data
+    const responseData = {
+      id: row.id, name: row.name, description: row.description, is_default: row.is_default,
+      year_type: row.year_type, is_active: row.is_active, cas_version: row.cas_version, updated_at: row.updated_at,
     }
 
     await logAction(fastify.supabase, {
@@ -300,7 +302,7 @@ export default async function leavePolicyMastersRoutes(fastify: FastifyInstance)
       newData:     fields,
     })
 
-    return reply.send({ data })
+    return reply.send({ data: responseData })
   })
 
   // ── DELETE /:id ────────────────────────────────────────────────────────────

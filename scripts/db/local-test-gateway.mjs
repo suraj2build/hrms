@@ -503,6 +503,29 @@ async function getFnArgTypes(client, fnName) {
   return map
 }
 
+// Cache of fnName -> boolean (pg_proc.proretset): whether the function
+// RETURNS SETOF/TABLE (a genuine row set — real PostgREST wraps these in a
+// JSON array) vs a plain single-row type like `RETURNS leave_policy_masters`
+// (a named composite, singular — real PostgREST returns that as ONE JSON
+// object, same as a scalar JSON/JSONB-returning function, with no `.single()`
+// needed client-side). Found via create_leave_policy_master_atomic /
+// update_leave_policy_master_atomic (SYSTEM_AUDIT_2026-10-14 checkpoint 27):
+// before this, the RPC handler always returned `result.rows` (an array) for
+// any non-scalar result, so a client expecting the real-PostgREST singular
+// shape for a `RETURNS <composite>` function saw an array instead and its
+// field reads came back undefined.
+const fnReturnsSetCache = new Map()
+async function getFnReturnsSet(client, fnName) {
+  if (fnReturnsSetCache.has(fnName)) return fnReturnsSetCache.get(fnName)
+  const { rows } = await client.query(
+    `SELECT proretset FROM pg_proc WHERE proname = $1 AND pronamespace = 'public'::regnamespace LIMIT 1`,
+    [fnName],
+  )
+  const returnsSet = rows[0]?.proretset ?? true // unknown function: default to the old (array) behavior
+  fnReturnsSetCache.set(fnName, returnsSet)
+  return returnsSet
+}
+
 async function handleRest(req, res, pathname, searchParams, role, claims) {
   const client = await pool.connect()
   try {
@@ -573,6 +596,14 @@ async function handleRest(req, res, pathname, searchParams, role, claims) {
       // (e.g. emp.id) silently gets undefined.
       if (result.rows.length === 1 && Object.keys(result.rows[0]).length === 1 && Object.keys(result.rows[0])[0] === fnName) {
         return sendJson(res, 200, result.rows[0][fnName])
+      }
+      // A plain `RETURNS <composite>` function (not SETOF/TABLE) is singular
+      // in real PostgREST — one JSON object, never array-wrapped, same as a
+      // scalar JSON-returning function above. Only a genuine SETOF/TABLE
+      // function returns the JSON-array shape.
+      const returnsSet = await getFnReturnsSet(client, fnName)
+      if (!returnsSet) {
+        return sendJson(res, 200, result.rows[0] ?? null)
       }
       return sendJson(res, 200, result.rows)
     }
