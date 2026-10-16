@@ -1735,7 +1735,7 @@ the repository, not estimated.
 
 | Module (route namespace) | Total files | Examined (this audit) | Remaining | Open defects | Blocked verification |
 |---|---|---|---|---|---|
-| attendance | 64 | 38 | 26 | 1 open-confirmed (retroactive.ts dedup — low-severity, read-only observability, disclosed not fixed). 8 found-and-FIXED-same-batch (roster-api.ts pagination ×2, roster-calendar.ts rotation-members pagination, leave-reconciliation.ts breakdown-aggregation, writeLedgerEntry idempotency + atomicity, regularisation-policy.ts SLA-breach-reject chain orphaning, **scoped-policy accrual gap (migration 470 + `leave-entitlement-service.ts` scope-chain resolver — see checkpoint 15)**, **two-accrual-system double-credit (migration 470 execution-time guard — see checkpoint 15)** — don't count as open) | — |
+| attendance | 64 | 51 | 13 | 1 open-confirmed (retroactive.ts dedup — low-severity, read-only observability, disclosed not fixed). 9 found-and-FIXED-same-batch (roster-api.ts pagination ×2, roster-calendar.ts rotation-members pagination, leave-reconciliation.ts breakdown-aggregation, writeLedgerEntry idempotency + atomicity, regularisation-policy.ts SLA-breach-reject chain orphaning, scoped-policy accrual gap (migration 470 + `leave-entitlement-service.ts` scope-chain resolver), two-accrual-system double-credit (migration 470 execution-time guard), **reconciliation.ts's `/attendance/reconciliation/open` capped-breakdown undercounting (same bug class as leave-reconciliation.ts, same fix)** — don't count as open) | — |
 | employees | 31 | 31 | 0 | 0 | separation-workflow.ts F&F section (~lines 416-972) relies on prior-round evidence, not re-read this audit |
 | payroll (incl. statutory/) | 52 | 0 | 52 | — | approval/finalization/F&F/encashment-adjacent correctness relies on PRIOR rounds (G12 etc.), not re-verified by this audit's own checkpoints |
 | masters | 29 | 0 | 29 | — | nav-link fixes only; no file-level authz review this audit |
@@ -1789,7 +1789,7 @@ the repository, not estimated.
 | uploads | 1 | 0 | 1 | — | — |
 | whatsapp | 1 | 0 | 1 | — | — |
 | workforce | 1 | 0 | 1 | — | — |
-| **TOTAL (54 rows, 53 namespaces + setup.ts)** | **289** | **76** | **213** | **1 open-confirmed (retroactive.ts dedup — low-severity, read-only observability) — none else currently open; the scoped-policy accrual gap and the two-accrual-system double-credit, both CONFIRMED financial defects as of checkpoint 14, are now FIXED as of checkpoint 15 (migration 470) — see that section below; every other defect found this audit was fixed in the same checkpoint it was found** | **global: hosted Supabase/RLS/storage behavior is never verified anywhere in this tracker — see "Explicitly still blocked" below; PT/TDS/F&F/asset/careers/tenant-licensing rows above rely on evidence from rounds OUTSIDE this specific audit, real but not re-verified here** |
+| **TOTAL (54 rows, 53 namespaces + setup.ts)** | **289** | **89** | **200** | **1 open-confirmed (retroactive.ts dedup — low-severity, read-only observability) — none else currently open; the scoped-policy accrual gap and the two-accrual-system double-credit, both CONFIRMED financial defects as of checkpoint 14, are now FIXED as of checkpoint 15 (migration 470) — see that section below; every other defect found this audit was fixed in the same checkpoint it was found** | **global: hosted Supabase/RLS/storage behavior is never verified anywhere in this tracker — see "Explicitly still blocked" below; PT/TDS/F&F/asset/careers/tenant-licensing rows above rely on evidence from rounds OUTSIDE this specific audit, real but not re-verified here** |
 
 **Checkpoint 14 continuation, second leg**: 4 more files examined —
 `manager-dashboard.ts`, `payroll-summary.ts`, `context.ts` (no defects;
@@ -2148,24 +2148,52 @@ attendance namespace's only remaining open-confirmed defect is
 `retroactive.ts`'s detect-dedup gap (low-severity, disclosed, not fixed —
 see Part 4 of the regularisation-cluster entry above).
 
-**Next planned batch**: resume tier 2 of `attendance` (26 files remaining
-there, per the updated count above) — `queue-actions.ts`, `status.ts`,
-`last-run.ts`, `run-details.ts`, `run-export.ts`, `sample-csv.ts`,
-`who-is-in.ts`, `work-sessions.ts`, `debug-raw.ts`, `audit.ts`,
-`force-unlock.ts`, `reconciliation.ts`/`reconciliation-validate.ts`, and
-the intelligence/anomaly/forensics/confidence/risk cluster (`anomalies.ts`,
-`anomaly-reconcile.ts`, `confidence.ts`, `forensics.ts`, `health-index.ts`,
-`inference.ts`, `intelligence.ts`, `risk.ts`, `timeline-intelligence.ts`,
-`workforce-optimization.ts`, `pipeline-stats.ts`, `policy-conflicts.ts`,
-`simulate-policy.ts` — already de-emphasized per CLAUDE.md's 2026-10-11
-admin-load philosophy decision, so a lighter pass is appropriate there,
-not full per-route authorization re-derivation). Then `payroll` (52,
-largest remaining namespace), `masters` (29), `ess` (12), then the
-long tail of 1-3-file namespaces. Also recommended, not yet done: delete
-the confirmed-100%-dead `AdminDashboard.tsx` / `Dashboard.tsx` (zero route
-registrations, verified in an earlier round) — flagging rather than
-deleting since the session's own destructive-action guard declined the
-delete.
+**Checkpoint 15 continuation, sixth leg**: 13 more files examined —
+`queue-actions.ts`, `status.ts`, `last-run.ts`, `run-details.ts`,
+`run-export.ts`, `sample-csv.ts`, `who-is-in.ts`, `work-sessions.ts`,
+`debug-raw.ts`, `audit.ts`, `force-unlock.ts`, `reconciliation.ts`,
+`reconciliation-validate.ts`. One real defect found and fixed:
+`reconciliation.ts`'s `GET /attendance/reconciliation/open` had the exact
+same capped-breakdown bug class already found and fixed in the sibling
+`leave-reconciliation.ts` earlier this audit — `by_type`/`by_severity`
+were aggregated from the same `data` page capped at `limit` (≤200), so a
+tenant with more unresolved issues than that cap got a silently
+undercounted breakdown while `total` (an exact count) stayed correct.
+Fixed identically: the breakdown is now derived from a dedicated
+`fetchAllRows` pull of just the grouping columns. **Real-Postgres +
+real-HTTP proof** (`scripts/db/verify-attendance-reconciliation-open-
+breakdown.mjs`): seeds 210 unresolved issues across two types/severities,
+calls the real endpoint with `limit=20`, confirms `total=210`,
+`data.length=20` (capped page unchanged), and `by_type`/`by_severity` sum
+to 210, not 20 — 7/7 checks PASS. The other 12 files were read and found
+already correct: tenant-scoped, role-gated (`HR_ADMIN_ROLES` or
+`MANAGER_ROLES` as appropriate — `who-is-in.ts` correctly scopes managers
+to direct reports via `manager_id`), `fetchAllRows` used everywhere
+unbounded data could exceed PostgREST's 1,000-row cap (`run-export.ts`,
+`who-is-in.ts`, `work-sessions.ts`'s month-range routes, `debug-raw.ts`),
+intentionally bounded top-N queries correctly left as `.limit()`/`.range()`
+per CLAUDE.md's exception (`last-run.ts`, `run-details.ts`'s list route,
+`audit.ts`, `work-sessions.ts`'s anomaly browse/search), and CAS-correct
+lock/unlock in `work-sessions.ts` (the authoritative guard is the
+`payroll_locked` WHERE clause folded into the UPDATE itself, not the
+friendly pre-check read, so a concurrent request can't race it).
+**Updated: attendance 51/64 examined (13 remaining); overall 89/289
+examined, 200 remaining.**
+
+**Next planned batch**: finish tier 2 of `attendance` (13 files
+remaining) — the intelligence/anomaly/forensics/confidence/risk cluster
+(`anomalies.ts`, `anomaly-reconcile.ts`, `confidence.ts`, `forensics.ts`,
+`health-index.ts`, `inference.ts`, `intelligence.ts`, `risk.ts`,
+`timeline-intelligence.ts`, `workforce-optimization.ts`,
+`pipeline-stats.ts`, `policy-conflicts.ts`, `simulate-policy.ts` —
+already de-emphasized per CLAUDE.md's 2026-10-11 admin-load philosophy
+decision, so a lighter pass is appropriate there, not full per-route
+authorization re-derivation). Then `payroll` (52, largest remaining
+namespace), `masters` (29), `ess` (12), then the long tail of 1-3-file
+namespaces. Also recommended, not yet done: delete the confirmed-100%-dead
+`AdminDashboard.tsx` / `Dashboard.tsx` (zero route registrations, verified
+in an earlier round) — flagging rather than deleting since the session's
+own destructive-action guard declined the delete.
 
 ### Separate totals: frontend pages, shared services, migrations
 
