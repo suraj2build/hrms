@@ -1735,7 +1735,7 @@ the repository, not estimated.
 
 | Module (route namespace) | Total files | Examined (this audit) | Remaining | Open defects | Blocked verification |
 |---|---|---|---|---|---|
-| attendance | 64 | 51 | 13 | 1 open-confirmed (retroactive.ts dedup — low-severity, read-only observability, disclosed not fixed). 9 found-and-FIXED-same-batch (roster-api.ts pagination ×2, roster-calendar.ts rotation-members pagination, leave-reconciliation.ts breakdown-aggregation, writeLedgerEntry idempotency + atomicity, regularisation-policy.ts SLA-breach-reject chain orphaning, scoped-policy accrual gap (migration 470 + `leave-entitlement-service.ts` scope-chain resolver), two-accrual-system double-credit (migration 470 execution-time guard), **reconciliation.ts's `/attendance/reconciliation/open` capped-breakdown undercounting (same bug class as leave-reconciliation.ts, same fix)** — don't count as open) | — |
+| attendance | 64 | 64 | 0 | 1 open-confirmed (retroactive.ts dedup — low-severity, read-only observability, disclosed not fixed). 14 found-and-FIXED-same-batch (roster-api.ts pagination ×2, roster-calendar.ts rotation-members pagination, leave-reconciliation.ts breakdown-aggregation, writeLedgerEntry idempotency + atomicity, regularisation-policy.ts SLA-breach-reject chain orphaning, scoped-policy accrual gap (migration 470 + `leave-entitlement-service.ts` scope-chain resolver), two-accrual-system double-credit (migration 470 execution-time guard), reconciliation.ts's `/attendance/reconciliation/open` capped-breakdown undercounting, **workforce-optimization.ts missing-authz on 7 routes, health-index.ts department/tenant pagination, 4-file DECIMAL-string-coercion NaN bug, risk.ts `/summary` pagination, risk.ts non-deterministic pagination tie-breaker** — don't count as open) | — |
 | employees | 31 | 31 | 0 | 0 | separation-workflow.ts F&F section (~lines 416-972) relies on prior-round evidence, not re-read this audit |
 | payroll (incl. statutory/) | 52 | 0 | 52 | — | approval/finalization/F&F/encashment-adjacent correctness relies on PRIOR rounds (G12 etc.), not re-verified by this audit's own checkpoints |
 | masters | 29 | 0 | 29 | — | nav-link fixes only; no file-level authz review this audit |
@@ -1789,7 +1789,7 @@ the repository, not estimated.
 | uploads | 1 | 0 | 1 | — | — |
 | whatsapp | 1 | 0 | 1 | — | — |
 | workforce | 1 | 0 | 1 | — | — |
-| **TOTAL (54 rows, 53 namespaces + setup.ts)** | **289** | **89** | **200** | **1 open-confirmed (retroactive.ts dedup — low-severity, read-only observability) — none else currently open; the scoped-policy accrual gap and the two-accrual-system double-credit, both CONFIRMED financial defects as of checkpoint 14, are now FIXED as of checkpoint 15 (migration 470) — see that section below; every other defect found this audit was fixed in the same checkpoint it was found** | **global: hosted Supabase/RLS/storage behavior is never verified anywhere in this tracker — see "Explicitly still blocked" below; PT/TDS/F&F/asset/careers/tenant-licensing rows above rely on evidence from rounds OUTSIDE this specific audit, real but not re-verified here** |
+| **TOTAL (54 rows, 53 namespaces + setup.ts)** | **289** | **102** | **187** | **1 open-confirmed (retroactive.ts dedup — low-severity, read-only observability) — none else currently open; the scoped-policy accrual gap and the two-accrual-system double-credit, both CONFIRMED financial defects as of checkpoint 14, are now FIXED as of checkpoint 15 (migration 470) — see that section below; every other defect found this audit was fixed in the same checkpoint it was found** | **global: hosted Supabase/RLS/storage behavior is never verified anywhere in this tracker — see "Explicitly still blocked" below; PT/TDS/F&F/asset/careers/tenant-licensing rows above rely on evidence from rounds OUTSIDE this specific audit, real but not re-verified here** |
 
 **Checkpoint 14 continuation, second leg**: 4 more files examined —
 `manager-dashboard.ts`, `payroll-summary.ts`, `context.ts` (no defects;
@@ -2180,20 +2180,91 @@ friendly pre-check read, so a concurrent request can't race it).
 **Updated: attendance 51/64 examined (13 remaining); overall 89/289
 examined, 200 remaining.**
 
-**Next planned batch**: finish tier 2 of `attendance` (13 files
-remaining) — the intelligence/anomaly/forensics/confidence/risk cluster
-(`anomalies.ts`, `anomaly-reconcile.ts`, `confidence.ts`, `forensics.ts`,
-`health-index.ts`, `inference.ts`, `intelligence.ts`, `risk.ts`,
-`timeline-intelligence.ts`, `workforce-optimization.ts`,
-`pipeline-stats.ts`, `policy-conflicts.ts`, `simulate-policy.ts` —
-already de-emphasized per CLAUDE.md's 2026-10-11 admin-load philosophy
-decision, so a lighter pass is appropriate there, not full per-route
-authorization re-derivation). Then `payroll` (52, largest remaining
-namespace), `masters` (29), `ess` (12), then the long tail of 1-3-file
-namespaces. Also recommended, not yet done: delete the confirmed-100%-dead
-`AdminDashboard.tsx` / `Dashboard.tsx` (zero route registrations, verified
-in an earlier round) — flagging rather than deleting since the session's
-own destructive-action guard declined the delete.
+**Checkpoint 15 continuation, seventh leg — `attendance` namespace
+COMPLETE (64/64)**: the final 13 files — the intelligence/anomaly/
+forensics/confidence/risk cluster (`anomalies.ts`, `anomaly-reconcile.ts`,
+`confidence.ts`, `forensics.ts`, `health-index.ts`, `inference.ts`,
+`intelligence.ts`, `risk.ts`, `timeline-intelligence.ts`,
+`workforce-optimization.ts`, `pipeline-stats.ts`, `policy-conflicts.ts`,
+`simulate-policy.ts`) — were examined despite being de-emphasized per
+CLAUDE.md's admin-load philosophy decision; the lighter pass still
+surfaced 5 real defects, most severe first:
+
+1. **`workforce-optimization.ts` — missing authorization on 7 of 9
+   routes.** `fairness-balance`, `consecutive-shifts`, `rest-gaps`,
+   `ot-distribution`, `staffing-hints`, `shift-overload`, and `hints` had
+   `fastify.authenticate` only — no role check — unlike every sibling file
+   in this same cluster (`anomalies.ts`, `confidence.ts`, `health-index.ts`,
+   `inference.ts`), which all gate reads behind `HR_ADMIN_ROLES`. Any
+   authenticated employee could read every coworker's name alongside OT
+   fairness scores, weekend/night fairness, rest-gap and consecutive-shift
+   violations, and shift-overload status, tenant-wide. Fixed by adding the
+   same `requireAdmin()` gate already used by this file's two write
+   routes. **Real-HTTP proof** (`scripts/db/verify-workforce-optimization-
+   admin-gate.mjs`): a plain `'employee'` role gets 403 on all 7 routes;
+   `'hr_admin'` gets 200 — 14/14 checks PASS.
+2. **`health-index.ts` — department/tenant aggregation pagination gap.**
+   `POST /attendance/health-index/compute`'s department/tenant branches
+   read `attendance_health_scores` with a plain, unpaginated `.select()`,
+   silently truncating at PostgREST's 1,000-row ceiling for a tenant with
+   >1,000 scored employees — the CLAUDE.md-flagged bug class. Fixed with
+   `fetchAllRows()`.
+3. **DECIMAL-column string-coercion NaN bug, 4 files.** `health_score`,
+   `confidence_score`, `confidence_penalty`, `risk_score`, and the three
+   fairness-score columns are all `DECIMAL(5,2)`, which can come back as a
+   string rather than a JS number; `+=`/`.reduce()` on an uncoerced string
+   concatenates instead of summing, producing `NaN`, which serializes as
+   JSON `null` and is rejected by a `NOT NULL` constraint on write —
+   confirmed empirically (fix #2's own verification failed with exactly
+   this Postgres error before this coercion fix landed alongside it).
+   Fixed with `Number(...)` at every read site, matching the
+   `Number(row.days)` pattern already used elsewhere in this codebase
+   (`leave.ts`, `leave-accrual-lifecycle.ts`): `health-index.ts`,
+   `confidence.ts` (3 spots), `inference.ts`, `workforce-optimization.ts`.
+   **Real-Postgres proof** (`scripts/db/verify-health-index-aggregation-
+   pagination.mjs`): seeds 1,050 rows (1,000 @ 50.00, 50 @ 90.00), confirms
+   the persisted tenant-scope average is the true weighted average
+   (51.90), not `NaN`/`null` and not the wrong capped-page value.
+4. **`risk.ts` — `GET /attendance/risk/summary` pagination gap**, the
+   identical plain-select 1,000-row-ceiling bug as #2, plus the same
+   DECIMAL string-coercion bug on `risk_score`. **Real-Postgres proof**
+   (`scripts/db/verify-risk-summary-pagination.mjs`): seeds 1,050
+   employees (1,000 @ score 10/level `'low'`, 50 @ score 80/level
+   `'critical'`), confirms `total_employees=1050` and
+   `avg_risk_score=13.33` (the true average), not capped at 1000.
+5. **`risk.ts` — non-deterministic pagination sort key**, found while
+   fixing #4. `POST /attendance/risk/compute` stamps every row in one
+   batch with the SAME `computed_at` (one `now` reused across the whole
+   upsert), so `ORDER BY computed_at` alone is not a stable sort key:
+   OFFSET-based `.range()` pagination over ties can skip or duplicate rows
+   across page boundaries — the exact instability this module's own
+   `supabase-paginate.ts` already documents as a known risk class (see its
+   `fetchAllRowsByKeyset` comment). Fixed by adding a unique `id`
+   tie-breaker to both the `/summary` `fetchAllRows` loop and the
+   `/attendance/risk` list route's `ORDER BY`. **Real-Postgres proof**
+   (`scripts/db/verify-risk-list-pagination-stability.mjs`): seeds 1,050
+   rows with IDENTICAL `risk_score` AND `computed_at` (the worst case),
+   pages through the real endpoint, confirms every id appears exactly
+   once — no skips, no duplicates.
+
+All other files in this final batch read and found already correct:
+tenant-scoped, role-gated, `fetchAllRows` used wherever unbounded data
+could exceed PostgREST's 1,000-row cap, bounded top-N queries correctly
+left as `.limit()`/`.range()` per CLAUDE.md's exception, single-employee/
+single-date routes correctly scoped and bounded by construction
+(`forensics.ts`, `timeline-intelligence.ts`), a stateless read-only
+simulation with no DB writes (`simulate-policy.ts`).
+
+**Updated: attendance 64/64 examined (0 remaining) — namespace complete.
+Overall: 102/289 examined, 187 remaining.**
+
+**Next planned batch**: `payroll` (52 files, the largest remaining
+namespace), then `masters` (29), `ess` (12), then the long tail of
+1–3-file namespaces. Also recommended, not yet done: delete the
+confirmed-100%-dead `AdminDashboard.tsx` / `Dashboard.tsx` (zero route
+registrations, verified in an earlier round) — flagging rather than
+deleting since the session's own destructive-action guard declined the
+delete.
 
 ### Separate totals: frontend pages, shared services, migrations
 
