@@ -1737,7 +1737,7 @@ the repository, not estimated.
 |---|---|---|---|---|---|
 | attendance | 64 | 64 | 0 | 1 open-confirmed (retroactive.ts dedup — low-severity, read-only observability, disclosed not fixed). 14 found-and-FIXED-same-batch (roster-api.ts pagination ×2, roster-calendar.ts rotation-members pagination, leave-reconciliation.ts breakdown-aggregation, writeLedgerEntry idempotency + atomicity, regularisation-policy.ts SLA-breach-reject chain orphaning, scoped-policy accrual gap (migration 470 + `leave-entitlement-service.ts` scope-chain resolver), two-accrual-system double-credit (migration 470 execution-time guard), reconciliation.ts's `/attendance/reconciliation/open` capped-breakdown undercounting, **workforce-optimization.ts missing-authz on 7 routes, health-index.ts department/tenant pagination, 4-file DECIMAL-string-coercion NaN bug, risk.ts `/summary` pagination, risk.ts non-deterministic pagination tie-breaker** — don't count as open) | — |
 | employees | 31 | 31 | 0 | 0 | separation-workflow.ts F&F section (~lines 416-972) relies on prior-round evidence, not re-read this audit |
-| payroll (incl. statutory/) | 52 | 28 | 24 | **1 open-confirmed, HIGH SEVERITY, disclosed-not-fixed, spans 3 files**: arrears.ts, variable-pay.ts, and adjustments.ts each have a complete, well-hardened create→approve workflow whose end state (`arrear_records`/`arrear_payouts`, `variable_payouts`, `payroll_adjustments`) is **never read by `payroll-engine.ts` or `payroll-snapshot-engine.ts`** — approving one changes nothing about what any employee is actually paid. See checkpoint 18 below for the full writeup and decision proposal; blocked pending a product decision, not attempted as a same-batch fix given its design scope (same class of work G12's encashment payout took 3 rounds to get right). 5 found-and-FIXED-same-batch (runs.ts DELETE TOCTOU race; compensation-revisions.ts silent component-copy swallow → rebuilt fully atomic; advances.ts /recover guaranteed-NOT-NULL-violation + stuck-schedule torn write; loans.ts /record-payment identical guaranteed-NOT-NULL-violation + non-idempotent retry; record_loan_payment_atomic (migration 396) column-ambiguity bug that made the function fail on every call since it was created — silently breaking runs.ts's own automatic loan-balance sweep this whole time) — don't count those 5 as open | approval/finalization/F&F/encashment-adjacent correctness relies on PRIOR rounds (G12 etc.), not re-verified by this audit's own checkpoints; the 38 remaining files include all 14 statutory/ files (not yet opened) |
+| payroll (incl. statutory/) | 52 | 28 | 24 | **0 open-confirmed.** The HIGH SEVERITY arrears/variable-pay/adjustments payroll-integration gap (checkpoint 18) is now FIXED as of checkpoint 22 (migrations 476-480) — see that section below; not left disclosed-only, per explicit instruction not to de-scope it. 6 found-and-FIXED-same-batch total (runs.ts DELETE TOCTOU race; compensation-revisions.ts silent component-copy swallow → rebuilt fully atomic; advances.ts /recover guaranteed-NOT-NULL-violation + stuck-schedule torn write; loans.ts /record-payment identical guaranteed-NOT-NULL-violation + non-idempotent retry; record_loan_payment_atomic (migration 396) column-ambiguity bug that made the function fail on every call since it was created — silently breaking runs.ts's own automatic loan-balance sweep this whole time; the arrears/variable-pay/adjustments payroll-integration gap itself) — don't count as open | approval/finalization/F&F/encashment-adjacent correctness relies on PRIOR rounds (G12 etc.), not re-verified by this audit's own checkpoints; the 24 remaining files include all 14 statutory/ files (not yet opened) |
 | masters | 29 | 0 | 29 | — | nav-link fixes only; no file-level authz review this audit |
 | ess | 12 | 0 | 12 | — | distinct from the frozen web ESS Context Rail (CLAUDE.md) — this is the unrelated API namespace |
 | onboarding | 8 | 0 | 8 | — | — |
@@ -1789,7 +1789,7 @@ the repository, not estimated.
 | uploads | 1 | 0 | 1 | — | — |
 | whatsapp | 1 | 0 | 1 | — | — |
 | workforce | 1 | 0 | 1 | — | — |
-| **TOTAL (54 rows, 53 namespaces + setup.ts)** | **289** | **130** | **159** | **2 open-confirmed: (1) retroactive.ts dedup — low-severity, read-only observability; (2) arrears/variable-pay/adjustments payroll-engine disconnect — HIGH SEVERITY, see checkpoint 18 — none else currently open; the scoped-policy accrual gap and the two-accrual-system double-credit, both CONFIRMED financial defects as of checkpoint 14, are now FIXED as of checkpoint 15 (migration 470) — see that section below; every other defect found this audit was fixed in the same checkpoint it was found** | **global: hosted Supabase/RLS/storage behavior is never verified anywhere in this tracker — see "Explicitly still blocked" below; PT/TDS/F&F/asset/careers/tenant-licensing rows above rely on evidence from rounds OUTSIDE this specific audit, real but not re-verified here** |
+| **TOTAL (54 rows, 53 namespaces + setup.ts)** | **289** | **130** | **159** | **1 open-confirmed: retroactive.ts dedup — low-severity, read-only observability. The arrears/variable-pay/adjustments payroll-engine disconnect (checkpoint 18, HIGH SEVERITY) is FIXED as of checkpoint 22 — see that section below; none else currently open; the scoped-policy accrual gap and the two-accrual-system double-credit, both CONFIRMED financial defects as of checkpoint 14, are now FIXED as of checkpoint 15 (migration 470) — see that section below; every other defect found this audit was fixed in the same checkpoint it was found** | **global: hosted Supabase/RLS/storage behavior is never verified anywhere in this tracker — see "Explicitly still blocked" below; PT/TDS/F&F/asset/careers/tenant-licensing rows above rely on evidence from rounds OUTSIDE this specific audit, real but not re-verified here** |
 
 **Checkpoint 14 continuation, second leg**: 4 more files examined —
 `manager-dashboard.ts`, `payroll-summary.ts`, `context.ts` (no defects;
@@ -2788,6 +2788,87 @@ No code changed. tsc --noEmit clean; vitest 79/79 files, 669/669 tests.
 
 **Updated: payroll 28/52 examined (24 remaining). Overall: 130/289
 examined, 159 remaining.**
+
+## Checkpoint 22 — FIXED: the arrears/variable-pay/adjustments payroll-integration gap (checkpoint 18)
+
+Per explicit standing instruction not to de-scope this as an existing
+approved workflow: traced consumers again from scratch (confirmed the
+same zero-consumption result independently, and additionally confirmed
+via grep that `arrear_batches`/`variable_payout_batches`/`variable_payouts`
+have no FK to `payroll_runs` at all — unlike `leave_encashment_requests`/
+`payroll_adjustments`, which already have one with `ON DELETE SET NULL`,
+confirmed via `pg_constraint`), then built the full integration mirroring
+G12's leave-encashment pattern (migration 447) exactly:
+
+- **`payroll-engine.ts`**: `applyArrearsPayout` / `applyVariablePayPayout`
+  / `applyAdjustmentPayout`, applied AFTER the regular monthly TDS
+  projection (same reasoning as `applyEncashmentPayout` — a one-time
+  addition must not get multiplied across the projection's remaining
+  months). The flat-marginal-slab TDS computation was factored out of
+  `accrual-engine.ts`'s `computeEncashmentPayout` into a shared,
+  exported `computeFlatMarginalTds` — reused for arrears (always taxable
+  — back-pay of recurring salary) and variable pay (per its own existing
+  `is_taxable` flag, the real configured policy, not a new one).
+  `payroll_adjustments.amount` is posted as a direct signed net-pay delta
+  with **no additional tax computed** — disclosed as a deliberate choice
+  (it corrects an amount from a prior computation, not a new taxable
+  event), not silently assumed.
+- **`runs.ts`**: `fetchArrearsPayout` / `fetchVariablePayPayout` /
+  `fetchAdjustmentPayout`, same fetch-fresh-every-generation shape as
+  `fetchEncashmentPayout` — survives any number of regenerations of a
+  still-draft run by construction, not by luck. Three new finalize-time
+  commit calls (non-fatal, same pattern as the existing advance/loan/
+  encashment blocks) and `rollback_payroll_run_atomic` (migration 479)
+  extended with three revert calls in the SAME transaction as the
+  existing leave-encashment revert.
+- **Migrations 476/477/478**: `assign_variable_pay_batch_to_run_atomic`,
+  `assign_arrears_batch_to_run_atomic` (which ALSO generates this batch's
+  `arrear_payouts` rows in the same transaction as its approve — that
+  table has existed since migration 103 and nothing had ever written to
+  it), `assign_payroll_adjustment_to_run_atomic` — all CAS-guarded,
+  locking the batch/record then the target run (same order as 447),
+  checking run status ∈ {draft, partial_failed} and month match, plus
+  their `fn_finalize_*`/`fn_revert_*` siblings.
+- **Migration 480**: added the missing `ON DELETE SET NULL` FKs from
+  `arrear_payouts`/`arrear_batches`/`variable_payouts`/
+  `variable_payout_batches` to `payroll_runs` — without this, deleting a
+  draft run with an assigned batch would permanently orphan the
+  assignment (no FK to null it out, unlike encashment/adjustments).
+- **Route changes**: new `POST .../batches/:id/assign-run` on
+  `arrears.ts`/`variable-pay.ts`; `arrears.ts`'s `/approve` rebuilt onto
+  the new atomic RPC; `adjustments.ts`'s `/apply` restructured from a
+  direct CAS-to-terminal-`'applied'` (the exact "approve and nothing
+  happens" shape) into an assign step; all three `/cancel` endpoints now
+  also clear any pending run assignment — a batch cancelled after being
+  assigned but before finalize would otherwise still be folded into the
+  next regeneration.
+
+**Proven, 40+ checks, real Postgres + real HTTP + the real async
+payroll-run durable job**
+(`scripts/db/verify-payroll-integration-close-the-gap.mjs`): for all three
+subsystems — assign (status stays non-terminal), real payroll generation
+via `POST /payroll/runs` (polled through the actual durable queue, not
+mocked), the resulting `payroll_slips` row's `component_breakdown`/
+`gross_pay`/`net_pay` independently checked against hand-computed
+expectations (e.g. a ₹50,000 base + ₹10,000 variable pay = ₹60,000
+gross_pay, exactly); regeneration reproduces the identical result (survives
+re-run); finalize (driven through the real two-user maker-checker four-eyes
+gate) only then flips status to terminal; rollback reverts status while
+keeping the run assignment; genuine `Promise.all` concurrency on
+assign-run (exactly one of two simultaneous calls wins the other gets
+`ALREADY_ASSIGNED`); and cancelling an assigned-but-not-finalized batch
+clears the assignment so the next regeneration correctly excludes it.
+
+tsc --noEmit clean; vitest 79/79 files, 669/669 tests; all 40+ checks in
+the new script pass.
+
+**Disclosed, not fixed this checkpoint** (both lower severity, logged to
+backlog): (1) `payroll_adjustments.amount`'s no-additional-tax treatment —
+if `statutory_correction`-type adjustments should instead re-trigger
+EPF/ESI/PT wage-base recomputation rather than a flat net-pay line, that
+needs tax/compliance sign-off before go-live; (2) `adjustments.ts` still
+has no frontend UI at all — the backend money-safety integration is done,
+a new HR screen is a separate follow-up.
 
 ### Separate totals: frontend pages, shared services, migrations
 
