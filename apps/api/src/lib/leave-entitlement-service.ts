@@ -1024,19 +1024,39 @@ export async function runEngineMonthlyAccrual(
       if (accrualAmount <= 0) { result.skipped++; continue }
 
       try {
-        // Ledger-first, then gate the non-idempotent cache credit on insertion so
-        // re-running the engine accrual for the same period can't double-credit.
-        const { skipped: alreadyCredited } = await writeLedgerEntry(
-          supabase, tenantId, assignment.employee_id, leaveTypeId,
-          rule.accrual_type, accrualAmount, year, runDate, null,
-          `Engine ${rule.accrual_type} accrual — policy ${assignment.policy_id}`,
-        )
-        if (alreadyCredited) { result.skipped++; continue }
-
-        await creditEmployeeDays(
-          supabase, tenantId, assignment.employee_id, leaveTypeId,
-          accrualAmount, year, rule.max_accrual_balance,
-        )
+        // SYSTEM_AUDIT_2026-10-14 checkpoint 14 — this used to be two
+        // separate statements (writeLedgerEntry's INSERT, then a plain
+        // creditEmployeeDays read-balance/add/upsert), gated by treating
+        // the ledger INSERT as the idempotency signal. Real-Postgres +
+        // real-HTTP testing (scripts/db/verify-engine-accrual-concurrency-
+        // and-crash-recovery.mjs) confirmed genuinely concurrent requests
+        // are safe (Postgres's own unique index resolves the race), but
+        // found a real gap: anything failing between the two statements
+        // (lost connection, process restart) left the ledger row claiming
+        // the credit happened while the balance was never incremented —
+        // and every future retry would see that same ledger row and skip
+        // forever, making the credit permanently unrecoverable.
+        // credit_engine_accrual_atomic (migration 469) does both writes
+        // in one transaction — one top-level RPC call is one transaction
+        // by construction, the same guarantee every other atomic RPC in
+        // this codebase relies on — and also makes the balance increment
+        // itself a true atomic `balance = balance + days` against the row
+        // Postgres locks for the update, closing the separate lost-update
+        // risk the old read-then-write creditEmployeeDays had against any
+        // OTHER concurrent credit to the same balance row.
+        const { data: creditResult, error: creditErr } = await supabase.rpc('credit_engine_accrual_atomic', {
+          p_tenant_id:     tenantId,
+          p_employee_id:   assignment.employee_id,
+          p_leave_type_id: leaveTypeId,
+          p_accrual_type:  rule.accrual_type,
+          p_days:          accrualAmount,
+          p_year:          year,
+          p_accrued_on:    runDate,
+          p_notes:         `Engine ${rule.accrual_type} accrual — policy ${assignment.policy_id}`,
+          p_max_balance:   rule.max_accrual_balance ?? null,
+        })
+        if (creditErr) throw new Error(creditErr.message)
+        if ((creditResult as { skipped: boolean }).skipped) { result.skipped++; continue }
 
         result.employees_processed++
         result.total_days_credited = round1(result.total_days_credited + accrualAmount)
