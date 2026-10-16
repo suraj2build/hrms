@@ -1737,7 +1737,7 @@ the repository, not estimated.
 |---|---|---|---|---|---|
 | attendance | 64 | 64 | 0 | 1 open-confirmed (retroactive.ts dedup — low-severity, read-only observability, disclosed not fixed). 14 found-and-FIXED-same-batch (roster-api.ts pagination ×2, roster-calendar.ts rotation-members pagination, leave-reconciliation.ts breakdown-aggregation, writeLedgerEntry idempotency + atomicity, regularisation-policy.ts SLA-breach-reject chain orphaning, scoped-policy accrual gap (migration 470 + `leave-entitlement-service.ts` scope-chain resolver), two-accrual-system double-credit (migration 470 execution-time guard), reconciliation.ts's `/attendance/reconciliation/open` capped-breakdown undercounting, **workforce-optimization.ts missing-authz on 7 routes, health-index.ts department/tenant pagination, 4-file DECIMAL-string-coercion NaN bug, risk.ts `/summary` pagination, risk.ts non-deterministic pagination tie-breaker** — don't count as open) | — |
 | employees | 31 | 31 | 0 | 0 | separation-workflow.ts F&F section (~lines 416-972) relies on prior-round evidence, not re-read this audit |
-| payroll (incl. statutory/) | 52 | 16 | 36 | **1 open-confirmed, HIGH SEVERITY, disclosed-not-fixed, spans 3 files**: arrears.ts, variable-pay.ts, and adjustments.ts each have a complete, well-hardened create→approve workflow whose end state (`arrear_records`/`arrear_payouts`, `variable_payouts`, `payroll_adjustments`) is **never read by `payroll-engine.ts` or `payroll-snapshot-engine.ts`** — approving one changes nothing about what any employee is actually paid. See checkpoint 18 below for the full writeup and decision proposal; blocked pending a product decision, not attempted as a same-batch fix given its design scope (same class of work G12's encashment payout took 3 rounds to get right). 5 found-and-FIXED-same-batch (runs.ts DELETE TOCTOU race; compensation-revisions.ts silent component-copy swallow → rebuilt fully atomic; advances.ts /recover guaranteed-NOT-NULL-violation + stuck-schedule torn write; loans.ts /record-payment identical guaranteed-NOT-NULL-violation + non-idempotent retry; record_loan_payment_atomic (migration 396) column-ambiguity bug that made the function fail on every call since it was created — silently breaking runs.ts's own automatic loan-balance sweep this whole time) — don't count those 5 as open | approval/finalization/F&F/encashment-adjacent correctness relies on PRIOR rounds (G12 etc.), not re-verified by this audit's own checkpoints; the 38 remaining files include all 14 statutory/ files (not yet opened) |
+| payroll (incl. statutory/) | 52 | 17 | 35 | **1 open-confirmed, HIGH SEVERITY, disclosed-not-fixed, spans 3 files**: arrears.ts, variable-pay.ts, and adjustments.ts each have a complete, well-hardened create→approve workflow whose end state (`arrear_records`/`arrear_payouts`, `variable_payouts`, `payroll_adjustments`) is **never read by `payroll-engine.ts` or `payroll-snapshot-engine.ts`** — approving one changes nothing about what any employee is actually paid. See checkpoint 18 below for the full writeup and decision proposal; blocked pending a product decision, not attempted as a same-batch fix given its design scope (same class of work G12's encashment payout took 3 rounds to get right). 5 found-and-FIXED-same-batch (runs.ts DELETE TOCTOU race; compensation-revisions.ts silent component-copy swallow → rebuilt fully atomic; advances.ts /recover guaranteed-NOT-NULL-violation + stuck-schedule torn write; loans.ts /record-payment identical guaranteed-NOT-NULL-violation + non-idempotent retry; record_loan_payment_atomic (migration 396) column-ambiguity bug that made the function fail on every call since it was created — silently breaking runs.ts's own automatic loan-balance sweep this whole time) — don't count those 5 as open | approval/finalization/F&F/encashment-adjacent correctness relies on PRIOR rounds (G12 etc.), not re-verified by this audit's own checkpoints; the 38 remaining files include all 14 statutory/ files (not yet opened) |
 | masters | 29 | 0 | 29 | — | nav-link fixes only; no file-level authz review this audit |
 | ess | 12 | 0 | 12 | — | distinct from the frozen web ESS Context Rail (CLAUDE.md) — this is the unrelated API namespace |
 | onboarding | 8 | 0 | 8 | — | — |
@@ -1789,7 +1789,7 @@ the repository, not estimated.
 | uploads | 1 | 0 | 1 | — | — |
 | whatsapp | 1 | 0 | 1 | — | — |
 | workforce | 1 | 0 | 1 | — | — |
-| **TOTAL (54 rows, 53 namespaces + setup.ts)** | **289** | **118** | **171** | **2 open-confirmed: (1) retroactive.ts dedup — low-severity, read-only observability; (2) arrears/variable-pay/adjustments payroll-engine disconnect — HIGH SEVERITY, see checkpoint 18 — none else currently open; the scoped-policy accrual gap and the two-accrual-system double-credit, both CONFIRMED financial defects as of checkpoint 14, are now FIXED as of checkpoint 15 (migration 470) — see that section below; every other defect found this audit was fixed in the same checkpoint it was found** | **global: hosted Supabase/RLS/storage behavior is never verified anywhere in this tracker — see "Explicitly still blocked" below; PT/TDS/F&F/asset/careers/tenant-licensing rows above rely on evidence from rounds OUTSIDE this specific audit, real but not re-verified here** |
+| **TOTAL (54 rows, 53 namespaces + setup.ts)** | **289** | **119** | **170** | **2 open-confirmed: (1) retroactive.ts dedup — low-severity, read-only observability; (2) arrears/variable-pay/adjustments payroll-engine disconnect — HIGH SEVERITY, see checkpoint 18 — none else currently open; the scoped-policy accrual gap and the two-accrual-system double-credit, both CONFIRMED financial defects as of checkpoint 14, are now FIXED as of checkpoint 15 (migration 470) — see that section below; every other defect found this audit was fixed in the same checkpoint it was found** | **global: hosted Supabase/RLS/storage behavior is never verified anywhere in this tracker — see "Explicitly still blocked" below; PT/TDS/F&F/asset/careers/tenant-licensing rows above rely on evidence from rounds OUTSIDE this specific audit, real but not re-verified here** |
 
 **Checkpoint 14 continuation, second leg**: 4 more files examined —
 `manager-dashboard.ts`, `payroll-summary.ts`, `context.ts` (no defects;
@@ -2671,6 +2671,44 @@ specific reasons, not by assumption:
 
 **Updated: payroll 16/52 examined (36 remaining). Overall: 118/289
 examined, 171 remaining.**
+
+## Checkpoint 19 — payout-batches.ts: real TOCTOU race, fixed
+
+Examined `payout-batches.ts` (bank-disbursement batch listing, employee-
+level payout detail, `payroll_payout_reconciliation` CRUD, and `POST
+/payroll/runs/:id/payout-obligations` which generates the bank-advice
+obligation rows for a finalized run). Found one real defect in the last
+route: the "don't regenerate if obligations already exist" guard was a
+plain check-then-insert (`SELECT count(*) ... WHERE run_id=$1`, then
+insert if 0) with **no DB-level constraint backing it** —
+`payroll_payout_reconciliation` (migration 146) had no unique constraint
+tying a row to its run/slip. Two concurrent calls (a network retry, a
+double-click before the UI disables the button) would both pass the same
+"0 existing" read and both insert a full obligation set, doubling every
+`expected_amount` in the bank-disbursement reconciliation for that run —
+a genuine money-safety risk, since this table is what bank-advice
+generation and payout tracking read to know what to pay each employee.
+
+Fixed with a unique index on `(tenant_id, run_id, slip_id)` (migration
+475) plus a `23505` → `409 OBLIGATIONS_EXIST` mapping in the route — the
+existing `count(*)` check stays as a friendly fast-path, no longer the
+authoritative guard. **Proven, 10/10 checks**
+(`scripts/db/verify-payout-obligations-cas.mjs`): Part A — genuine
+`Promise.all` concurrency over real HTTP against the SAME finalized run —
+exactly one call succeeds, the other is rejected 409, and exactly one
+obligation row per slip exists afterward (total `expected_amount` is
+₹225,000 for 5×₹45,000 slips, not doubled to ₹450,000). Part B —
+sequential retry after success is rejected, not reapplied. The unique
+constraint itself was independently verified (not just inferred from the
+app-level race outcome): a direct two-statement SQL reproduction, bypassing
+the route entirely, shows Postgres itself rejects the exact duplicate row
+shape with `duplicate key value violates unique constraint
+"uidx_payout_recon_run_slip"`.
+
+tsc --noEmit clean; vitest 79/79 files, 669/669 tests.
+
+**Updated: payroll 17/52 examined (35 remaining). Overall: 119/289
+examined, 170 remaining.**
 
 ### Separate totals: frontend pages, shared services, migrations
 
