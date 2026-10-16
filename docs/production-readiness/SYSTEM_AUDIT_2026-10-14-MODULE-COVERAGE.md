@@ -1735,7 +1735,7 @@ the repository, not estimated.
 
 | Module (route namespace) | Total files | Examined (this audit) | Remaining | Open defects | Blocked verification |
 |---|---|---|---|---|---|
-| attendance | 64 | 38 | 26 | 3 open-confirmed (retroactive.ts dedup; scoped-policy accrual gap — fully diagnosed, resolution recommended, not yet implemented; two-accrual-system CONFIRMED double-credit — reproduced both call orders, resolution recommended, crosses into unexamined `masters` namespace). 6 found-and-FIXED-same-batch (roster-api.ts pagination ×2, roster-calendar.ts rotation-members pagination, leave-reconciliation.ts breakdown-aggregation, writeLedgerEntry idempotency + atomicity, regularisation-policy.ts SLA-breach-reject chain orphaning — don't count as open) | two-accrual-system fix requires touching `masters/leave-policy-rules.ts` (0/29 examined) — deferred to a dedicated pass, not patched inside this one |
+| attendance | 64 | 38 | 26 | 1 open-confirmed (retroactive.ts dedup — low-severity, read-only observability, disclosed not fixed). 8 found-and-FIXED-same-batch (roster-api.ts pagination ×2, roster-calendar.ts rotation-members pagination, leave-reconciliation.ts breakdown-aggregation, writeLedgerEntry idempotency + atomicity, regularisation-policy.ts SLA-breach-reject chain orphaning, **scoped-policy accrual gap (migration 470 + `leave-entitlement-service.ts` scope-chain resolver — see checkpoint 15)**, **two-accrual-system double-credit (migration 470 execution-time guard — see checkpoint 15)** — don't count as open) | — |
 | employees | 31 | 31 | 0 | 0 | separation-workflow.ts F&F section (~lines 416-972) relies on prior-round evidence, not re-read this audit |
 | payroll (incl. statutory/) | 52 | 0 | 52 | — | approval/finalization/F&F/encashment-adjacent correctness relies on PRIOR rounds (G12 etc.), not re-verified by this audit's own checkpoints |
 | masters | 29 | 0 | 29 | — | nav-link fixes only; no file-level authz review this audit |
@@ -1789,7 +1789,7 @@ the repository, not estimated.
 | uploads | 1 | 0 | 1 | — | — |
 | whatsapp | 1 | 0 | 1 | — | — |
 | workforce | 1 | 0 | 1 | — | — |
-| **TOTAL (54 rows, 53 namespaces + setup.ts)** | **289** | **76** | **213** | **3 open-confirmed (retroactive.ts dedup; scoped-policy accrual gap — diagnosed, resolution recommended; two-accrual-system CONFIRMED double-credit — reproduced, resolution recommended; see §cp14 continuation) — none else currently open; every other defect found this audit was fixed in the same checkpoint it was found** | **global: hosted Supabase/RLS/storage behavior is never verified anywhere in this tracker — see "Explicitly still blocked" below; PT/TDS/F&F/asset/careers/tenant-licensing rows above rely on evidence from rounds OUTSIDE this specific audit, real but not re-verified here** |
+| **TOTAL (54 rows, 53 namespaces + setup.ts)** | **289** | **76** | **213** | **1 open-confirmed (retroactive.ts dedup — low-severity, read-only observability) — none else currently open; the scoped-policy accrual gap and the two-accrual-system double-credit, both CONFIRMED financial defects as of checkpoint 14, are now FIXED as of checkpoint 15 (migration 470) — see that section below; every other defect found this audit was fixed in the same checkpoint it was found** | **global: hosted Supabase/RLS/storage behavior is never verified anywhere in this tracker — see "Explicitly still blocked" below; PT/TDS/F&F/asset/careers/tenant-licensing rows above rely on evidence from rounds OUTSIDE this specific audit, real but not re-verified here** |
 
 **Checkpoint 14 continuation, second leg**: 4 more files examined —
 `manager-dashboard.ts`, `payroll-summary.ts`, `context.ts` (no defects;
@@ -2033,14 +2033,128 @@ job completion), `upload-health.ts` (already correctly uses
 three. **Updated: attendance 38/64 examined (26 remaining); overall
 76/289 examined, 213 remaining.**
 
-**Next planned batch**: continue tier 2 of `attendance` (29 files
-remaining there, per the final count after this checkpoint's three legs
-above) — api-sources.ts, upload.ts/upload-health.ts, queue-actions.ts,
-status.ts, last-run.ts, run-details.ts, run-export.ts, sample-csv.ts,
-who-is-in.ts, work-sessions.ts, debug-raw.ts, audit.ts, force-unlock.ts,
-reconciliation.ts/reconciliation-validate.ts, and the intelligence/
-anomaly/forensics/confidence/risk cluster (`anomalies.ts`, `anomaly-
-reconcile.ts`, `confidence.ts`, `forensics.ts`, `health-index.ts`,
+## Checkpoint 15 — both confirmed accrual defects CLOSED (migration 470)
+
+The user explicitly rejected leaving either checkpoint-14 finding as
+"diagnosed/reproduced, resolution recommended" — both are financial
+correctness defects, already authorized to fix, and the "needs dedicated
+tests or changes in the masters namespace" qualifier was explicitly
+pre-empted as not an acceptable reason to defer. Both are now implemented,
+and both are proven with real-Postgres + real-HTTP evidence, not just
+code review.
+
+**1. Scoped-policy accrual gap — FIXED.** `runEngineMonthlyAccrual` and
+`runEngineYearlyCredit` (`leave-entitlement-service.ts`) previously
+resolved only `scope_type='employee'` assignments, so any employee
+covered solely by a department/work_location/site/default-scoped policy
+assignment received zero accrual credit. Fixed by implementing the full
+effective-dated priority chain (employee > department > work_location >
+site > default) in two places that must agree:
+- **SQL** — `resolve_engine_policy_rule(tenant, employee, leave_type,
+  as_of)` (migration 470): the canonical resolver, walks all five scopes
+  in declared priority order, checking `leave_policy_assignments`
+  effective-dating then `leave_policy_rules` effective-dating for the
+  specific leave type, returning the first match.
+- **TypeScript** — an in-memory `resolveApplicableRule` mirror in both
+  engine functions, batch-fetching every assignment/rule row once per run
+  (via `fetchAllRows`, per CLAUDE.md's pagination rule) and resolving
+  per-employee from `employees.department_id/work_location_id/site_id`
+  directly (confirmed synced from `job_history` by the pre-existing
+  `trg_sync_employee_job_fields` trigger — no join needed), instead of
+  one RPC round trip per employee.
+
+  **Real-Postgres proof** (`scripts/db/verify-scoped-policy-accrual.mjs`,
+  all PASSED): each of the five scopes individually; the full 5-scope
+  precedence stack for one employee (confirming department overrides
+  default, etc., in the declared order); removing an override and
+  confirming fallback to the next scope; reassigning an employee between
+  departments and confirming the resolved rule changes accordingly;
+  effective-date boundaries (a rule not yet effective, or already
+  expired, is correctly skipped); retry idempotency (re-running the same
+  period credits nothing twice); and tenant isolation (one tenant's scope
+  configuration never leaks into another's resolution). In every case the
+  resulting `leave_accrual_ledger` row and `employee_leave_balance` value
+  were reconciled against the expected credit for that employee's
+  resolved rule, not just checked for "some credit happened."
+
+**2. Two-accrual-system double credit — FIXED.** `leave_accrual_rules`
+(System A) and `leave_policy_rules`+`leave_policy_assignments` (System B)
+are two independently-triggered crediting systems with no shared
+authority; an employee configured in both was credited twice, in either
+call order, with no precedence rule. A CRUD-time-only mutual-exclusivity
+check was explicitly rejected as insufficient — it can't catch configs
+that already overlap, concurrent config changes, or two scheduled jobs
+racing each other. The guard is instead enforced **inside the existing
+atomic crediting transactions themselves** (migration 470), so it holds
+at execution time regardless of configuration history or race timing:
+- `credit_engine_accrual_atomic` (System B) now checks, inside its own
+  transaction, for an active, effective-dated, frequency-matching
+  `leave_accrual_rules` row for the same tenant/employee/leave_type
+  before writing any ledger or balance row.
+- `credit_monthly_accrual_batch` (System A) runs the symmetric check per
+  employee via `resolve_engine_policy_rule` in a CTE, before its own
+  ledger/balance writes.
+- On conflict, **neither system credits**. The ambiguity is recorded into
+  a new `leave_accrual_conflicts` table (`detected_by` records which run
+  found it: `system_a_run` / `system_b_run` / `detection_scan`) for HR
+  review — never auto-resolved, never silently defaulting to one system.
+
+  **Pre-existing overlaps** (configured before migration 470 existed) are
+  handled by a separate, standalone, re-runnable, read-only detection
+  tool: `scripts/db/detect-existing-accrual-overlaps.mjs`. It is dry-run
+  by default; `--apply` records findings into `leave_accrual_conflicts`
+  only — it never writes to `leave_accrual_ledger`, `employee_leave_
+  balance`, or `leave_balance_ledger`, directly satisfying "preserve audit
+  history; do not automatically reverse historical credits without
+  reconciliation." Verified by seeding a simulated pre-470 double-credit,
+  running dry-run (found, nothing written), running `--apply` (recorded),
+  running `--apply` again (idempotent, 0 new rows via the table's
+  `UNIQUE (tenant_id, employee_id, leave_type_id, period)` constraint),
+  then confirming via direct SQL that the original seeded ledger rows
+  were byte-for-byte unchanged throughout.
+
+  **Real-Postgres + real-HTTP proof**
+  (`scripts/db/verify-dual-accrual-conflict-execution-time.mjs`, 10/10
+  checks PASSED): both job call orders (System A then B, System B then
+  A); genuinely simultaneous execution via `Promise.all` (not sequential
+  awaits — directly answering the concern that sequential-retry evidence
+  doesn't prove concurrency safety); retry-after-success (idempotent, no
+  second credit); and a forced mid-transaction failure (an impossible
+  `p_max_balance=-1`) in a conflicting scenario, proving the conflict
+  check runs and blocks *before* any write is attempted, not merely
+  before a crash is simulated. Exactly one credit in every non-conflicting
+  shape; exactly zero (correctly blocked + reported, never defaulted) in
+  every conflicting shape. `scripts/db/verify-dual-accrual-system-
+  overlap.mjs` (the original checkpoint-14 reproduction script) was
+  updated to assert this "both blocked" verdict and now passes instead of
+  reproducing the bug.
+
+**Also in this batch**: removed the dead `writeLedgerEntry` function from
+`leave-entitlement-service.ts` (superseded by the atomic RPC at both call
+sites, zero remaining references); surfaced per-run conflicted-employee
+counts through `AccrualResult`/`BatchResult` into `leave-jobs.ts`'s job
+error reporting, so a blocked conflict is visible in the job run's result,
+not only in the `leave_accrual_conflicts` table.
+
+**Verification**: `npx tsc --noEmit` clean (both the migration-adjacent
+lib changes and all four new/updated scripts). `npx vitest run`: 79/79
+files, 669/669 tests passing — zero regressions from the pre-checkpoint-15
+baseline. Migration 470 applied cleanly to `hrms_uat` (full `000`→`470`
+history). `main` untouched throughout; PR #30 still unmerged.
+
+**Status change**: both items move from "CONFIRMED open defect,
+resolution recommended" (checkpoint 14) to **FIXED** (checkpoint 15). The
+attendance namespace's only remaining open-confirmed defect is
+`retroactive.ts`'s detect-dedup gap (low-severity, disclosed, not fixed —
+see Part 4 of the regularisation-cluster entry above).
+
+**Next planned batch**: resume tier 2 of `attendance` (26 files remaining
+there, per the updated count above) — `queue-actions.ts`, `status.ts`,
+`last-run.ts`, `run-details.ts`, `run-export.ts`, `sample-csv.ts`,
+`who-is-in.ts`, `work-sessions.ts`, `debug-raw.ts`, `audit.ts`,
+`force-unlock.ts`, `reconciliation.ts`/`reconciliation-validate.ts`, and
+the intelligence/anomaly/forensics/confidence/risk cluster (`anomalies.ts`,
+`anomaly-reconcile.ts`, `confidence.ts`, `forensics.ts`, `health-index.ts`,
 `inference.ts`, `intelligence.ts`, `risk.ts`, `timeline-intelligence.ts`,
 `workforce-optimization.ts`, `pipeline-stats.ts`, `policy-conflicts.ts`,
 `simulate-policy.ts` — already de-emphasized per CLAUDE.md's 2026-10-11
