@@ -1735,7 +1735,7 @@ the repository, not estimated.
 
 | Module (route namespace) | Total files | Examined (this audit) | Remaining | Open defects | Blocked verification |
 |---|---|---|---|---|---|
-| attendance | 64 | 35 | 29 | 3 open-confirmed (retroactive.ts dedup; scoped-policy accrual gap — fully diagnosed, resolution recommended, not yet implemented; two-accrual-system CONFIRMED double-credit — reproduced both call orders, resolution recommended, crosses into unexamined `masters` namespace). 6 found-and-FIXED-same-batch (roster-api.ts pagination ×2, roster-calendar.ts rotation-members pagination, leave-reconciliation.ts breakdown-aggregation, writeLedgerEntry idempotency + atomicity, regularisation-policy.ts SLA-breach-reject chain orphaning — don't count as open) | two-accrual-system fix requires touching `masters/leave-policy-rules.ts` (0/29 examined) — deferred to a dedicated pass, not patched inside this one |
+| attendance | 64 | 38 | 26 | 3 open-confirmed (retroactive.ts dedup; scoped-policy accrual gap — fully diagnosed, resolution recommended, not yet implemented; two-accrual-system CONFIRMED double-credit — reproduced both call orders, resolution recommended, crosses into unexamined `masters` namespace). 6 found-and-FIXED-same-batch (roster-api.ts pagination ×2, roster-calendar.ts rotation-members pagination, leave-reconciliation.ts breakdown-aggregation, writeLedgerEntry idempotency + atomicity, regularisation-policy.ts SLA-breach-reject chain orphaning — don't count as open) | two-accrual-system fix requires touching `masters/leave-policy-rules.ts` (0/29 examined) — deferred to a dedicated pass, not patched inside this one |
 | employees | 31 | 31 | 0 | 0 | separation-workflow.ts F&F section (~lines 416-972) relies on prior-round evidence, not re-read this audit |
 | payroll (incl. statutory/) | 52 | 0 | 52 | — | approval/finalization/F&F/encashment-adjacent correctness relies on PRIOR rounds (G12 etc.), not re-verified by this audit's own checkpoints |
 | masters | 29 | 0 | 29 | — | nav-link fixes only; no file-level authz review this audit |
@@ -1789,7 +1789,7 @@ the repository, not estimated.
 | uploads | 1 | 0 | 1 | — | — |
 | whatsapp | 1 | 0 | 1 | — | — |
 | workforce | 1 | 0 | 1 | — | — |
-| **TOTAL (54 rows, 53 namespaces + setup.ts)** | **289** | **73** | **216** | **3 open-confirmed (retroactive.ts dedup; scoped-policy accrual gap — diagnosed, resolution recommended; two-accrual-system CONFIRMED double-credit — reproduced, resolution recommended; see §cp14 continuation) — none else currently open; every other defect found this audit was fixed in the same checkpoint it was found** | **global: hosted Supabase/RLS/storage behavior is never verified anywhere in this tracker — see "Explicitly still blocked" below; PT/TDS/F&F/asset/careers/tenant-licensing rows above rely on evidence from rounds OUTSIDE this specific audit, real but not re-verified here** |
+| **TOTAL (54 rows, 53 namespaces + setup.ts)** | **289** | **76** | **213** | **3 open-confirmed (retroactive.ts dedup; scoped-policy accrual gap — diagnosed, resolution recommended; two-accrual-system CONFIRMED double-credit — reproduced, resolution recommended; see §cp14 continuation) — none else currently open; every other defect found this audit was fixed in the same checkpoint it was found** | **global: hosted Supabase/RLS/storage behavior is never verified anywhere in this tracker — see "Explicitly still blocked" below; PT/TDS/F&F/asset/careers/tenant-licensing rows above rely on evidence from rounds OUTSIDE this specific audit, real but not re-verified here** |
 
 **Checkpoint 14 continuation, second leg**: 4 more files examined —
 `manager-dashboard.ts`, `payroll-summary.ts`, `context.ts` (no defects;
@@ -2021,6 +2021,17 @@ analysis).
 touched lib files and a route already counted). **Overall: 67 of 289
 files examined, 222 remaining (77% remaining)** — down from 235 remaining
 at the top of this batch.
+
+**Checkpoint 14 continuation, fifth leg**: 3 more files examined —
+`api-sources.ts` (596 lines; SSRF-protected outbound fetches via
+`ssrfCheck`, admin-gated, tenant-scoped, secrets properly redacted on
+read), `upload.ts` (556 lines; path-traversal guard on `storage_path`,
+period-lock pre-filter before punch upsert, chunked+concurrent upserts,
+orphaned-job detection, background recompute correctly decoupled from
+job completion), `upload-health.ts` (already correctly uses
+`fetchAllRows`, fixed in a prior round). No defects found in any of the
+three. **Updated: attendance 38/64 examined (26 remaining); overall
+76/289 examined, 213 remaining.**
 
 **Next planned batch**: continue tier 2 of `attendance` (29 files
 remaining there, per the final count after this checkpoint's three legs
