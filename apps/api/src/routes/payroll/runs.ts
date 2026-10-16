@@ -2949,19 +2949,14 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
           }
         }
 
-        // ── Loans: mark paid, roll the rest forward ──────────────────────────────
-        if (recoveredLoanIds.size > 0) {
-          const loanIdChunks = [...recoveredLoanIds]
-          for (let i = 0; i < loanIdChunks.length; i += ID_CHUNK) {
-            await fastify.supabase
-              .from('loan_schedules')
-              .update({ status: 'paid', payroll_run_id: id, paid_at: now })
-              .eq('tenant_id', req.tenantId)
-              .eq('due_month', run.month)
-              .eq('status', 'pending')
-              .in('id', loanIdChunks.slice(i, i + ID_CHUNK))
-          }
-        }
+        // ── Loans: mark paid + decrement balance (one atomic call per
+        // schedule), roll the rest forward ───────────────────────────────────
+        // Deliberately done BELOW the roll-forward block below it reads
+        // status='pending' too — finalize_loan_emi_atomic's own CAS guard
+        // (also requires status='pending') is what actually flips these, so
+        // ordering between the two no longer matters, unlike the old bulk
+        // UPDATE this replaced which had to run first to avoid rolling a
+        // just-recovered installment's due_month forward.
         {
           // loan_schedules has no employee_id → map employees to loan ids
           const loanRows2 = await fetchChunked(finalizedEmpIds, (chunk) =>
@@ -3023,40 +3018,39 @@ export default async function payrollRunsRoutes(fastify: FastifyInstance) {
           }
         }
 
-        // Loan outstanding balance sweep: reduce by principal_component for each paid EMI.
-        // `paid_amount` (otherwise unused on this table) doubles as an
-        // "already applied to outstanding_balance" marker: without it, a
-        // retried/duplicate finalize call would re-match the same
-        // status='paid' rows (that status never reverts) and double-decrement
-        // the loan balance. Filtering on `.is('paid_amount', null)` makes the
-        // sweep idempotent, and `record_loan_payment_atomic` makes each
-        // decrement itself race-safe against concurrent finalize calls.
-        const { data: paidLoanScheds } = await fastify.supabase
-          .from('loan_schedules')
-          .select('id, loan_id, principal_component')
-          .eq('tenant_id', req.tenantId)
-          .eq('due_month', run.month)
-          .eq('status', 'paid')
-          .eq('payroll_run_id', id)
-          .is('paid_amount', null)
-
-        for (const s of (paidLoanScheds ?? []) as any[]) {
-          const principalPaid = s.principal_component ?? 0
-          const { data: rpcResult, error: rpcErr } = await fastify.supabase
-            .rpc('record_loan_payment_atomic', {
+        // Loan EMI finalize: mark paid + decrement outstanding_balance in one
+        // atomic transaction per schedule (migration 481,
+        // finalize_loan_emi_atomic). Replaces a prior two-step shape (bulk
+        // mark-paid UPDATE, then a separate later sweep calling
+        // record_loan_payment_atomic) that a real injected-failure test
+        // (scripts/db/verify-loan-finalize-injected-failure.mjs) proved could
+        // leave a schedule permanently stuck at status='paid' with
+        // paid_amount NULL and the balance never decremented, if the
+        // balance-decrement step failed after the mark-paid step had already
+        // committed — unrecoverable, since the manual recovery endpoint
+        // requires status='pending' to act. The CAS inside the RPC
+        // (status='pending' in its WHERE clause) makes this idempotent
+        // against a retried/duplicate finalize call: a schedule already
+        // flipped to 'paid' by an earlier successful call simply won't match
+        // and is skipped, instead of relying on a separate `paid_amount`
+        // marker to detect that case.
+        if (recoveredLoanIds.size > 0) {
+          const recoveredLoanIdArr = [...recoveredLoanIds]
+          const loanSchedRows = await fetchChunked(recoveredLoanIdArr, (chunk) =>
+            fastify.supabase
+              .from('loan_schedules').select('id, loan_id, principal_component')
+              .eq('tenant_id', req.tenantId).eq('due_month', run.month).eq('status', 'pending')
+              .in('id', chunk),
+          )
+          for (const s of loanSchedRows as any[]) {
+            const { error: emiErr } = await fastify.supabase.rpc('finalize_loan_emi_atomic', {
               p_tenant_id:      req.tenantId,
+              p_schedule_id:    s.id,
               p_loan_id:        s.loan_id,
-              p_principal_paid: principalPaid,
+              p_principal_paid: s.principal_component ?? 0,
+              p_payroll_run_id: id,
             })
-            .single()
-
-          if (!rpcErr && rpcResult) {
-            // Mark this schedule as balance-applied so a retry can't re-decrement.
-            await fastify.supabase
-              .from('loan_schedules')
-              .update({ paid_amount: principalPaid })
-              .eq('id', s.id)
-              .eq('tenant_id', req.tenantId)
+            if (emiErr) req.log.warn({ err: emiErr, schedule_id: s.id, loan_id: s.loan_id }, 'payroll finalize: loan EMI finalize failed for schedule (non-fatal, left pending for retry)')
           }
         }
       }
