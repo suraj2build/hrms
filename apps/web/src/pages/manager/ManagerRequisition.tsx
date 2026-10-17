@@ -70,9 +70,15 @@ export function ManagerRequisition() {
   })
   const departments = deptData?.data ?? []
 
+  // Fresh audit finding: this previously called GET /recruitment/requisitions
+  // with no filter at all, so "My Requisitions" actually rendered every
+  // requisition in the tenant — every other manager's and department's,
+  // including their salary_min/salary_max — not just this manager's own.
+  // `mine=true` (added alongside this fix) scopes the backend query to
+  // `raised_by = req.userId`.
   const { data: reqData, isLoading } = useQuery<{ data: Requisition[] }>({
-    queryKey: ['manager', 'requisitions'],
-    queryFn:  () => api.get('/recruitment/requisitions'),
+    queryKey: ['manager', 'requisitions', 'mine'],
+    queryFn:  () => api.get('/recruitment/requisitions?mine=true'),
   })
   const requisitions = reqData?.data ?? []
 

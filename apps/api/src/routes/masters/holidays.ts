@@ -269,9 +269,19 @@ export default async function holidaysRoutes(fastify: FastifyInstance) {
   })
 
   // ── POST /masters/holidays/group-assignments ───────────────────────────────
-  // Set the complete group assignment for a holiday (replaces existing).
+  // Set the complete group assignment for a holiday (replaces existing) — a
+  // holiday CAN apply to multiple groups at once.
   // Body: { holiday_id: string, group_ids: string[] }
-  // Also syncs holiday_calendar.holiday_group_id to group_ids[0] for backward compat.
+  //
+  // SYSTEM_AUDIT_2026-10-14 checkpoint 28: this used to also "sync" the
+  // legacy single-FK holiday_calendar.holiday_group_id column to
+  // group_ids[0] "for backward compat" — but every consumer that decides
+  // whether a holiday applies to an employee (attendance/roster/leave/
+  // payroll/collision engines) read THAT single column directly, so a
+  // holiday assigned to groups [B, A] applied to group B's employees but
+  // silently NOT group A's, despite the admin UI showing both assigned.
+  // All 9 consumers are now fixed to read the real multi-group assignment
+  // set instead — the legacy column is dead and no longer written here.
   fastify.post('/group-assignments', auth, async (req: any, reply) => {
     if (!(HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'hr_admin or super_admin required' })
@@ -309,29 +319,19 @@ export default async function holidaysRoutes(fastify: FastifyInstance) {
       }
     }
 
-    // Delete existing assignments for this holiday, then insert the new set
-    const { error: deleteErr } = await fastify.supabase
-      .from('holiday_group_assignments')
-      .delete()
-      .eq('holiday_id', holiday_id)
-      .eq('tenant_id', req.tenantId)
-    if (deleteErr) return serverError(req, reply, deleteErr, ErrorCode.DELETE_FAILED, 'Failed to clear previous holiday group assignments')
-
-    if (group_ids.length > 0) {
-      const rows = group_ids.map(gid => ({ tenant_id: req.tenantId, holiday_id, group_id: gid }))
-      const { error } = await fastify.supabase
-        .from('holiday_group_assignments')
-        .insert(rows)
-      if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to save holiday group assignments')
+    // Delete-then-insert fused into one atomic transaction (migration 483) —
+    // a failed insert after a committed delete used to leave the holiday
+    // with zero group assignments and no indication anything had gone wrong
+    // beyond the 500 response.
+    const { error } = await fastify.supabase.rpc('set_holiday_group_assignments_atomic', {
+      p_tenant_id:  req.tenantId,
+      p_holiday_id: holiday_id,
+      p_group_ids:  group_ids,
+    })
+    if (error) {
+      if (error.message?.includes('NOT_FOUND:')) return reply.code(400).send({ error: 'INVALID_HOLIDAY', message: 'Holiday not found' })
+      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to save holiday group assignments')
     }
-
-    // Sync legacy single-FK for backward compat (first group or NULL)
-    const { error: syncErr } = await fastify.supabase
-      .from('holiday_calendar')
-      .update({ holiday_group_id: group_ids[0] ?? null })
-      .eq('id', holiday_id)
-      .eq('tenant_id', req.tenantId)
-    if (syncErr) return serverError(req, reply, syncErr, ErrorCode.UPDATE_FAILED, 'Groups saved but failed to sync legacy holiday_group_id')
 
     return reply.send({ holiday_id, group_ids })
   })

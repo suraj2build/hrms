@@ -26,6 +26,7 @@ import { OperationalBanner }      from '@/components/operational/OperationalBann
 import { SubscriptionBanner }     from '@/components/layout/SubscriptionBanner'
 import { PayrollDeadlineBanner }  from '@/components/operational/PayrollDeadlineBanner'
 import { PreviewBanner }          from '@/components/layout/PreviewBanner'
+import { PilotEnvironmentBanner } from '@/components/layout/PilotEnvironmentBanner'
 import { TopNavV2 }          from './v2/TopNavV2'
 import { ContextualSidebar } from './v2/ContextualSidebar'
 import { UniversalSearch }            from '@/components/search/UniversalSearch'
@@ -105,6 +106,7 @@ export function AdminShellV2() {
 
         {/* ── System banners (below header) ────────────────────────── */}
         <PreviewBanner />
+        <PilotEnvironmentBanner />
         <SubscriptionBanner />
         <OperationalBanner />
         <PayrollDeadlineBanner />

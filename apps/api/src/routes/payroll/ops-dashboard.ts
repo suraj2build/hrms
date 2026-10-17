@@ -13,6 +13,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchTenantTz } from '../../lib/attendance-engine.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import { getLocalDate } from '../../lib/org-context.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
@@ -485,15 +486,24 @@ export default async function opsDashboardRoutes(fastify: FastifyInstance) {
       message: esiCfg.data ? 'ESI config is configured' : 'No active ESI config found',
     })
 
-    // 5. No pending payroll adjustments for open (unfrozen) months
-    const { data: adjCheck, error: adjCheckErr } = await fastify.supabase
-      .from('payroll_adjustments')
-      .select('locked_month')
-      .eq('tenant_id', tenantId)
-      .eq('status', 'pending')
-    if (adjCheckErr) return serverError(req, reply, adjCheckErr, ErrorCode.QUERY_FAILED, 'Failed to run pending-adjustments validation')
-
-    const pendingAdj = (adjCheck ?? []) as any[]
+    // 5. No pending payroll adjustments for open (unfrozen) months.
+    // fetchAllRows(): a genuinely unbounded tenant-wide scan (no month/
+    // employee filter) — a plain query would silently under-report the
+    // pending count for a tenant with >1,000 pending adjustments.
+    let pendingAdj: any[]
+    try {
+      pendingAdj = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('payroll_adjustments')
+          .select('locked_month')
+          .eq('tenant_id', tenantId)
+          .eq('status', 'pending')
+          .order('id')
+          .range(from, to),
+      )
+    } catch (adjCheckErr) {
+      return serverError(req, reply, adjCheckErr, ErrorCode.QUERY_FAILED, 'Failed to run pending-adjustments validation')
+    }
     results.push({
       check:   'no_pending_adjustments',
       status:  pendingAdj.length === 0 ? 'pass' : 'warn',

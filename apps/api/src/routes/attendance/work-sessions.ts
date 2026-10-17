@@ -61,16 +61,24 @@ async function attachEmployeeLabels(
   if (list.length === 0) return list
   const empIds = [...new Set(list.map((r) => r.employee_id as string).filter(Boolean))]
   if (empIds.length === 0) return list
-  const { data: empRows, error } = await supabase
-    .from('employees')
-    .select('id, first_name, last_name, employee_code')
-    .in('id', empIds)
-    .eq('tenant_id', tenantId)
-  // A discarded error here previously rendered every row's employee_name/code
-  // as null — indistinguishable from "no employee data" — instead of
-  // surfacing the failure; throw so the caller's existing try/catch reports
-  // a real 500 (both current call sites already wrap this in a try/catch).
-  if (error) throw new Error(`attachEmployeeLabels: failed to fetch employees: ${error.message}`)
+  // Chunked: this is a shared helper with no guarantee callers pass a
+  // bounded id list — can exceed a single .in() URL's safe size at scale.
+  const empRows: any[] = []
+  for (let i = 0; i < empIds.length; i += 100) {
+    const chunkIds = empIds.slice(i, i + 100)
+    const { data, error } = await supabase
+      // lint-query-ok: chunkIds is a slice of 100 ids (loop above) — result is bounded to <=100 rows, well under the 1,000-row cap
+      .from('employees')
+      .select('id, first_name, last_name, employee_code')
+      .in('id', chunkIds)
+      .eq('tenant_id', tenantId)
+    // A discarded error here previously rendered every row's employee_name/code
+    // as null — indistinguishable from "no employee data" — instead of
+    // surfacing the failure; throw so the caller's existing try/catch reports
+    // a real 500 (both current call sites already wrap this in a try/catch).
+    if (error) throw new Error(`attachEmployeeLabels: failed to fetch employees: ${error.message}`)
+    if (data) empRows.push(...data)
+  }
   const map = new Map<string, { name: string; code: string | null }>()
   for (const e of (empRows ?? []) as Array<{ id: string; first_name: string; last_name: string; employee_code: string | null }>) {
     map.set(e.id, { name: `${e.first_name ?? ''} ${e.last_name ?? ''}`.trim(), code: e.employee_code ?? null })
@@ -468,6 +476,22 @@ export default async function workSessionRoutes(fastify: FastifyInstance) {
 
     if (fetchError) return serverError(req, reply, fetchError, ErrorCode.QUERY_FAILED, 'Failed to fetch session')
     if (!existing) return notFound(reply, 'SESSION_NOT_FOUND', 'Session not found')
+
+    // payroll_run_id is caller-supplied and was written straight into the
+    // update with no tenant check — a cross-tenant UUID would be accepted
+    // and stored as a dangling/wrong-tenant reference on this work_sessions
+    // row. Verify it belongs to this tenant first, same as every other
+    // caller-supplied FK in this namespace.
+    if (payroll_run_id !== undefined) {
+      const { data: run, error: runError } = await supabase
+        .from('payroll_runs')
+        .select('id')
+        .eq('id', payroll_run_id)
+        .eq('tenant_id', tenantId)
+        .maybeSingle()
+      if (runError) return serverError(req, reply, runError, ErrorCode.QUERY_FAILED, 'Failed to verify payroll run')
+      if (!run) return notFound(reply, 'PAYROLL_RUN_NOT_FOUND', 'Payroll run not found')
+    }
 
     const updatePayload: Record<string, unknown> = {
       payroll_locked:    true,

@@ -25,6 +25,7 @@ import { z }                    from 'zod'
 import { runLeaveReconciliation } from '../../lib/leave-reconciliation.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 
 export default async function leaveReconciliationRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
@@ -226,9 +227,36 @@ export default async function leaveReconciliationRoutes(fastify: FastifyInstance
     const { data, error, count } = await q
     if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch reconciliation summary')
 
+    // SYSTEM_AUDIT_2026-10-14 checkpoint 14 — by_type/by_severity used to be
+    // aggregated from `data` above, which is intentionally capped at `limit`
+    // (≤200, a legitimate bounded "top N" feed per CLAUDE.md's exception).
+    // That made the breakdown silently wrong for any tenant with more than
+    // `limit` unresolved issues: `total` (from the exact count) would show
+    // the true number while by_type/by_severity summed to only the returned
+    // page. The breakdown must reflect every unresolved issue, so it's
+    // computed from a dedicated fetchAllRows pull of just the two grouping
+    // columns (cheap — no large payload fields), independent of the capped
+    // `data` feed.
+    let breakdownRows: Array<{ issue_type: string; severity: string }> = []
+    try {
+      breakdownRows = await fetchAllRows((from, to) => {
+        let bq = fastify.supabase
+          .from('leave_reconciliation_issues')
+          .select('issue_type, severity')
+          .eq('tenant_id', req.tenantId)
+          .eq('resolved', false)
+          .range(from, to)
+        if (severity) bq = bq.eq('severity', severity)
+        if (year)     bq = bq.eq('year', year)
+        return bq
+      })
+    } catch (err) {
+      return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to fetch reconciliation summary')
+    }
+
     const byType: Record<string, number> = {}
     const bySeverity: Record<string, number> = {}
-    for (const iss of (data ?? []) as any[]) {
+    for (const iss of breakdownRows) {
       byType[iss.issue_type] = (byType[iss.issue_type] ?? 0) + 1
       bySeverity[iss.severity] = (bySeverity[iss.severity] ?? 0) + 1
     }

@@ -51,13 +51,15 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { writeAuditLogs, writeComputeLogs }  from './attendance-processor.js'
 import { eventService }                      from './event-service.js'
 import { policyService, type AttendancePolicy, DEFAULT_POLICY } from './policy-service.js'
-import { resolveEmployeeOrgContext, getWeeklyOffDays, EmployeeOrgContext } from './org-context.js'
+import { resolveEmployeeOrgContext, getWeeklyOffDays, withHolidayGroupIds, EmployeeOrgContext } from './org-context.js'
 import { resolveIsWeeklyOff }                          from './roster-calendar-engine.js'
 import { resolveViaRotationPolicy }                    from './rotation-engine.js'
 import { resolveShiftWithAttribution, toShiftMeta, type ResolvedShift } from './shift-resolution-engine.js'
 import { isShiftAttributionEnabled } from './attendance-flags.js'
 import { generateCompOffRequests }                     from './comp-off-service.js'
+import { fetchAllRows }                                 from './supabase-paginate.js'
 import { resolveLeaveDayFraction, type LeaveSession }    from './leave-engine.js'
+import { deriveMusterCode }                             from './muster-codes.js'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -105,6 +107,14 @@ export interface AttendanceDailyRecord {
   worked_on_holiday:    boolean
   /** Ownership: identifies the subsystem that last wrote this row. Default 'engine'. */
   computed_source:      AttendanceComputedSource
+  /**
+   * Display-only muster roll code (column exists per migration 376). Purely
+   * for reporting — day_fraction/status above remain the payroll-authoritative
+   * values. Only set by this engine for the WO/holiday-worked branches below,
+   * to carry the half-vs-full distinction the muster roll needs (DEFECT-04,
+   * PR #30 UAT 2026-10-12) without touching the payroll-neutral day_fraction.
+   */
+  muster_code?:         string | null
 
   // ── Shift attribution snapshot (migration 260) ─────────────────────────────
   // Persisted at compute time so the exact shift used is always traceable.
@@ -655,6 +665,7 @@ async function fetchPunches(
   }
 
   const { data, error: punchErr } = await supabase
+    // lint-query-ok: scoped to a single employee_id over a single-day (or single-shift) punch window — cannot plausibly exceed the 1,000-row cap
     .from('attendance_punch_logs')
     .select('id, punched_at, direction, source')
     .eq('tenant_id', tenantId)
@@ -784,7 +795,7 @@ async function fetchHoliday(
   // this filter aligns the attendance engine so day_fraction does not diverge.
   const { data: holidays, error } = await supabase
     .from('holiday_calendar')
-    .select('name, is_optional, site_id, location_id, holiday_group_id')
+    .select('name, is_optional, site_id, location_id, holiday_group_assignments(group_id)')
     .eq('tenant_id', tenantId)
     .eq('date', date)
     .eq('is_optional', false)
@@ -799,9 +810,13 @@ async function fetchHoliday(
   }
   if (!holidays?.length) return null
 
-  const hols = holidays as Array<{
+  // SYSTEM_AUDIT_2026-10-14 checkpoint 28: a holiday can be assigned to
+  // MULTIPLE groups (holiday_group_assignments) — comparing against the
+  // legacy single holiday_group_id column silently missed every group but
+  // the first one a holiday was saved to.
+  const hols = (holidays as any[]).map(withHolidayGroupIds) as Array<{
     name: string; is_optional: boolean
-    site_id: string | null; location_id: string | null; holiday_group_id: string | null
+    site_id: string | null; location_id: string | null; holiday_group_ids: string[]
   }>
 
   // Applicability priority: location > site > holiday-group > global (all-India).
@@ -811,10 +826,10 @@ async function fetchHoliday(
   const site = hols.find((h) => h.site_id && h.site_id === ctx.site_id)
   if (site) return { name: site.name, is_optional: site.is_optional }
 
-  const grp = hols.find((h) => h.holiday_group_id && h.holiday_group_id === ctx.site_holiday_group_id)
+  const grp = hols.find((h) => ctx.site_holiday_group_id && h.holiday_group_ids.includes(ctx.site_holiday_group_id))
   if (grp) return { name: grp.name, is_optional: grp.is_optional }
 
-  const global = hols.find((h) => !h.site_id && !h.location_id && !h.holiday_group_id)
+  const global = hols.find((h) => !h.site_id && !h.location_id && h.holiday_group_ids.length === 0)
   return global ? { name: global.name, is_optional: global.is_optional } : null
 }
 
@@ -1116,6 +1131,7 @@ export async function computeDay(
       worked_on_weekly_off: true,
       worked_on_holiday:    false,
       computed_source:      'engine' as const,
+      muster_code:          deriveMusterCode(status, false, true, workedFraction),
       ...shiftAttribution,
       reason:               `Worked on weekly off — ${workHours}h`,
       meta:                 { ...punchMeta, workedFraction },
@@ -1135,6 +1151,7 @@ export async function computeDay(
       worked_on_weekly_off: false,
       worked_on_holiday:    true,
       computed_source:      'engine' as const,
+      muster_code:          deriveMusterCode(status, true, false, workedFraction),
       ...shiftAttribution,
       reason:               `Worked on holiday (${holiday!.name}) — ${workHours}h`,
       meta:                 { ...punchMeta, workedFraction },
@@ -1315,18 +1332,33 @@ export async function recomputeRange(
   // Batch-fetch existing {status, day_fraction, computed_source} for delta detection
   // and recompute-protection filtering. Also pull the prior shift attribution so a
   // shift change across a recompute can be recorded (AHI-3 / migration 261).
-  const { data: existing } = await supabase
-    .from('attendance_daily')
-    .select('employee_id, date, status, day_fraction, computed_source, expected_shift_id, shift_start_time, resolution_source')
-    .eq('tenant_id', tenant_id)
-    .eq('employee_id', employee_id)
-    .in('date', dates)
+  //
+  // fetchAllRows(), scoped by date range rather than .in('date', dates):
+  // this is single-employee, but nothing caps from_date/to_date (several
+  // callers — recompute.ts, upload.ts, approval-service.ts — pass through
+  // a caller-supplied range with no maximum-span validation). A range
+  // spanning more than ~2.7 years produces >1,000 calendar dates, which
+  // both risks the .in() URL-length limit and the PostgREST 1,000-row
+  // response cap — silently truncating beforeMap and making the
+  // recompute-protection check below blind to protected dates past the
+  // cap, which could let a recompute silently overwrite them.
+  const existing = await fetchAllRows((from, to) =>
+    supabase
+      .from('attendance_daily')
+      .select('employee_id, date, status, day_fraction, computed_source, expected_shift_id, shift_start_time, resolution_source')
+      .eq('tenant_id', tenant_id)
+      .eq('employee_id', employee_id)
+      .gte('date', from_date)
+      .lte('date', to_date)
+      .order('date')
+      .range(from, to),
+  )
 
   const beforeMap = new Map<string, {
     status: string; day_fraction: number; computed_source: string
     expected_shift_id: string | null; shift_start_time: string | null; resolution_source: string | null
   }>(
-    ((existing ?? []) as Array<any>)
+    (existing as Array<any>)
       .map((r) => [`${r.employee_id}:${r.date}`, {
         status:            r.status,
         day_fraction:      r.day_fraction,
@@ -1378,6 +1410,7 @@ export async function recomputeRange(
 
   if (dbRows.length > 0) {
     const { error } = await supabase
+      // lint-tenant-ok: dbRows come from computeDay(), whose returned row always carries tenant_id — upsert payload is tenant-scoped even though the literal isn't inline in this query chain
       .from('attendance_daily')
       .upsert(dbRows, { onConflict: 'tenant_id,employee_id,date' })
 
@@ -1459,6 +1492,32 @@ export async function recomputeRange(
     // approval downstream, so it never changes pay directly. Non-blocking: a failure
     // here must never abort the attendance recompute.
     try {
+      const qualifies = safeComputed.some(r => r.worked_on_weekly_off || r.worked_on_holiday)
+      // Resolve the tenant's comp-off leave type so these requests are
+      // actually approvable. Without an explicit leave_type_id here, every
+      // request created through this — the only automatic path there is,
+      // triggered by any worked holiday/weekly-off day — persists with
+      // leave_type_id = NULL and the approval route then permanently refuses
+      // it ("regenerate via a leave-type-specific comp-off generation"), but
+      // that regeneration is a same-key upsert with ignoreDuplicates — it
+      // skips the already-existing row rather than fixing it, so the
+      // documented remedy doesn't actually unblock anything. Match on the
+      // "Compensatory Off" name the standard leave-type library seeds
+      // (comp-off has no dedicated marker column); tenants without that
+      // exact type keep today's behavior (null — HR must assign one via the
+      // manual Generate flow, whose explicit leave_type_id continues to work
+      // for dates not yet auto-generated).
+      let compOffLeaveTypeId: string | null = null
+      if (qualifies) {
+        const { data: compOffType } = await supabase
+          .from('leave_types')
+          .select('id')
+          .eq('tenant_id', tenant_id)
+          .eq('name', 'Compensatory Off')
+          .eq('is_active', true)
+          .maybeSingle()
+        compOffLeaveTypeId = compOffType?.id ?? null
+      }
       await generateCompOffRequests(
         supabase,
         tenant_id,
@@ -1471,6 +1530,7 @@ export async function recomputeRange(
           days_to_credit:       r.meta?.workedFraction ?? 1.0,
         })),
         changed_by ?? null,
+        compOffLeaveTypeId,
       )
     } catch (e) {
       console.warn(`[recomputeRange] comp-off auto-generate failed for employee ${employee_id}:`, e)

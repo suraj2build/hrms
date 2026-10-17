@@ -418,7 +418,35 @@ export async function runLeaveReconciliation(
     // chunked parallelism (same convention as poll-scheduler.ts's
     // SEND_CHUNK_SIZE) is safe.
     const REPLAY_CHUNK_SIZE = 25
-    const asOfToday = today  // already computed above
+    // DEFECT-10 (found during the PR #30 live-screen Attendance/Leave UAT,
+    // 2026-10-12): runMonthlyAccrual() deliberately stamps a credit's
+    // accrued_on as the accrual PERIOD's last calendar day (periodLastDay in
+    // accrual-engine.ts — e.g. 2026-10-31 for an October run), not the day
+    // the job actually ran. replayBalanceAsOf() filters ledger rows with
+    // `.lte('accrued_on', asOf)`, so passing today's exact date as `asOf`
+    // excludes the CURRENT month's just-credited accrual on every single
+    // day between "accrual ran" and the real end of that month — the
+    // ordinary case (accrual is normally run early/mid-month, not on the
+    // last day). That made this replay-drift check flag a false
+    // `replay_drift` for every employee whose current-month accrual had
+    // already run, every day until month-end — a systemic false-positive
+    // that would have drowned out real reconciliation issues in noise.
+    // Use the end of the current LOCAL month as the replay cutoff instead
+    // of the exact day, so a credit dated for the month already in
+    // progress is correctly visible once credited. Only applies when
+    // reconciling the year still in progress (`year === todayYear`) — a
+    // past year's accrual dates are all already behind `today` regardless,
+    // so the original exact-date cutoff is harmless (and correct) there;
+    // widening it unconditionally would be wrong for an admin re-running
+    // reconciliation against an arbitrary past year via POST
+    // /leave/reconciliation/run. (This function's own general-purpose
+    // `asOf` parameter — used by payroll-dispute lookups for a genuine
+    // historical point in time — is untouched; only this
+    // reconciliation-report call site's notion of "as of today" changes.)
+    const [todayYear, todayMonth] = today.split('-').map(Number)
+    const asOfToday = year === todayYear
+      ? new Date(Date.UTC(todayYear, todayMonth, 0)).toISOString().slice(0, 10)
+      : today
     const replayIds = [...replayEmployeeIds]
 
     for (let i = 0; i < replayIds.length; i += REPLAY_CHUNK_SIZE) {

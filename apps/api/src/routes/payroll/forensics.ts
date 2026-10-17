@@ -170,6 +170,7 @@ export default async function payrollForensicsRoutes(fastify: FastifyInstance) {
         .from('profiles')
         .select('id, full_name')
         .in('id', actorIds)
+        .eq('tenant_id', tenantId)
       nameById = new Map((profs ?? []).map((p: any) => [p.id as string, p.full_name as string | null]))
     }
 

@@ -13,6 +13,7 @@ import { z }                    from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
 import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
+import { blockIfPilotTenant } from '../../lib/pilot-guard.js'
 
 const monthRe = /^\d{4}-\d{2}$/
 
@@ -96,6 +97,7 @@ export default async function payrollLedgerRoute(fastify: FastifyInstance) {
   // ── POST /payroll/ledger/export — acknowledge an export of the filtered ledger ──
   fastify.post('/payroll/ledger/export', auth, async (req: any, reply) => {
     if (!isHr(req)) return reply.code(403).send({ error: 'FORBIDDEN', message: 'HR admin access required' })
+    if (await blockIfPilotTenant(fastify.supabase, req.tenantId, reply, 'Exporting the explainability ledger')) return
     const body = z.object({
       employee_id: z.string().uuid().optional(),
       month:       z.string().regex(monthRe).optional(),

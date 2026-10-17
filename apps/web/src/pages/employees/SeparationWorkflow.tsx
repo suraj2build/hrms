@@ -47,6 +47,9 @@ interface FnF {
   other_additions: number | null
   notice_period_deduction: number | null
   other_deductions: number | null
+  asset_recovery_amount: number | null
+  loan_recovery_amount: number | null
+  advance_recovery_amount: number | null
   net_payable: number | null
   status: 'draft' | 'approved' | 'paid'
   version?: number
@@ -59,6 +62,10 @@ interface FfBreakdown {
   gratuity_eligible?: boolean
   gratuity_years?: number
   leave_encashment_days?: number
+  asset_recovery_amount?: number | null
+  asset_recovery_count?: number
+  loan_recovery_amount?: number | null
+  advance_recovery_amount?: number | null
 }
 
 interface SeparationRow {
@@ -399,8 +406,10 @@ function FnFSection({ row }: { row: SeparationRow }) {
   const emptyFnF = {
     last_payroll_amount: 0, leave_encashment_amount: 0, gratuity_amount: 0,
     other_additions: 0, notice_period_deduction: 0, other_deductions: 0,
+    asset_recovery_amount: 0, loan_recovery_amount: 0, advance_recovery_amount: 0,
   }
   const [form, setForm] = useState(emptyFnF)
+  const [assetRecoveryCount, setAssetRecoveryCount] = useState<number | null>(null)
 
   function openEdit() {
     const f = row.fnf
@@ -411,13 +420,18 @@ function FnFSection({ row }: { row: SeparationRow }) {
       other_additions:        f?.other_additions        ?? 0,
       notice_period_deduction: f?.notice_period_deduction ?? 0,
       other_deductions:       f?.other_deductions       ?? 0,
+      asset_recovery_amount:   f?.asset_recovery_amount   ?? 0,
+      loan_recovery_amount:    f?.loan_recovery_amount    ?? 0,
+      advance_recovery_amount: f?.advance_recovery_amount ?? 0,
     })
+    setAssetRecoveryCount(null)
     setEditOpen(true)
   }
 
   const computedNet =
     (form.last_payroll_amount + form.leave_encashment_amount + form.gratuity_amount + form.other_additions)
-    - (form.notice_period_deduction + form.other_deductions)
+    - (form.notice_period_deduction + form.other_deductions
+       + form.asset_recovery_amount + form.loan_recovery_amount + form.advance_recovery_amount)
 
   // See ActionButtons' invalidate() above for why the extra keys are needed.
   const invalidate = () => {
@@ -463,7 +477,25 @@ function FnFSection({ row }: { row: SeparationRow }) {
   const paidMutation = useMutation({
     mutationFn: () => api.patch(`/employees/${row.employee_id}/separation-ff/mark-paid`, {}),
     onSuccess: () => { invalidate(); toast.success('F&F marked as paid') },
-    onError: (e: Error) => toast.error('Failed', { description: e.message }),
+    onError: (e: Error) => {
+      // SOURCE_DRIFT: a source loan/advance/asset balance changed since
+      // approval (migration 445's atomic mark-paid validates this before
+      // writing anything) — the fix is to reopen, recompute and re-approve,
+      // not just retry the same payment.
+      if (e.message?.includes('changed since this settlement was approved')) {
+        toast.error('Settlement is out of date', {
+          description: `${e.message} Use "Reopen" below to recompute and re-approve.`,
+        })
+        return
+      }
+      toast.error('Failed', { description: e.message })
+    },
+  })
+
+  const reopenMutation = useMutation({
+    mutationFn: () => api.patch(`/employees/${row.employee_id}/separation-ff/reopen`, {}),
+    onSuccess: () => { invalidate(); toast.success('F&F reopened to draft — recompute and review before re-approving') },
+    onError: (e: Error) => toast.error('Failed to reopen', { description: e.message }),
   })
 
   const computeMutation = useMutation<{ breakdown?: FfBreakdown }, unknown>({
@@ -476,7 +508,11 @@ function FnFSection({ row }: { row: SeparationRow }) {
           leave_encashment_amount: b.leave_encashment_amount ?? prev.leave_encashment_amount,
           gratuity_amount:         b.gratuity_amount ?? prev.gratuity_amount,
           notice_period_deduction: b.notice_period_deduction ?? prev.notice_period_deduction,
+          asset_recovery_amount:   b.asset_recovery_amount ?? prev.asset_recovery_amount,
+          loan_recovery_amount:    b.loan_recovery_amount ?? prev.loan_recovery_amount,
+          advance_recovery_amount: b.advance_recovery_amount ?? prev.advance_recovery_amount,
         }))
+        setAssetRecoveryCount(b.asset_recovery_count ?? null)
         toast.success('Settlement auto-calculated', {
           description: `Gratuity ${b.gratuity_eligible ? `(${b.gratuity_years} yrs service)` : '(not eligible)'} · ${b.leave_encashment_days} encashable leave days`,
         })
@@ -529,6 +565,9 @@ function FnFSection({ row }: { row: SeparationRow }) {
             <FnFLine label="(+) Other Additions"     value={fmtMoney(f.other_additions)} positive />
             <FnFLine label="(-) Notice Period Deduction" value={fmtMoney(f.notice_period_deduction)} negative />
             <FnFLine label="(-) Other Deductions"    value={fmtMoney(f.other_deductions)} negative />
+            <FnFLine label="(-) Outstanding Asset Recovery" value={fmtMoney(f.asset_recovery_amount)} negative />
+            <FnFLine label="(-) Loan Recovery"       value={fmtMoney(f.loan_recovery_amount)} negative />
+            <FnFLine label="(-) Advance Salary Recovery" value={fmtMoney(f.advance_recovery_amount)} negative />
             <div className="flex items-center justify-between px-4 py-3 bg-muted/30">
               <span className="text-sm font-bold">Net Payable</span>
               <span className={cn('text-lg font-bold', (f.net_payable ?? 0) < 0 ? 'text-destructive' : 'text-foreground')}>
@@ -555,12 +594,20 @@ function FnFSection({ row }: { row: SeparationRow }) {
             </Button>
           )}
           {f.status === 'approved' && (
-            <Button size="sm" variant="outline" className="h-7 text-xs border-success/40 text-success hover:bg-success/10"
-              disabled={paidMutation.isPending}
-              onClick={() => paidMutation.mutate()}>
-              {paidMutation.isPending && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
-              Mark as Paid
-            </Button>
+            <>
+              <Button size="sm" variant="outline" className="h-7 text-xs border-success/40 text-success hover:bg-success/10"
+                disabled={paidMutation.isPending}
+                onClick={() => paidMutation.mutate()}>
+                {paidMutation.isPending && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
+                Mark as Paid
+              </Button>
+              <Button size="sm" variant="ghost" className="h-7 text-xs text-muted-foreground"
+                disabled={reopenMutation.isPending}
+                onClick={() => reopenMutation.mutate()}>
+                {reopenMutation.isPending && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
+                Reopen
+              </Button>
+            </>
           )}
         </div>
       )}
@@ -585,9 +632,19 @@ function FnFSection({ row }: { row: SeparationRow }) {
               ['other_additions',         'Other Additions'],
               ['notice_period_deduction', 'Notice Period Deduction'],
               ['other_deductions',        'Other Deductions'],
+              ['asset_recovery_amount',   'Outstanding Asset Recovery'],
+              ['loan_recovery_amount',    'Loan Recovery'],
+              ['advance_recovery_amount', 'Advance Salary Recovery'],
             ] as [keyof typeof form, string][]).map(([key, label]) => (
               <div key={key}>
-                <Label className="text-xs">{label}</Label>
+                <Label className="text-xs">
+                  {label}
+                  {key === 'asset_recovery_amount' && assetRecoveryCount !== null && (
+                    <span className="ml-1 text-muted-foreground">
+                      ({assetRecoveryCount} unreturned {assetRecoveryCount === 1 ? 'asset' : 'assets'})
+                    </span>
+                  )}
+                </Label>
                 <Input
                   type="number"
                   className="mt-1 h-8 text-xs"

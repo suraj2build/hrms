@@ -346,6 +346,7 @@ export async function executeInChunks({
         .from('import_jobs')
         .select('status')
         .eq('id', jobId)
+        .eq('tenant_id', tenantId)
         .single()
       if (liveJob?.status === 'cancelled') {
         cancelled = true
@@ -490,6 +491,7 @@ export async function executeInChunks({
           avg_rows_per_sec: avgRps,
         })
         .eq('id', jobId)
+        .eq('tenant_id', tenantId)
         .then(() => {}, () => {})
     }
   }

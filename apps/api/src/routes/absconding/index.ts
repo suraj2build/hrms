@@ -50,6 +50,19 @@ const ALL_STATUSES  = [...OPEN_STATUSES, 'terminated', 'resolved', 'rejoined', '
 
 export default async function abscondingRoutes(fastify: FastifyInstance) {
   const hrAuth   = { preHandler: [fastify.authenticate, requireRole(...HR_ADMIN_ROLES)] }
+  // NOT narrowed to 'owner'/'chro' only, despite the docstring above saying
+  // "CHRO-only" — see the SYSTEM_AUDIT_2026-10-14 finding left as a comment
+  // on this route below. profiles.role's CHECK constraint (002_profiles.sql)
+  // only ever allows 'super_admin' | 'hr_admin' | 'manager' | 'employee' — no
+  // profile can hold role 'owner' or 'chro' in the current schema, so
+  // requireRole('owner','chro') alone would make this endpoint unreachable by
+  // anyone and permanently strand every case at 'termination_pending'.
+  // 'hr_admin' is kept here as the only presently-reachable role; this is a
+  // real segregation-of-duties gap (the same hr_admin who flags a case for
+  // termination can also approve it) that needs a data-model decision before
+  // it can be closed in code — see the escalation left for the integration
+  // owner rather than silently either leaving the gap unflagged or disabling
+  // the endpoint outright.
   const chroAuth = { preHandler: [fastify.authenticate, requireRole('owner', 'chro', 'hr_admin')] }
 
   // ── GET /absconding/cases ─────────────────────────────────────────────────

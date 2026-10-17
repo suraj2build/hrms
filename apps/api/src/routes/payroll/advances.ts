@@ -13,6 +13,7 @@ import { serverError, notFound, conflictError, ErrorCode } from '../../lib/api-e
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import { fetchTenantTz } from '../../lib/attendance-engine.js'
 import { getLocalDate } from '../../lib/org-context.js'
+import { blockIfPilotTenant } from '../../lib/pilot-guard.js'
 
 const RECOVERY_TYPES = ['payroll_deduction', 'manual_payment', 'adjustment'] as const
 
@@ -329,6 +330,7 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
   // ── POST /payroll/advances/:id/disburse ──────────────────────────────────────
   fastify.post('/:id/disburse', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const { id } = req.params as { id: string }
+    if (await blockIfPilotTenant(fastify.supabase, req.tenantId, reply, 'Disbursing a salary advance')) return
 
     const schema = z.object({
       disbursed_date: z.string(),
@@ -529,6 +531,7 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
 
   // ── POST /payroll/advances/recover ───────────────────────────────────────────
   fastify.post('/recover', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
+    if (await blockIfPilotTenant(fastify.supabase, req.tenantId, reply, 'Recording an advance recovery')) return
     const schema = z.object({
       advance_id: z.string().uuid(),
       schedule_id: z.string().uuid().optional(),
@@ -543,75 +546,37 @@ export default async function advancesRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
-    // advance_id is caller-supplied — verify it belongs to this tenant
-    // before it's referenced by the recovery insert below, otherwise a
-    // recovery row could be created against a foreign tenant's advance.
-    const { data: advance, error: advErr } = await fastify.supabase
-      .from('advance_salary_requests')
-      .select('id')
-      .eq('id', parsed.data.advance_id)
-      .eq('tenant_id', req.tenantId)
-      .maybeSingle()
-    if (advErr) return serverError(req, reply, advErr, ErrorCode.QUERY_FAILED, 'Failed to verify advance')
-    if (!advance) return notFound(reply, 'ADVANCE_NOT_FOUND', 'Advance not found')
+    // record_advance_recovery_atomic (migration 472) fuses what used to be
+    // FOUR separate supabase-js calls (verify the advance belongs to this
+    // tenant, CAS the schedule to 'recovered', insert the recovery record,
+    // recompute and update the advance's aggregate status) into ONE
+    // transaction. It also fixes a real, previously-unconditional bug in
+    // the insert this replaces: that insert never supplied `employee_id` or
+    // `recovery_month`, both NOT NULL with no default — every real call
+    // failed with a constraint violation, AFTER the schedule had already
+    // been flipped to 'recovered' in an earlier, separate statement,
+    // leaving it permanently stuck with no matching recovery record and no
+    // way to retry. Fusing the sequence means a failure anywhere (including
+    // a tenant mismatch, surfaced here as NOT_FOUND) rolls back the whole
+    // thing — the schedule is never left recovered with nothing recorded.
+    const { data: result, error: rpcErr } = await fastify.supabase.rpc('record_advance_recovery_atomic', {
+      p_tenant_id:      req.tenantId,
+      p_advance_id:     parsed.data.advance_id,
+      p_schedule_id:    parsed.data.schedule_id ?? null,
+      p_payroll_run_id: parsed.data.payroll_run_id ?? null,
+      p_amount:         parsed.data.amount,
+      p_recovery_type:  parsed.data.recovery_type,
+      p_notes:          parsed.data.notes ?? null,
+      p_actor_id:       req.userId,
+    })
 
-    // Fold the pending-status guard into the schedule update's own WHERE
-    // clause (was a separate unchecked update with no precondition at all),
-    // so recovering the same schedule twice can't insert a duplicate
-    // advance_recoveries row for the same recovery.
-    if (parsed.data.schedule_id) {
-      const { data: updatedSched, error: schedErr } = await fastify.supabase
-        .from('advance_recovery_schedules')
-        .update({ status: 'recovered' })
-        .eq('id', parsed.data.schedule_id)
-        .eq('tenant_id', req.tenantId)
-        .eq('status', 'pending')
-        .select('id')
-        .maybeSingle()
-      if (schedErr) return serverError(req, reply, schedErr, ErrorCode.UPDATE_FAILED, 'Failed to update recovery schedule')
-      if (!updatedSched) return conflictError(reply, 'ALREADY_RECOVERED', 'This recovery schedule has already been recovered')
+    if (rpcErr) {
+      const msg = rpcErr.message ?? ''
+      if (msg.includes('NOT_FOUND:')) return notFound(reply, 'ADVANCE_NOT_FOUND', 'Advance not found')
+      if (msg.includes('ALREADY_RECOVERED:')) return conflictError(reply, 'ALREADY_RECOVERED', 'This recovery schedule has already been recovered')
+      return serverError(req, reply, rpcErr, ErrorCode.UPDATE_FAILED, 'Failed to record advance recovery — no changes were made; retry is safe.')
     }
 
-    // Insert recovery record
-    const { data: recovery, error: recoveryErr } = await fastify.supabase
-      .from('advance_recoveries')
-      .insert({
-        ...parsed.data,
-        tenant_id: req.tenantId,
-        created_by: req.userId,
-      })
-      .select()
-      .single()
-
-    if (recoveryErr) return serverError(req, reply, recoveryErr, ErrorCode.INSERT_FAILED, 'Failed to record advance recovery')
-
-    // Check if all schedules recovered for this advance
-    const { count: pendingCount, error: pendingErr } = await fastify.supabase
-      .from('advance_recovery_schedules')
-      .select('id', { count: 'exact', head: true })
-      .eq('advance_id', parsed.data.advance_id)
-      .eq('tenant_id', req.tenantId)
-      .eq('status', 'pending')
-
-    if (pendingErr) return serverError(req, reply, pendingErr, ErrorCode.QUERY_FAILED, 'Failed to check remaining recovery schedules')
-
-    if ((pendingCount ?? 0) === 0) {
-      const { error: doneErr } = await fastify.supabase
-        .from('advance_salary_requests')
-        .update({ status: 'fully_recovered', updated_at: new Date().toISOString() })
-        .eq('id', parsed.data.advance_id)
-        .eq('tenant_id', req.tenantId)
-      if (doneErr) return serverError(req, reply, doneErr, ErrorCode.UPDATE_FAILED, 'Recovery recorded but failed to update advance status')
-    } else {
-      const { error: recoveringErr } = await fastify.supabase
-        .from('advance_salary_requests')
-        .update({ status: 'recovering', updated_at: new Date().toISOString() })
-        .eq('id', parsed.data.advance_id)
-        .eq('tenant_id', req.tenantId)
-        .in('status', ['disbursed'])
-      if (recoveringErr) return serverError(req, reply, recoveringErr, ErrorCode.UPDATE_FAILED, 'Recovery recorded but failed to update advance status')
-    }
-
-    return reply.code(201).send({ data: recovery })
+    return reply.code(201).send({ data: result })
   })
 }

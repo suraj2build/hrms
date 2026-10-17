@@ -10,6 +10,7 @@ import { resolveGreeting, type DayContext } from '@/components/experience/resolv
 import { cn } from '@/lib/utils'
 import { HEADER_GRADIENT } from './glossy'
 import { MobileBottomNav, employeeTabs } from './MobileBottomNav'
+import { PilotEnvironmentBanner } from '@/components/layout/PilotEnvironmentBanner'
 import { MobileHome } from './screens/MobileHome'
 import { EssTimeline } from '@/pages/ess/EssTimeline'
 import { MyGrowth } from '@/pages/ess/MyGrowth'
@@ -78,6 +79,7 @@ export function MobileEssShell({ previewHome = false }: { previewHome?: boolean 
 
   return (
     <div className="flex min-h-screen flex-col bg-[#EEF3FF]">
+      <PilotEnvironmentBanner />
       {/* ── Glossy header (hidden at the Arrival threshold) ── */}
       {!atThreshold && (
       <header className="relative px-5 pb-5 pt-9 text-white" style={{ background: HEADER_GRADIENT }}>

@@ -126,12 +126,14 @@ export default async function attendanceHealthIndexRoute(fastify: FastifyInstanc
     const nameMap = new Map<string, string>()
     const [empRes, deptRes, siteRes] = await Promise.all([
       idsByScope.employee.size
+        // lint-query-ok: idsByScope.employee is distinct scope_ids from one page of results (limit <= 500, validated above) — bounded well under the 1,000-row cap
         ? fastify.supabase.from('employees').select('id, first_name, last_name, employee_code').eq('tenant_id', req.tenantId).in('id', [...idsByScope.employee])
         : Promise.resolve({ data: [], error: null }),
       idsByScope.department.size
         ? fastify.supabase.from('departments').select('id, name').eq('tenant_id', req.tenantId).in('id', [...idsByScope.department])
         : Promise.resolve({ data: [], error: null }),
       idsByScope.site.size
+        // lint-query-ok: idsByScope.site is distinct scope_ids from one page of results (limit <= 500, validated above) — bounded well under the 1,000-row cap
         ? fastify.supabase.from('sites').select('id, name').eq('tenant_id', req.tenantId).in('id', [...idsByScope.site])
         : Promise.resolve({ data: [], error: null }),
     ])
@@ -313,6 +315,23 @@ export default async function attendanceHealthIndexRoute(fastify: FastifyInstanc
           return serverError(req, reply, empErr, ErrorCode.QUERY_FAILED, 'Failed to fetch active employees')
         }
         targetIds = activeEmps.map((e) => e.id)
+      } else {
+        // FK cross-tenant check — employee_ids is caller-supplied and only
+        // referenced via `.eq('tenant_id', ...)` filters on OTHER tables
+        // below, never verified against this tenant's own employees.
+        // attendance_health_scores.scope_id has no FK at all (it's a bare
+        // text/uuid column whose meaning depends on `scope`), so an
+        // unverified foreign employee_id would upsert a tenant_id=<this
+        // tenant>, scope_id=<foreign employee> row with every rate zeroed
+        // out — a tenant-isolation leak into this tenant's own health-index
+        // data, same bug class as risk.ts's /risk/compute.
+        const { data: ownedEmps, error: ownedErr } = await fastify.supabase
+          .from('employees')
+          .select('id')
+          .eq('tenant_id', req.tenantId)
+          .in('id', targetIds)
+        if (ownedErr) return serverError(req, reply, ownedErr, ErrorCode.QUERY_FAILED, 'Failed to verify employee_ids')
+        targetIds = (ownedEmps ?? []).map((e: { id: string }) => e.id)
       }
 
       if (targetIds.length === 0) {
@@ -480,14 +499,25 @@ export default async function attendanceHealthIndexRoute(fastify: FastifyInstanc
     // For department and tenant scopes, we aggregate from employee scores
     // that must already exist for the same period_month.
     if (scope === 'department') {
-      const { data: empScores, error: scErr } = await fastify.supabase
-        .from('attendance_health_scores')
-        .select('scope_id, health_score')
-        .eq('tenant_id', req.tenantId)
-        .eq('scope', 'employee')
-        .eq('period_month', period_month)
-
-      if (scErr) return serverError(req, reply, scErr, ErrorCode.QUERY_FAILED, 'Failed to fetch employee scores for department aggregation')
+      // fetchAllRows(): attendance_health_scores has one 'employee'-scope row
+      // per active employee per month — a plain .select() here silently
+      // truncated at PostgREST's 1,000-row cap for a tenant with >1,000
+      // active employees, so department aggregates were computed from an
+      // incomplete employee set rather than the whole department.
+      let empScores: Array<{ scope_id: string; health_score: number }>
+      try {
+        empScores = await fetchAllRows((from, to) =>
+          fastify.supabase
+            .from('attendance_health_scores')
+            .select('scope_id, health_score')
+            .eq('tenant_id', req.tenantId)
+            .eq('scope', 'employee')
+            .eq('period_month', period_month)
+            .range(from, to),
+        ) as Array<{ scope_id: string; health_score: number }>
+      } catch (scErr) {
+        return serverError(req, reply, scErr, ErrorCode.QUERY_FAILED, 'Failed to fetch employee scores for department aggregation')
+      }
 
       // Fetch employee → department mapping
       const empIds = ((empScores ?? []) as any[]).map((r) => r.scope_id)
@@ -495,11 +525,23 @@ export default async function attendanceHealthIndexRoute(fastify: FastifyInstanc
         return reply.send({ computed: 0, period_month })
       }
 
-      const { data: empDepts } = await fastify.supabase
-        .from('employees')
-        .select('id, job_history!job_history_employee_id_fkey(department_id, is_current)')
-        .eq('tenant_id', req.tenantId)
-        .in('id', empIds)
+      // Chunked: empIds is the tenant's full set of scored employees for the
+      // period — can exceed a single .in() URL's safe size at scale.
+      const empDepts: any[] = []
+      for (let i = 0; i < empIds.length; i += 100) {
+        const chunkIds = empIds.slice(i, i + 100)
+        const { data, error: empDeptsErr } = await fastify.supabase
+          // lint-query-ok: chunkIds is a slice of 100 ids (loop above) — result is bounded to <=100 rows, well under the 1,000-row cap
+          .from('employees')
+          .select('id, job_history!job_history_employee_id_fkey(department_id, is_current)')
+          .eq('tenant_id', req.tenantId)
+          .in('id', chunkIds)
+        // Surface rather than silently proceed with a partial employee set —
+        // a swallowed chunk failure would silently under-report some
+        // employees from their department's health-index aggregation.
+        if (empDeptsErr) return serverError(req, reply, empDeptsErr, ErrorCode.QUERY_FAILED, 'Failed to resolve employee departments for health-index aggregation')
+        if (data) empDepts.push(...data)
+      }
 
       const deptScoreMap: Map<string, number[]> = new Map()
       const empDeptLookup: Map<string, string> = new Map()
@@ -511,7 +553,15 @@ export default async function attendanceHealthIndexRoute(fastify: FastifyInstanc
         const deptId = empDeptLookup.get(s.scope_id)
         if (!deptId) continue
         if (!deptScoreMap.has(deptId)) deptScoreMap.set(deptId, [])
-        deptScoreMap.get(deptId)!.push(s.health_score)
+        // Number(): health_score is a NUMERIC/DECIMAL column, which can come
+        // back as a string rather than a JS number depending on the PostgREST
+        // client — the same coercion this codebase already applies to every
+        // other DECIMAL column read before arithmetic (e.g. Number(row.days)
+        // in leave.ts/leave-accrual-lifecycle.ts). Without it, `+` on two
+        // string values concatenates instead of summing, producing NaN once
+        // divided — which then serializes as a JSON `null` and is rejected
+        // by the NOT NULL constraint on write.
+        deptScoreMap.get(deptId)!.push(Number(s.health_score))
       }
 
       const now        = new Date().toISOString()
@@ -542,16 +592,28 @@ export default async function attendanceHealthIndexRoute(fastify: FastifyInstanc
 
     // tenant scope
     if (scope === 'tenant') {
-      const { data: empScores, error: scErr } = await fastify.supabase
-        .from('attendance_health_scores')
-        .select('health_score')
-        .eq('tenant_id', req.tenantId)
-        .eq('scope', 'employee')
-        .eq('period_month', period_month)
+      // fetchAllRows(): same 1,000-row ceiling risk as the department branch
+      // above — a plain .select() here would silently drop employees past
+      // the cap for a tenant with >1,000 scored employees, skewing the
+      // tenant-wide average toward whichever page happened to be returned.
+      let empScores: Array<{ health_score: number }>
+      try {
+        empScores = await fetchAllRows((from, to) =>
+          fastify.supabase
+            .from('attendance_health_scores')
+            .select('health_score')
+            .eq('tenant_id', req.tenantId)
+            .eq('scope', 'employee')
+            .eq('period_month', period_month)
+            .range(from, to),
+        ) as Array<{ health_score: number }>
+      } catch (scErr) {
+        return serverError(req, reply, scErr, ErrorCode.QUERY_FAILED, 'Failed to fetch employee scores for tenant aggregation')
+      }
 
-      if (scErr) return serverError(req, reply, scErr, ErrorCode.QUERY_FAILED, 'Failed to fetch employee scores for tenant aggregation')
-
-      const scores = ((empScores ?? []) as any[]).map((r) => r.health_score as number)
+      // Number(): see the department branch above — health_score is a
+      // NUMERIC/DECIMAL column that can come back as a string.
+      const scores = ((empScores ?? []) as any[]).map((r) => Number(r.health_score))
       if (scores.length === 0) {
         return reply.send({ computed: 0, period_month })
       }

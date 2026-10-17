@@ -1,0 +1,818 @@
+# CognixHR Production-Readiness — Final Qualification Report
+
+**Branch:** `fix/g13-numeric-coercion-sweep` (PR #29, `suraj2build/hrms`)
+**Last CI-validated code SHA:** `2d8e0d70` — pushed and run through real CI
+(6 of 7 checks green; E2E blocked on staging secrets, as documented below).
+This is the actual tested artifact; it is deliberately recorded as a
+*separate* fact from this document's own commit, not embedded self-
+referentially (see note below).
+**Ahead of `origin/main`:** 65 commits (0 behind)
+**Unpushed vs `origin/fix/g13-numeric-coercion-sweep`:** 0 commits — **pushed**
+**PR #29 state:** open, **draft**, not merged, base `main` — unchanged this round
+**Push status:** done. Pushed `0d798014..4d8b006b`, `4d8b006b..c622a08c`, `c622a08c..f5e48e7b`, `f5e48e7b..15e582d0`, then `15e582d0..2d8e0d70`. This round fixes two real defects direct testing found (a string-literal-unsafe normalizer, a wiring check that didn't verify the checked origin actually answered) and precisely rewords three claims a review correctly flagged as overstated (schema coverage, wiring scope, secrets availability) — see §4 addendum. It does not itself advance Gates 1–4, since there is still no staging environment to run any of this against.
+
+**Note on this document's own hash:** an earlier revision embedded this
+commit's own SHA inside itself, then amended that commit to fix a
+mistake — which changes the SHA again, invalidating the embedded value.
+This is a correction a review correctly caught. Fix: this document now
+records the *code* SHA it describes (`2d8e0d70`, above) as a fact
+established by a prior, separate, already-pushed commit — never the
+hash of whatever commit is currently editing this file. Anyone needing
+this document's own commit hash should read it from `git log -1 --
+docs/production-readiness/FINAL_QUALIFICATION_REPORT.md` rather than
+trust a value written inside the file.
+
+This report is the single source of truth for "what is actually true right
+now." Where it disagrees with an earlier narrative elsewhere in this
+directory, this document is newer and wins — but nothing here was produced
+by regenerating a baseline or deleting evidence; every claim below cites the
+script/commit that backs it.
+
+**Revision note:** the first version of this report said "one hard blocker
+left," which understated what's actually outstanding. This revision corrects
+that: §4 below lists four standing release gates, none of them satisfied yet,
+exactly as named in review feedback — not a single blocker with everything
+else downgraded to a footnote. It also corrects an accounting error from the
+first version: the G08 fix-sweep's "96 findings... fixed or
+justified-suppressed" blurred two different things together. The real,
+register-backed split (`g08-sweep-findings-register.csv`, built from the
+actual commit diff, not from memory) is **39 true positives genuinely
+repaired** and **59 false positives justified and suppressed — not repairs,
+not counted toward anything "fixed."** The exact mechanism for 96→98 (two
+specific lines whose fingerprint changed register when their *other*
+register's gap was fixed — `EVIDENCE.md`'s new subsection) and an
+independent spot-verification of 7 of the 59 suppressions against the
+actual code/migrations (zero overturned) are both now documented rather
+than asserted.
+
+---
+
+## 1. What this round closed
+
+Continuing the standing engagement (G01–G13 individual findings, the 223-row
+baseline reconciliation, cross-role UAT), this round's explicit mandate was:
+close the remaining financial-semantics gaps a review flagged as
+insufficient, complete the release-check migration, broaden UAT, run local
+load/recovery tests, and report G07–G09/G11 status. Completed in full:
+
+| Item | Status | Evidence |
+|---|---|---|
+| G02 (excessive LOP) correction | **FIXED** — blocks by default, override persisted | `scripts/g02-lop-exceeds-working-days-check.sh`, 19/19 |
+| G03 (F&F staleness) correction + extension | **FIXED** — now covers salary basis AND gratuity/leave-encashment/notice | `scripts/g03-fnf-settlement-last-finalized-slip-check.sh`, 12/12 |
+| G04 (maker-checker ordering) correction | **FIXED** — commit moved to after Step 2's atomic seal; downstream failure/retry/concurrency tested | `scripts/g04-maker-checker-approval-ordering-check.sh`, 22/22 |
+| G06 (statutory report) frontend wiring | **FIXED** — real browser verification | `scripts/g06-statutory-report-real-contributions-check.sh`, 6/6 |
+| G08 (ratchet mechanism) | **FIXED** — stable-key migration complete; of 98 surfaced findings, 39 genuinely repaired + 59 justified-suppressed (not repairs) | both ratchets, 0 new findings; register: `g08-sweep-findings-register.csv` |
+| G09 (E2E not a PR gate) | **FIXED** | `e2e.yml` + `05-payroll.spec.ts` |
+| G11 (revocation latency) | **FIXED, measured** | `scripts/g11-access-revocation-latency-check.sh`, 9/9 |
+| Full financial-chain reconciliation | **Done** — one real bug found (PTax) and fixed | `scripts/ptax-filing-slip-reconciliation-check.sh`, 2/2 |
+| Broader UAT (3rd journey) | **Done** — reimbursement-claim approval | `scripts/cross-role-reimbursement-approval-uat.sh`, 13/13 |
+| Local load/scale test | **Re-confirmed at 2,200 employees** | `scripts/pagination-scale-check.sh`, 15/15 |
+| Local concurrency/retry test | **Re-confirmed** | `scripts/concurrency-retry-check.sh`, 7/7 |
+| Local backup/restore rehearsal | **New, done** | `scripts/backup-restore-rehearsal-check.sh`, 18/18 |
+| Real PostgREST / real Supabase validation | **Still blocked** — infrastructure access this sandbox cannot provide | unchanged |
+
+---
+
+## 2. Complete real-stack check results
+
+Every script below drives the real Fastify API against real Postgres
+through the real auth gateway — not mocks, not direct DB writes to the
+workflow state under test. All 16 were re-run clean, in sequence, against
+the same HEAD as this report, immediately before this report was written.
+
+| Script | Assertions | Result |
+|---|---|---|
+| `g01-leave-accrual-ledger-check.sh` | 4 | ✅ 4/4 |
+| `g02-lop-exceeds-working-days-check.sh` | 19 | ✅ 19/19 |
+| `g03-fnf-settlement-last-finalized-slip-check.sh` | 12 | ✅ 12/12 |
+| `g04-maker-checker-approval-ordering-check.sh` | 22 | ✅ 22/22 |
+| `g06-statutory-report-real-contributions-check.sh` | 6 | ✅ 6/6 |
+| `g11-access-revocation-latency-check.sh` | 9 | ✅ 9/9 |
+| `g13-reconciliation-check.sh` | 21 | ✅ 21/21 |
+| `finalized-slip-value-lockdown-check.sh` | 5 | ✅ 5/5 |
+| `validation-rules-tenant-override-check.sh` | 13 | ✅ 13/13 |
+| `attendance-survey-truncation-check.sh` | 7 | ✅ 7/7 |
+| `cross-role-ess-payslip-uat.sh` | 7 | ✅ 7/7 |
+| `cross-role-leave-approval-uat.sh` | 7 | ✅ 7/7 |
+| `cross-role-reimbursement-approval-uat.sh` | 13 | ✅ 13/13 |
+| `ptax-filing-slip-reconciliation-check.sh` | 2 | ✅ 2/2 |
+| `concurrency-retry-check.sh` | 7 | ✅ 7/7 |
+| `pagination-scale-check.sh` | 15 | ✅ 15/15 |
+| **Total** | **169** | **✅ 169/169** |
+
+Plus, unit/type level:
+- `cd apps/api && npx tsc --noEmit` — clean.
+- `cd apps/api && npx vitest run` — **41 files / 334 tests passing**.
+- `node scripts/check-unbounded-queries.mjs --ratchet` — **0 new findings** (stable-key).
+- `node scripts/check-tenant-isolation.mjs --ratchet` — **0 new findings** (stable-key).
+
+Every fix landing in this round was mutation-tested (revert → confirm RED
+against the real stack → restore → confirm GREEN) before being counted as
+closed; see the individual commit messages and EVIDENCE.md for each
+before/after pair.
+
+---
+
+## 3. Workflow / journey coverage
+
+**Cross-role UAT (3 journeys, 12 distinct real identities across them, all
+through real HTTP endpoints — not direct DB manipulation of the workflow
+under test):**
+1. ESS payslip isolation (hr_admin + employee self-service) — `cross-role-ess-payslip-uat.sh`.
+2. Leave-request manager approval (employee + 2 managers + hr_admin; tests `validateApprover()`'s direct manager_id scoping) — `cross-role-leave-approval-uat.sh`.
+3. Reimbursement-claim approval (5 identities incl. cross-tenant; tests the independent `gateApprove()`/`isSelfApproval()` authorization path, a different mechanism from #2) — `cross-role-reimbursement-approval-uat.sh`.
+
+**Financial-chain reconciliation**, traced end to end: leave → payroll →
+TDS/EPF/ESI/PTax → arrears/advances/reimbursements → leave encashment → F&F
+→ accounting ledger → filing pack. EPF/ESI/TDS/accounting were already
+"slip is source of truth" (closing the exact G06 failure mode at each
+stage); PTax was not — found and fixed this round (§1).
+
+**Scale / concurrency / recovery:**
+- 2,200 employees, ESI+EPF+PTax compute, independent SQL read-back (not
+  just the API's own claim) confirming zero truncation signature.
+- 2 concurrent + 1 serial retry of the same ESI compute request — idempotent, not corrupted.
+- G04's own script separately covers concurrent/duplicate finalize-approve
+  calls and a downstream-failure-then-retry sequence for payroll finalize specifically.
+- Local Postgres backup (`pg_dump -Fc`, 4.6s/3.5MB) → restore into a fresh
+  DB (7.8s) → independently verified: every sampled table's row count AND
+  a full content checksum of `payroll_slips` match exactly.
+
+**Not covered / explicitly out of scope for a local sandbox:** a true
+multi-instance *production* deployment behind a load balancer (G11 was
+measured across 2 local instances, not N); "background jobs" under
+interrupted-process conditions (kill -9 mid-write) — the maker-checker
+downstream-failure test (G04 §6/§7) is the closest real analogue reproduced
+without actually killing a process.
+
+---
+
+## 4. Four standing release gates — none satisfied yet
+
+These are explicit, named release gates. Local remediation being
+substantially complete does not close any of them; each needs its own
+distinct action, and none of them are optional caution.
+
+**Two scope limits to carry into the actual staging run, stated plainly
+up front so they can't be missed in the detail below:**
+1. **Schema verification currently covers columns only.** Constraints
+   (CHECK/UNIQUE/FK), indexes, RLS policies, triggers, and functions are
+   NOT checked by anything in this report and still need validation
+   against the real staging database once it exists.
+2. **The dynamic wiring check is an unauthenticated startup signal, not
+   proof the application works.** It confirms the checked API origin
+   answers a request during page load. It does not log in, and it does
+   not prove the candidate web app successfully completes an authenticated
+   request against the candidate API — only the real Playwright E2E suite,
+   run against staging with real HR credentials, proves that.
+
+**Gate 1 — Push the commits and pass real CI on the exact release
+candidate.** Status: **partially done; the verifier itself had four real
+defects, caught by review before any secret had ever made it fire — all
+four now fixed and independently re-tested.**
+
+Pushed and ran real CI on `4d8b006b`: **6 of 7 checks passed** — Schema
+drift, Data correctness ratchet (RC-G5-01), Tenant isolation ratchet,
+Typecheck & tests, Error hygiene ratchet, Vercel Preview Comments —
+directly validating this round's fixes against real infrastructure, not
+just this sandbox. **End-to-End Lifecycle Tests failed**, root-caused via
+the actual job log: all required secrets are unavailable to this job (see
+§4 addendum — this does not establish they are absent from every scope,
+or that no staging environment exists). This is not a
+regression from this PR — every prior run of this workflow (9 of 9,
+`schedule`-triggered on `main`, back to 2026-08-10) failed identically;
+it's been silently red for two months, and this PR's own G09 fix
+(`pull_request` trigger) is what made it visible for the first time.
+
+The next review correctly identified that the candidate-verification
+infrastructure built in `0d798014` had not actually been exercised against
+real secrets yet, and found four concrete gaps in it before it could be
+trusted as qualification evidence. All four are fixed in `c622a08c`, with
+direct (not just reasoned-through) re-verification for each:
+
+1. **Wrong target commit.** `EXPECTED_SHA` was `github.sha`, which on a
+   `pull_request` run is GitHub's ephemeral `refs/pull/N/merge` commit —
+   confirmed concretely from this PR's own CI run (job `37339052239`):
+   `github.sha` there was `18362fd5...`, a merge commit that exists on no
+   branch Vercel/Railway ever deploy, while the PR's real head was
+   `4d8b006b`. Even a staging environment correctly deployed at the exact
+   candidate commit would have been reported as a mismatch. Fixed: use
+   `github.event.pull_request.head.sha` (falls back to `github.sha` for
+   `workflow_dispatch`/`schedule` runs on a real branch, where it IS the
+   deployed commit).
+2. **DB check was optional and latest-only.** Fixed: `STAGING_PG*` secrets
+   are now required (fails the job the same as a missing URL does, not a
+   silent skip), and the check now walks every file in
+   `supabase/migrations/` and reports exactly which are missing from
+   `supabase_migrations.schema_migrations`, not just whether the latest
+   one is present — a DB with migration 441 applied but missing 250 now
+   fails instead of passing.
+3. **Missing secrets don't prove staging doesn't exist — so that claim was
+   checked, not assumed.** Re-ran the workflow manually
+   (`workflow_dispatch`, run `37351301793`, on this HEAD `c622a08c`) to get
+   a direct answer instead of relying on an unverified statement either
+   way. The job log shows, byte for byte: **all nine required secrets
+   were unavailable to this job** — `E2E_BASE_URL`, `E2E_API_URL`,
+   `E2E_HR_EMAIL`, `E2E_HR_PASS`, `STAGING_PGHOST`, `STAGING_PGPORT`,
+   `STAGING_PGUSER`, `STAGING_PGPASSWORD`, `STAGING_PGDATABASE` (`[ -z "" ]`
+   evaluated true for every one of them, as seen by this specific job).
+   This is evidence of exactly that and no more: it does not establish
+   the secrets are absent from every GitHub scope (a GitHub
+   Environment-scoped secret would look identical to this job without an
+   `environment:` key — see the §4 addendum below), and it does not
+   establish that no staging environment exists at all. If
+   `E2E_BASE_URL` was expected to already be configured, that expectation
+   needs reconciling against this job's actual visibility, not assumed
+   either way from here.
+4. **The local DB-check test only proved the script's own SQL, not real
+   Supabase compatibility.** Re-tested against a table a real
+   `supabase db push --db-url` run actually populated (not a hand-built
+   fixture): confirmed `schema_migrations.version` is the exact
+   zero-padded numeric prefix and `.name` excludes it, tightened the query
+   from a `LIKE`-prefix match to exact equality on `version` (a prefix
+   match could wrongly treat "25" as satisfied by version "250"), and
+   confirmed both directions — a deleted mid-history row (441 present, 250
+   missing) correctly fails; full history correctly passes. (Applying all
+   437 migrations end-to-end via the real CLI was not possible in this
+   sandbox — most reference `auth.users`, which only exists under the full
+   Supabase stack, which needs Docker, which this sandbox's container
+   can't run — but that limitation is irrelevant to what was being
+   verified: the tracking table's real shape and the query's correctness
+   against it, both confirmed.)
+
+A fifth, independently raised gap — that matching web and API SHAs do not
+prove the web app actually calls the API that was checked — is also closed
+in `c622a08c`: `write-build-info.mjs` now records the build-time
+`VITE_API_URL` in `version.json`, and the verifier's new check 3 fails if
+that recorded value doesn't match the `API_URL` under test. Verified with
+a deliberate fixture: both SHAs matching while the web build points at a
+different API host correctly fails; a consistent fixture correctly passes.
+
+**A further review correctly characterized the previous round as
+preparing qualification, not completing it, and named three specific
+remaining gaps in the verifier itself.** All three are fixed in `15e582d0`:
+
+1. *Migration presence proves tracking entries exist, not that content or
+   resulting schema match.* Presence-only was always going to miss a
+   migration edited after being applied (file now says X, but the DB was
+   built from the old Y), and never actually tested whether the staging
+   DB's real shape — as opposed to a theoretical reconstruction — has
+   what the code needs. Added `scripts/db/check-migration-content-drift.mjs`
+   (compares `schema_migrations.statements` — confirmed by direct test to
+   hold the real applied SQL — against each file's current content) and
+   wired `check-schema-drift.mjs --skip-apply` into the verifier to
+   introspect the staging connection directly. Verified against the real
+   437-migration history: a one-line edit to an already-applied file is
+   caught, a comment-only edit is correctly ignored, and a temporarily
+   renamed column the API code depends on is caught and clears once
+   reverted. This testing also surfaced a real bug — the content query's
+   default 1MB exec buffer overflowed against the full migration corpus
+   (`ENOBUFS`) — fixed by raising it to 200MB; caught before it could ever
+   produce a false pass in CI.
+2. *Build metadata proves what the build script wrote, not what the
+   running client does.* A platform rewrite, a runtime config override,
+   or a stale cached bundle would all pass the SHA/metadata checks while
+   the deployed page actually calls something else. Added
+   `apps/e2e/verify-web-api-wiring.mjs`: loads the real page in a real
+   browser (Playwright, already available in the CI job) and checks the
+   actual network *responses* it receives, not just requests sent — see
+   §4 addendum below for why that distinction mattered and what it caught.
+   Could not be pointed at the real live Vercel preview from this sandbox
+   — its egress proxy blocks arbitrary external hosts by policy — so this
+   is verified against controlled fixtures, not (yet) the real deployed PR
+   preview; it will run for real the next time this workflow does, once
+   secrets exist.
+3. *A missing-secret result proves the secret was unavailable to that
+   job, not that it is absent everywhere.* GitHub Environments scope
+   secrets separately from repository secrets, and this job declares no
+   `environment:` key — if any of the required secrets exist under an
+   Environment rather than as a plain repository secret, they would
+   report as missing regardless. Checked directly rather than assumed:
+   both `GET .../environments` and `GET .../actions/secrets` (names only,
+   values are never retrievable) return "not permitted through this
+   proxy" — a firm tool boundary, not a transient failure. Documented as
+   an explicit open question in `apps/e2e/README.md`, with the exact
+   `environment:` line to add if an administrator confirms one applies.
+
+**§4 addendum — a further review correctly identified that three of the
+claims above were imprecisely worded, and this round's own output could
+still be overclaiming.** None of these change the verdict; this is a
+wording correction plus two real defects that direct testing (not
+inspection) turned up while checking those claims:
+
+- *"Resulting schema matches" overstated what check 6 proves.* It checks
+  column references only — it was never close to a full schema
+  comparison, and the report's and script's own language didn't say so.
+  Reworded throughout (`verify-staging-candidate.sh`, `apps/e2e/README.md`,
+  here) to state plainly that constraints (CHECK/UNIQUE/FK), indexes, RLS
+  policies, triggers, and function/procedure bodies are NOT checked by
+  this — a staging DB can pass column coverage while missing an RLS
+  policy the application's tenant isolation depends on.
+- *"Issued a request to the checked origin" was too weak a claim, and
+  testing proved it, not just arguably.* Built a fixture where the
+  checked API origin immediately 302-redirects every request to a
+  different host (with correct CORS headers, so the browser actually
+  follows it rather than blocking it outright) — the previous
+  request-only check reported a clean pass, because a request WAS sent
+  to the checked origin; it just never got an answer FROM it. Rewrote the
+  check to listen for *responses*, not requests, and to explicitly fail
+  (naming the redirect target) when the only responses from the checked
+  origin are redirects elsewhere. Re-verified all three cases on the
+  corrected check: genuine direct answer passes, wrong host fails, redirect-
+  away fails and names where it went. This is still, precisely, an
+  unauthenticated load-time signal — it does not log in, exercise an
+  authenticated request, or inspect response bodies; that remains the
+  Playwright suite's job in the very next step, and the report no longer
+  implies otherwise.
+- *The secrets claim needed the same precision the README already had.*
+  "All nine secrets are unset" is accurate only as "unavailable to the
+  job that reported it" — it was never evidence that no staging
+  environment exists, or that the secrets are absent from every GitHub
+  scope (an Environment-scoped secret would report the same way). Already
+  worded carefully in `apps/e2e/README.md`; tightened further there and
+  the language above now says "unavailable to this job," not "absent."
+- *Migration-content detection itself had two real masking defects,
+  confirmed by direct test, not assumed safe.* The normalizer treated
+  `--` and `;` as comment/separator characters even inside string
+  literals — constructed two concrete cases where this made genuinely
+  different content normalize equal (`'safe--value-A'` vs
+  `'safe--value-B'`; `'alpha;beta'` vs `'alpha beta'`), proving the
+  mask was real, not hypothetical. Rewrote `normalize()` as a proper
+  single-pass scanner that tracks single/double-quoted strings and
+  Postgres dollar-quoted blocks (`$$...$$`, `$tag$...$tag$`) and only
+  treats comments/semicolons as such outside them. Also confirmed
+  separately: a row with NULL or empty `statements` now fails with its
+  own distinct message ("no recorded statements to compare against")
+  rather than being folded into "edited since applied" or silently
+  passing — it was never a silent pass, but the message was imprecise
+  about why. Re-ran the full 437-migration real-content regression after
+  the rewrite (clean pass, real-edit detection, comment-only edit
+  correctly ignored) plus six targeted unit tests of the new normalizer,
+  including the two originally-masked cases and a real plpgsql function
+  body containing `$1`-style positional parameters — all pass.
+
+**Still blocked on an administrator and on infrastructure that doesn't
+exist yet** — not on anything further this kind of local work can close:
+provisioning the actual staging deployment, adding the real secrets (and
+confirming whether any need an `environment:` scope), and then letting
+this now-six-check-plus-dynamic verifier run against it for the first
+time. No amount of additional local hardening substitutes for that one
+real run — the next correction this section needs is its result, not
+another gap found by inspection. No further verifier changes are planned
+unless running it for real surfaces one.
+
+**Gate 2 — Validate against actual Supabase/PostgREST**: migrations, RLS,
+authentication, pagination, and financial reconciliation at 2,200+
+employees. Status: **not done.** Every real-stack script in this entire
+engagement (§2's 169 assertions, the 2,200-employee pagination test, the
+PTax reconciliation fix) runs against this sandbox's own Postgres plus a
+hand-built PostgREST-compatible gateway (`/tmp/supabase-gateway.mjs`), not
+genuine managed Supabase. That gateway faithfully reproduces the specific
+behavior this engagement cares about (`max-rows=1000`, NUMERIC-as-string)
+but has never been checked against the real service's actual RLS
+enforcement, auth token validation, or wire behavior at scale. This
+sandbox has no network path to a real Supabase project — it cannot be
+closed by any amount of further local work, only by running this same
+battery (or the equivalent) against a real staging project.
+
+**Gate 3 — Production qualification**: representative concurrent-user
+load and managed backup/restore evidence. Status: **not done — distinct
+risk from what's covered.** This round's `pagination-scale-check.sh`
+(2,200 employees) and `concurrency-retry-check.sh` (2 concurrent requests)
+prove data-volume and narrow-concurrency correctness, not production-scale
+concurrent-user load (many simultaneous distinct users/sessions hitting
+the API together) or Supabase's own managed backup/restore/PITR tooling.
+`backup-restore-rehearsal-check.sh` proves the *data* survives a local
+`pg_dump`/`pg_restore` cycle with integrity (18/18, row+checksum verified)
+— it does not exercise Supabase's operational recovery path at all. Both
+need a real staging environment.
+
+**Gate 4 — Resolve G12 scope**: complete standalone leave encashment, or
+explicitly exclude and disable it for launch. Status: **not done — this
+is a decision only the product owner can make, not something to default
+on.** The two concrete paths:
+  - *Complete it*: build the missing employee-initiated request UI and a
+    proven disbursement path (currently "mark paid" only flips a status
+    column with no verified payment execution behind it) — a real feature
+    build, not a quick fix, and needs product requirements this report
+    cannot supply on its own.
+  - *Explicitly disable it*: feature-flag or remove the standalone
+    encashment entry points for this launch, with that exclusion stated
+    in release notes/scope docs, not left ambiguous.
+  Neither has been chosen yet. **I have not picked one unilaterally** — if
+  you want the "disable" path executed, that's a bounded engineering task
+  I can do on explicit instruction; the "complete it" path needs product
+  requirements first.
+
+  **Addendum (2026-10-12): Gate 4 decided and the "complete it" path
+  executed.** The user explicitly authorized completion (not exclusion).
+  Built on `integration/g13-plus-market-priorities` (migration 446): the
+  employee request UI, real payout/TDS computation at approval, an atomic
+  `mark_leave_encashment_paid_atomic` that posts the payout into a named
+  draft payroll run's payslip, an atomic `reverse_leave_encashment_atomic`,
+  and duplicate-payroll/F&F-payment prevention (detailed in `STATUS.md`'s
+  own 2026-10-12 addendum and `FINDINGS.csv` row `G12-FOLLOWUP`). Gate 4
+  as originally scoped here — "a decision only the product owner can
+  make" — is now made and executed. What that gate does NOT retroactively
+  satisfy: the TDS figure is a flat marginal-rate withholding, not a
+  Section 10(10AA) exemption computation (needs tax/compliance sign-off),
+  and nothing here substitutes for Gates 1–3's still-open real-staging
+  evidence (E2E, real Supabase RLS, production-scale concurrent-user load,
+  managed backup/restore). The NO-GO verdict in §5 below is otherwise
+  unchanged by this addendum — it closes one of four gates' *decision*,
+  not the other three gates' *evidence*.
+
+  **Addendum (2026-10-12, round 2): a real defect in the round-1 "complete
+  it" build was found and fixed; one real gap was found and is explicitly
+  NOT fixed.** An independent review of the round-1 G12 build above
+  requested specific proof on four points instead of accepting the
+  "DONE" framing. Checking each against the actual code (not re-asserting
+  the prior claim) found:
+  - **Payment status (a real defect, now fixed).** `mark_leave_encashment_
+    paid_atomic` (migration 446) posted the payout into an already-
+    persisted `payroll_slips` row and flipped status to `'paid'`
+    immediately — but `POST /payroll/runs` explicitly permits deleting and
+    recomputing every slip in a non-finalized run on re-run, which would
+    have silently wiped that posting while the request kept claiming
+    `'paid'`. Migration 447 fixes this: the payout is derived fresh on
+    every (re)generation pass instead of stored-then-mutated, and `'paid'`
+    is only set once the run is actually finalized. Proven against a real
+    local Postgres 16 instance with the full migration history
+    (000→447) applying cleanly: `scripts/db/verify-g12-encashment-
+    atomic.mjs`, 32 checks, directly simulating the delete-and-recompute
+    re-run path.
+  - **Tax treatment and payroll consistency.** No change to the tax
+    treatment itself (still flat marginal-slab-rate, still not a
+    10(10AA) exemption computation). The fix above was deliberately
+    ordered to avoid a related risk: `applyEncashmentPayout` runs after
+    the TDS annual-income projection, so a one-time lump sum is never
+    multiplied into the recurring-salary annual projection.
+  - **F&F concurrency — a real gap, confirmed, explicitly NOT fixed.**
+    `mark_fnf_paid_atomic` (445) validates loan/advance/asset drift but has
+    no equivalent check for leave-encashment-balance drift, so a
+    concurrent standalone-encashment approval and F&F computation/approval
+    could let F&F be approved against a stale balance. A remediation was
+    scoped (an exact-basis snapshot re-validated at F&F mark-paid time,
+    mirroring the existing `SOURCE_DRIFT` pattern) but deliberately not
+    implemented this round — this is the most sensitive atomic function in
+    the F&F subsystem, and a rushed change to it was judged a worse risk
+    than leaving the gap open and disclosed. See `STATUS.md`'s 2026-10-12
+    round-2 addendum and `FINDINGS.csv` rows `G12-FOLLOWUP-2` and
+    `G12-FF-CONCURRENCY-GAP` for full detail. **This gap must be closed
+    before standalone encashment and F&F can be called safe running
+    concurrently in production — it is a new, additional precondition
+    layered onto the NO-GO verdict in §5, not something this addendum
+    resolves.**
+
+  **Addendum (2026-10-12, round 3): the F&F-concurrency gap from round 2 is
+  now FIXED, not just disclosed; a real, previously-unnoticed defect was
+  found and fixed in a subsystem no prior round examined (accounting); two
+  further gaps were found and honestly disclosed as NOT fixed.** A further
+  review asked for proof, not argument, on payment lifecycle, recomputation
+  safety across accounting/exports, and F&F concurrency.
+  - **Payment lifecycle — "cancelled/deleted runs preserve the entitlement"
+    is now proven, not just argued.** Round 2 relied on reading the
+    `ON DELETE SET NULL` FK and the existing finalized-run deletion guard.
+    This is now exercised against real Postgres: deleting a draft run with
+    an assigned request leaves it `'approved'`, unassigned, figures intact,
+    and re-assignable — 7 new checks, `scripts/db/verify-g12-encashment-
+    atomic.mjs`'s `[C2]`.
+  - **F&F-vs-standalone-encashment concurrency — FIXED (migration 448).**
+    The compute→approve window was already closed by the existing
+    approve-route staleness check; the real unclosed window was
+    approve→mark-paid. `computeFnfSettlement` now returns the exact
+    `(leave_type_id, year)` pairs it read balances for, stored as
+    `separation_ff_summary.leave_encashment_basis`; `mark_fnf_paid_atomic`
+    now re-sums exactly those rows and raises `SOURCE_DRIFT` on mismatch —
+    the identical pattern already proven for loan/advance/asset drift.
+    Proven with 10 new real-Postgres checks (`scripts/db/verify-fnf-mark-
+    paid-atomic.mjs` `[F]`–`[I]`), including that a drift abort leaves the
+    *loan in the same settlement* unforeclosed too (the abort is
+    transaction-wide). All of round 2's original loan/advance/F&F-vs-F&F/
+    payroll-vs-F&F concurrency checks still pass unchanged.
+  - **Payroll consistency — accounting: a real defect no prior round
+    looked for, found and fixed (migration 449).** The accounting ledger
+    (`payroll-accounting-engine.ts`) built every journal entry exclusively
+    from the employee's *standing* compensation catalog, never from the
+    slip's actual computed components — so standalone encashment's
+    `LEAVE_ENCASHMENT`/`TDS` lines (and, pre-existing, advance/loan-EMI
+    deductions) were silently absent from every GL posting, and the LOP
+    contra formula misclassified their rupee value as "LOP recovery"
+    instead. Fixed generally (not encashment-specific — it also closes the
+    pre-existing advance/loan-EMI gap as a side effect): the slip's ad-hoc
+    components are now captured in a new `payroll_employee_snapshots.
+    adhoc_components` column and posted via the same GL-mapping path
+    catalog components use; the LOP formula (now a named, tested
+    `computeLopAmount` helper) excludes them. 8 new unit tests prove both
+    the posting and the formula fix, including an explicit assertion of
+    what the pre-fix behavior would have misclassified.
+  - **Two further gaps found this round, disclosed, NOT fixed** (lower
+    severity, operational rather than money-safety): the statutory TDS
+    reconciliation screen (`statutory-recon.ts`) compares slip-derived TDS
+    (correct) against a separate manual projections table that doesn't
+    know about one-time encashment payouts, so an encashment month shows a
+    spurious variance needing manual review — it does not cause an
+    incorrect payment or filing (24Q/challan/IT-Statement/YTD all read the
+    slip directly and were verified correct). And `computeEncashmentPayout`
+    bases its rate on the single most recent finalized slip's `gross_pay`,
+    which could itself be inflated by a prior encashment payout, overstating
+    a *subsequent* request's rate — a real, confirmed, likely-rare edge
+    case. Full detail: `STATUS.md`'s 2026-10-12 round-3 addendum;
+    `FINDINGS.csv` rows `G12-DELETE-RUN-PRESERVATION`,
+    `G12-ACCOUNTING-LEDGER-ADHOC-GAP`, `G12-TDS-RECON-SCREEN-GAP`,
+    `G12-ENCASHMENT-RATE-COMPOUNDING-RISK`, and the updated
+    `G12-FF-CONCURRENCY-GAP` (now `FIXED`).
+  - Full API suite after this round: 48 files / 418 tests pass; `apps/api`
+    and `apps/web` both typecheck clean; full migration history (000→449)
+    verified against a fresh local Postgres 16 instance;
+    `check-schema-drift.mjs` passes clean.
+
+  **Addendum (2026-10-12, round 4): payout basis and the TDS
+  reconciliation-screen false positive are now FIXED; F&F payment now
+  consumes the leave balance atomically, not merely checks it (migration
+  450); a full persisted accounting chain exists through reversal; the
+  tax-treatment question remains explicitly OPEN. G12 is NOT closed.**
+  A further review rejected round 3's "all four points re-proven" framing
+  as an overclaim and asked for four items finished together, plus proof
+  that the DELETE-draft-run evidence's scope (deletion only) was extended
+  to cancellation and recomputation.
+  - **Payout basis — FIXED.** `payroll-engine.ts` exports
+    `computeCleanGrossPay(grossPay, components)`, subtracting any
+    `ONE_TIME_EARNING_CODES` line (currently `LEAVE_ENCASHMENT`) from a
+    slip's `gross_pay`. Both `fnf-settlement-engine.ts`'s rate basis and
+    `accrual-engine.ts`'s `computeEncashmentPayout` now use it instead of
+    the raw figure; places that must keep the real number (payroll totals,
+    accounting, exports) were left untouched. 6 new unit tests.
+  - **TDS integration — the reconciliation screen's false positive is
+    FIXED; the actual exemption-treatment question is explicitly left
+    OPEN.** `buildStatutoryRecon` now adds the run's paid encashment
+    `tds_amount` to the "payable" side, closing a spurious variance that
+    could block `/close` on an encashment month (3 new tests). This does
+    **not** resolve whether Section 10(10AA) exemption treatment applies —
+    `computeEncashmentPayout`'s withholding remains an explicitly-flagged
+    flat marginal-slab-rate computation, and a tax/compliance sign-off for
+    that is still needed before go-live. Unchanged from rounds 1–3,
+    restated rather than resolved.
+  - **Payment concurrency — FIXED (migration 450): a successful F&F
+    payment now consumes the leave balance, not merely checks it.** Round
+    3's `SOURCE_DRIFT` check (448) proves a *concurrent change* aborts a
+    payment; it cannot catch two settlements paying against the *same,
+    unchanged* balance, since F&F never wrote to `employee_leave_balance`
+    at all. `mark_fnf_paid_atomic` now decrements the exact
+    `leave_encashment_basis` rows (same lock migration 448 already takes)
+    and writes a `leave_balance_ledger` row — "paid" and "entitlement
+    spent" are now the same event. Proven with the exact double-pay
+    scenario reproduced and blocked, and genuine lock-contention
+    concurrency (not just sequential ordering) demonstrated with two real
+    Postgres connections — `scripts/db/verify-fnf-mark-paid-atomic.mjs`,
+    now 46 checks.
+  - **Accounting evidence — a full persisted chain now exists: request →
+    recomputation → finalized slip → GL → export → reversal**, including
+    the cancellation/recomputation extension specifically asked for: a
+    new `scripts/g12-accounting-reconciliation-check.sh` (23 checks, 10
+    sections, real Postgres through the full stack) proves the entire
+    chain in one run, ending with rolling a *finalized* run back to draft
+    and reversing the standalone request, confirming the leave balance is
+    credited back to its exact pre-encashment value with no residue.
+  - **On F&F's own cancellation path specifically:** investigated and
+    disclosed, not fixed — there is no reopen-from-`paid` path for a
+    separation settlement at all (`PATCH /separation-ff/reopen` 409s on
+    `paid`, already covered by an existing test), so migration 450's
+    consumption has **no API-reachable undo**. This is a pre-existing,
+    deliberate constraint on F&F in general that migration 450 did not
+    introduce; building a symmetric credit-back would need its own
+    dedicated reversal-workflow design, out of scope for this round.
+  - **One real, unrelated, pre-existing defect was found and fixed
+    because it blocked the accounting evidence above:**
+    `buildPayrollRunSnapshot` silently left a *stale, pre-correction*
+    snapshot in place forever whenever a draft run was computed more than
+    once before finalize (unavoidable for every G12 workflow, since
+    assignment requires an existing payslip) — `payroll_run_snapshots`'s
+    `UNIQUE(run_id)` made every snapshot build after the first fail
+    non-fatally. Fixed to supersede the stale manifest instead of leaving
+    it in place; a first attempt at this fix cascade-deleted the owning
+    payroll run entirely (`payroll_runs.snapshot_id` is `ON DELETE
+    CASCADE` into the snapshot table), caught and corrected before any
+    evidence was collected under it. Behavior-only, no migration; affects
+    any multi-recompute draft run, not only G12.
+  - Full API suite after this round: 49 files / 427 tests pass; `apps/api`
+    typechecks clean.
+  - Full detail: `STATUS.md`'s 2026-10-12 round-4 addendum; `FINDINGS.csv`
+    rows `G12-FNF-LEAVE-CONSUMPTION-GAP`,
+    `G12-FNF-PAID-IRREVERSIBLE-DISCLOSURE`, `G12-SNAPSHOT-REGEN-COLLISION`,
+    `G12-ACCOUNTING-E2E-EVIDENCE`, and the updated
+    `G12-TDS-RECON-SCREEN-GAP` / `G12-ENCASHMENT-RATE-COMPOUNDING-RISK`
+    (now `FIXED`).
+
+  **Addendum (2026-10-12, round 5): finalized-run rollback no longer
+  orphans a posted GL ledger or a filed statutory closure; F&F now has a
+  real, audited correction path for a paid settlement; tax treatment
+  still open.** A further review accepted round 4's four fixes as real
+  progress but correctly rejected its finalize→rollback→reversal evidence
+  as proving only one specific, always-correctly-ordered sequence, not
+  that rollback itself enforces that order — and rejected disclosure
+  alone as an answer for a payment with no correction path.
+  - **Rollback — two real, confirmed gaps, both FIXED.**
+    `POST /payroll/runs/:id/rollback` checked neither
+    `payroll_financial_ledgers` nor `statutory_filing_closures` before
+    deleting a run's slips. A GL ledger already **posted** from this run
+    (a separate HR action the accounting routes don't gate on) would
+    survive, still counted into the liability dashboard, now pointing at
+    data no longer there; a **filed** statutory closure would be left
+    claiming the month was filed against deleted data. Authorization
+    (`super_admin`-only for a finalized run) was already correct — the
+    gap was the missing consistency check. Fixed: rollback now refuses
+    with `LEDGER_POSTED` or `STATUTORY_FILING_EXISTS` (naming the exact
+    remedy route) when either blocks it; a never-posted ledger is
+    cleaned up instead of left orphaned; the pre-rollback snapshot is
+    archived and the run's reference to it cleared. The guard correctly
+    excludes a ledger's own always-auto-posted reversal from the
+    "posted blocks rollback" check — caught only because the real-stack
+    script actually exercised "reverse, then roll back" and failed on
+    the first attempt. 16 new checks in `scripts/g12-accounting-
+    reconciliation-check.sh` (now 37 across 12 sections), real Postgres
+    through the full stack.
+  - **F&F payment correction — a real, audited compensating transaction,
+    not disclosure.** New migration 451's `correct_fnf_payment_atomic`
+    reverses exactly what `mark_fnf_paid_atomic` wrote for a paid
+    settlement — scoped by the exact markers that function itself
+    writes, never a loan/advance that independently reached the same
+    status through an ordinary payroll cycle. Building it surfaced a
+    real schema constraint mid-build: `advance_recoveries` is not
+    append-only (migration 281's `UNIQUE(tenant_id, schedule_id)` plus
+    `amount >= 0` make a mirrored negative row impossible — the matched
+    row is deleted instead, which the table's own design already
+    required). Leave balance uses `leave_balance_ledger`'s existing
+    `reversal_of`/`is_reversal` mechanism, not a new type. Settlement
+    reverts to `'draft'` (figures may need recomputing). `super_admin`-
+    only, mandatory reason, `FOR UPDATE` locks, audit columns on the row.
+    20 new checks in `scripts/db/verify-fnf-mark-paid-atomic.mjs`
+    (`[M]`/`[M2]`, 66 total) including a scoping-precision proof that an
+    unrelated foreclosed loan is left untouched; 6 new route tests.
+  - **Tax treatment** — unchanged, still open; this is a human sign-off
+    this review cannot execute, not an engineering gap.
+  - Full API suite after this round: 49 files / 432 tests pass;
+    `apps/api` typechecks clean; migration history (000→451) applies
+    cleanly to a fresh local Postgres 16 with zero schema drift.
+  - Full detail: `STATUS.md`'s 2026-10-12 round-5 addendum; `FINDINGS.csv`
+    rows `G12-ROLLBACK-GL-STATUTORY-GAP` and
+    `G12-FNF-PAYMENT-CORRECTION`.
+
+  **Addendum (2026-10-12, round 6): rollback genuinely serializes against
+  ledger-post and statutory-close under real concurrency, not just the
+  sequential case; F&F correction gains cross-tenant/concurrency proof, a
+  durable deletion-audit log, and a mandatory recovery-evidence field.
+  G12 remains pending qualification.** A further review accepted round
+  5's fixes as real progress but treated "checked, then wrote" as
+  unproven under genuine concurrency, and treated an un-audited deletion
+  and an absent money-recovery control as insufficient to leave disclosed.
+  - **Rollback concurrency — the actual race is closed, not just the
+    single-threaded sequence.** Round 5's rollback used a plain SELECT
+    check followed by a SEPARATE UPDATE — nothing stopped a concurrent
+    ledger-post or statutory-close from landing in that gap. Migration
+    452 adds `rollback_payroll_run_atomic`, `mark_ledger_posted_atomic`,
+    and `close_statutory_filing_atomic`, all locking the SAME
+    `payroll_runs` row, in the SAME order, as their first action — the
+    same pattern every other money-safety function in this series
+    already uses. New `scripts/db/verify-rollback-concurrency.mjs` (18
+    checks, two live Postgres connections per case) proves genuine
+    blocking in all four directions, not just that the functions reject
+    bad input sequentially.
+  - **Correction authorization/idempotency — proven under concurrency,
+    not just sequentially.** Cross-tenant isolation (already structural
+    since round 5's tenant-scoped WHERE clause) is now explicitly tested;
+    a new genuine-concurrency test proves two simultaneous correction
+    calls for the same settlement serialize on the existing row lock, with
+    the loser failing `INVALID_STATE` and the balance credited back
+    exactly once.
+  - **Durable deletion audit.** New append-only
+    `fnf_payment_correction_log` captures the deleted `advance_
+    recoveries` row's full original values (amount, schedule_id,
+    advance_id, payroll_run_id, recovery_month) inside the same
+    transaction as the correction — a database delete no longer loses the
+    record of what the original payment was.
+  - **Mandatory recovery evidence.** `correct_fnf_payment_atomic` gains a
+    second mandatory field, `recovery_reference`, distinct from `reason`
+    — evidence the real-world money was actually handled, required
+    non-empty, stored on the settlement and every correction-log row.
+  - Full API suite after this round: 50 files / 438 tests pass;
+    `apps/api` typechecks clean; migration history (000→452) applies
+    cleanly to a fresh local Postgres 16 (480 tables) with zero schema
+    drift.
+  - Full detail: `STATUS.md`'s 2026-10-12 round-6 addendum; `FINDINGS.csv`
+    rows `G12-ROLLBACK-LOCK-ORDER-RACE` and
+    `G12-FNF-CORRECTION-AUTHZ-AUDIT-RECOVERY`.
+
+None of the four gates are closed by this round's local work, and none of
+them can be closed by more local work of the same kind — each needs either
+external access (Gates 1–3) or an explicit decision (Gate 4).
+
+---
+
+## 5. GO / NO-GO recommendation
+
+**NO-GO for production launch. Unchanged verdict. All four gates in §4
+remain open — this is not "one hard blocker," it is four, and none of
+them are fully satisfied yet.**
+
+What this round actually changed: the financial-semantics gaps a review
+correctly identified as insufficient (G02/G03/G04 corrections) are closed
+and mutation-tested; G08's ratchet mechanism is fixed with every surfaced
+finding individually accounted for (39 repaired, 59 justified-suppressed
+— see §1 revision note); G09's CI gate and G11's revocation SLA are fixed
+and measured; a real financial-chain reconciliation bug (PTax filing
+drift) was found and fixed, not just asserted absent; UAT coverage
+broadened to a third, structurally different authorization path; local
+load, concurrency, and backup/restore are all green at the scale this
+sandbox can produce; **the branch is now actually pushed and has run real
+CI** — 6 of 7 checks pass on real infrastructure, and the one failure
+(E2E) was root-caused to a pre-existing, two-month-old credentials gap,
+not a regression. The candidate-verification infrastructure built to gate
+E2E on the right deployment was itself found to have four real defects on
+review — a merge-SHA bug that would have falsely rejected a correctly
+deployed candidate, an optional/latest-only DB check, an unverified "no
+staging exists" claim, and a fixture that tested the script but not real
+Supabase — all four fixed and re-verified this round (§4, Gate 1), plus a
+fifth check added (web↔API wiring) that two independently-matching SHAs
+do not by themselves prove. A direct re-run (`workflow_dispatch`, not
+inference) confirms the actual state as seen by that job: all nine
+required secrets were unavailable to it (not proof they're absent from
+every scope, or that no staging environment exists — see §4 addendum). A
+further review then found the schema/wiring/secrets claims above still
+needed more precise wording, and that testing those claims directly
+turned up two more real defects (a string-literal-unsafe normalizer that
+could mask a genuine migration edit; a wiring check that passed on a
+request alone, missing a same-origin redirect to somewhere else) — both
+fixed and re-verified, detailed in the §4 addendum. This is real,
+substantiated progress against Gate 1 specifically — the verifier is now
+more trustworthy and more honestly scoped, pending a staging environment
+to actually run it against — but it still does not satisfy Gates 2–4,
+and does not move the verdict.
+
+**Recommended path, in order:** (1) an administrator adds
+`E2E_BASE_URL`/`E2E_API_URL`/`E2E_HR_EMAIL`/`E2E_HR_PASS`/`STAGING_PGHOST`/
+`STAGING_PGPORT`/`STAGING_PGUSER`/`STAGING_PGPASSWORD`/`STAGING_PGDATABASE`
+as real repository secrets, pointed at a dedicated staging deployment
+actually running this exact candidate's web+API+migrations — not a shared
+"alpha" environment, and confirms the PR head SHA (not a merge SHA) is
+what's deployed; (2) re-run the E2E job and confirm all 7 checks are green
+on this exact HEAD, including the now-mandatory full-migration-history and
+web↔API wiring checks; (3) run this same real-stack script battery (or the
+equivalent) against a real staging Supabase project — Gate 2; (4) run
+representative concurrent-user load and exercise Supabase's managed
+backup/restore tooling — Gate 3; (5) get an explicit decision on Gate 4
+and execute it. PR #29 stays unmerged throughout. NO-GO stands until all
+four gates pass, not until local work runs out.
+
+---
+
+## 6. Traceability
+
+Every claim in this report is backed by a script, a commit, or both:
+
+- Commits this round (newest first): `2d8e0d70` (precise wording for the
+  schema/wiring/secrets claims; two real masking defects fixed in the
+  migration-content normalizer, confirmed by direct test; dynamic wiring
+  check rewritten to check responses and detect redirects, confirmed by
+  direct test), `15e582d0` (migration content-drift +
+  resulting-schema checks against the real staging connection, dynamic
+  browser-based web↔API wiring check, environment-secrets-scoping gap
+  documented), `f5e48e7b` (Gate 1 report correction), `c622a08c` (fixed
+  the verifier's merge-SHA bug, made the DB check mandatory + full-history,
+  added the static web↔API wiring check, re-tested DB logic against a real
+  `supabase db push`-populated table), `0d798014` (E2E candidate-SHA
+  verification + fail-clear fix — first version, since corrected),
+  `2ac092db`, `a6bed7c8` (G08 accounting correction), `ed8f2063`,
+  `ffc4efb7`, `32f12e32`, `031f10f2`, `e2057ed1`, `c36a4853`, `629cb456`,
+  `295338ac`, `f914f4fd`, `55eeb9d4`, plus the earlier correction-round
+  commits `c315f76d` back through `1994b607` (G02/G03/G04/G06
+  corrections, 223-row reconciliation). Pushed to
+  `origin/fix/g13-numeric-coercion-sweep` as `9ab87791..07a08d8d`,
+  `07a08d8d..0d798014`, `0d798014..4d8b006b`, `4d8b006b..c622a08c`,
+  `c622a08c..f5e48e7b`, then `f5e48e7b..15e582d0`.
+- CI run `37339052239` (job logs) — source of the merge-SHA discovery
+  (`github.sha` = `18362fd5...` ≠ PR head `4d8b006b`) and of the original
+  E2E secrets-missing finding. `workflow_dispatch` run `37351301793` on
+  `c622a08c` — source of the current verified secrets state (all nine
+  unavailable to that job, confirmed directly from the job log, not
+  inferred — see §4 addendum for what this does and doesn't establish).
+- PR #29 comment (`issuecomment-5997073960`) — the E2E root-cause analysis
+  posted after checking all 9 prior workflow runs, not asserted from the
+  one failure alone.
+- `docs/production-readiness/STATUS.md` — findings-table narrative, phase status.
+- `docs/production-readiness/EVIDENCE.md` — §9/§9b (G01-G06 corrections),
+  §13 (financial-chain reconciliation), plus the original numbered sections
+  for everything predating this round.
+- `docs/production-readiness/FINDINGS.csv` — per-finding ID, status, fix
+  commit, regression test, remaining validation (481 rows).
+- `docs/production-readiness/baseline-reconciliation-223-rows.csv` —
+  row-level basis for the G08 stable-key migration's "nothing silently
+  dropped or added" claim.
+- `docs/production-readiness/g08-sweep-findings-register.csv` — the
+  per-finding register this revision's correction is built on: 98 rows,
+  each with its file/line, register, TRUE_POSITIVE_REPAIRED/FALSE_POSITIVE
+  classification, and the exact justification text (for suppressions,
+  extracted verbatim from the `// lint-*-ok:` comment; for repairs, the
+  commit that made the real code change) — extracted programmatically
+  from the actual diff of commits `32f12e32`/`c36a4853`, not reconstructed
+  from memory or agent-reported prose.

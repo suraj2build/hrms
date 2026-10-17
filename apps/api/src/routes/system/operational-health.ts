@@ -30,6 +30,7 @@ import { serverError, ErrorCode } from '../../lib/api-errors.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchTenantTz } from '../../lib/attendance-engine.js'
 import { getLocalDate }  from '../../lib/org-context.js'
+import { fetchAllRows }  from '../../lib/supabase-paginate.js'
 
 export default async function operationalHealthRoutes(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
@@ -123,19 +124,27 @@ export default async function operationalHealthRoutes(fastify: FastifyInstance) 
       // 1. Attendance freshness (no stale list — summary only)
       scanAttendanceFreshness(fastify.supabase, tenantId, 2, false),
 
-      // 2. Open attendance reconciliation issues (counts only)
-      fastify.supabase
-        .from('attendance_reconciliation_issues')
-        .select('severity', { count: 'exact', head: false })
-        .eq('tenant_id', tenantId)
-        .eq('resolved', false),
+      // 2. Open attendance reconciliation issues (counts only).
+      // fetchAllRows, not a plain .select() — PostgREST's server-side
+      // max-rows cap (1000) would otherwise silently truncate the severity
+      // breakdown (and thus isCritical/isDegraded below) for any tenant
+      // with a backlog bigger than that, with no truncation signal.
+      fetchAllRows<{ severity: string }>((from, to) =>
+        fastify.supabase
+          .from('attendance_reconciliation_issues')
+          .select('severity')
+          .eq('tenant_id', tenantId)
+          .eq('resolved', false)
+          .range(from, to)),
 
-      // 3. Open leave reconciliation issues
-      fastify.supabase
-        .from('leave_reconciliation_issues')
-        .select('severity', { count: 'exact', head: false })
-        .eq('tenant_id', tenantId)
-        .eq('resolved', false),
+      // 3. Open leave reconciliation issues — same reasoning as #2.
+      fetchAllRows<{ severity: string }>((from, to) =>
+        fastify.supabase
+          .from('leave_reconciliation_issues')
+          .select('severity')
+          .eq('tenant_id', tenantId)
+          .eq('resolved', false)
+          .range(from, to)),
 
       // 4. Scheduler heartbeats
       fastify.supabase
@@ -184,15 +193,17 @@ export default async function operationalHealthRoutes(fastify: FastifyInstance) 
       : { health: 'unknown', error: (freshnessResult.reason as Error)?.message }
 
     // ── Build reconciliation section ───────────────────────────────────────────
+    // fetchAllRows() resolves to the full row array directly (not a
+    // {data,count,error} wrapper) — see the fetch above.
     const attIssues = attendanceOpenResult.status === 'fulfilled'
-      ? (attendanceOpenResult.value.data ?? []) as any[]
+      ? (attendanceOpenResult.value ?? []) as any[]
       : []
     const leaveIssues = leaveOpenResult.status === 'fulfilled'
-      ? (leaveOpenResult.value.data ?? []) as any[]
+      ? (leaveOpenResult.value ?? []) as any[]
       : []
 
-    function severityCounts(issues: any[], realCount?: number) {
-      const c = { critical: 0, error: 0, warning: 0, info: 0, total: realCount ?? issues.length }
+    function severityCounts(issues: any[]) {
+      const c = { critical: 0, error: 0, warning: 0, info: 0, total: issues.length }
       for (const i of issues) {
         if (i.severity in c) (c as any)[i.severity]++
       }
@@ -200,8 +211,8 @@ export default async function operationalHealthRoutes(fastify: FastifyInstance) 
     }
 
     const reconciliation = {
-      attendance: severityCounts(attIssues, attendanceOpenResult.status === 'fulfilled' ? (attendanceOpenResult.value.count ?? attIssues.length) : attIssues.length),
-      leave:      severityCounts(leaveIssues, leaveOpenResult.status === 'fulfilled' ? (leaveOpenResult.value.count ?? leaveIssues.length) : leaveIssues.length),
+      attendance: severityCounts(attIssues),
+      leave:      severityCounts(leaveIssues),
     }
 
     // ── Build scheduler heartbeats section ────────────────────────────────────

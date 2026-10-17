@@ -229,6 +229,14 @@ export default defineConfig(({ mode }) => ({
       '/fabric':          apiProxy(),
       '/operational':     apiProxy(),
       '/billing':         apiProxy(),
+      // Found missing while live-testing the pilot "Report an issue" entry
+      // point (2026-10-13) — /support/error-reports silently 404'd against
+      // Vite's dev server instead of reaching the API, the same
+      // missing-proxy-prefix failure mode documented above for /assets etc.
+      // This had been true for crash reports too, not just the new pilot
+      // feedback button — they were failing the same way, just never
+      // exercised end-to-end locally before now.
+      '/support':         apiProxy(),
       '/health':          apiProxy(),
       '/ready':           apiProxy(),
       '/status':          apiProxy(),  // alias → GET /status on Fastify

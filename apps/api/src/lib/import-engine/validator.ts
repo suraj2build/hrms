@@ -1260,12 +1260,17 @@ export async function validateImportRows(
     // Flag rows whose employee already has a bank/statutory record (will update)
     const empIds = [...empCodeMap.values()]
     const existingBank = new Set<string>()
-    if (empIds.length > 0) {
+    // Chunked: empIds is every employee in this import batch, which has no
+    // application-level size cap — a large bulk import can exceed a single
+    // .in() URL's safe size.
+    for (let i = 0; i < empIds.length; i += 100) {
+      const chunkIds = empIds.slice(i, i + 100)
       const { data: bankRows, error: bankErr } = await supabase
+        // lint-query-ok: chunked to 100 ids/request, <=100 rows per query, well under the 1,000-row cap
         .from('employee_bank_statutory')
         .select('employee_id')
         .eq('tenant_id', tenantId)
-        .in('employee_id', empIds)
+        .in('employee_id', chunkIds)
       if (bankErr) throw new Error(`employee_bank_statutory lookup failed: ${bankErr.message}`)
       for (const r of (bankRows ?? []) as any[]) existingBank.add(r.employee_id as string)
     }
@@ -1293,19 +1298,25 @@ export async function validateImportRows(
       ),
     ]
     let siteCodeMap = new Map<string, string>()
-    if (siteCodesInBatch.length > 0) {
+    // Chunked: siteCodesInBatch is bounded by this import batch's row count,
+    // which has no application-level cap.
+    const siteRowsAll: Array<{ id: string; code: string }> = []
+    for (let i = 0; i < siteCodesInBatch.length; i += 100) {
+      const chunkCodes = siteCodesInBatch.slice(i, i + 100)
       const { data: siteRows, error: siteErr } = await supabase
+        // lint-query-ok: chunked to 100 codes/request, <=100 rows per query, well under the 1,000-row cap
         .from('sites')
         .select('id, code')
         .eq('tenant_id', tenantId)
-        .in('code', siteCodesInBatch)
+        .in('code', chunkCodes)
       if (siteErr) throw new Error(`sites lookup failed: ${siteErr.message}`)
-      siteCodeMap = new Map(
-        ((siteRows ?? []) as Array<{ id: string; code: string }>)
-          .filter((s) => s.code)
-          .map((s) => [s.code.toUpperCase(), s.id]),
-      )
+      if (siteRows) siteRowsAll.push(...siteRows as Array<{ id: string; code: string }>)
     }
+    siteCodeMap = new Map(
+      siteRowsAll
+        .filter((s) => s.code)
+        .map((s) => [s.code.toUpperCase(), s.id]),
+    )
 
     for (const vr of validatedRows) {
       if (!vr.isValid) continue

@@ -1,0 +1,15 @@
+-- SYSTEM_AUDIT_2026-10-14 checkpoint 13 — the idempotency_keys table (and
+-- lib/idempotency.ts built on it) has no way to detect a key being reused
+-- with a DIFFERENT request body. checkIdempotency replays whatever
+-- response was stored under that key regardless of what the current
+-- request actually asked for — so a client that reuses an Idempotency-Key
+-- across two meaningfully different submissions (a genuine client bug, or
+-- a key collision) silently gets back the FIRST request's result,
+-- believing it describes the second. Flagged while reviewing the
+-- encashment lifecycle for cap-invariant concurrency: "test same-key
+-- reuse with a different payload."
+--
+-- Adds an optional request_hash column (nullable — existing rows and
+-- every call site that doesn't opt in are unaffected) so a caller can
+-- store a fingerprint of the request body and have it compared on reuse.
+ALTER TABLE idempotency_keys ADD COLUMN IF NOT EXISTS request_hash TEXT;

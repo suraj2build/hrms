@@ -4,8 +4,19 @@
  * Routes inbound WhatsApp messages:
  *   "1" | "2" | "3"       → mood check-in from weekly poll (maps to 5, 3, 1)
  *   "ACK {policyId}"      → policy acknowledgement
- *   free text after mood  → save as note on the mood check-in
- *   other text            → forward to AI Copilot assistant
+ *   free text, with a check-in already recorded today → saved as a note on it
+ *   free text, with no check-in recorded today        → canned prompt to reply 1/2/3
+ *
+ * No branch here forwards free text to the AI Copilot assistant
+ * (apps/api/src/routes/assistant/index.ts) — identification on this channel is
+ * by `employees.phone` alone (no password/session), which this file's own
+ * lookup above already treats as collision-prone (a recycled number can match
+ * more than one active employee). The assistant's tool loop can also act on
+ * the caller's behalf (apply_leave, cancel_leave_request, update_contact_info,
+ * …) — wiring that up to a phone-number-only identity is a real
+ * security/product decision, not a backlog item, so this deliberately stops
+ * at mood/ack/note handling. SYSTEM_AUDIT_2026-10-14 confirmed this is not an
+ * accidental gap (see audit report's escalation on this file).
  *
  * Verification endpoint (GET) uses WHATSAPP_WEBHOOK_SECRET env var.
  */

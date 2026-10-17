@@ -28,8 +28,9 @@
 import type { FastifyInstance } from 'fastify'
 import { z }                    from 'zod'
 import { HR_ADMIN_ROLES }       from '../../lib/rbac.js'
-import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { serverError, conflictError, ErrorCode } from '../../lib/api-errors.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { logAction } from '../../lib/audit-service.js'
 const SUPER_ADMIN = ['super_admin']             as const
 
 // Fresh audit finding: entity_type/override_type were previously
@@ -146,6 +147,23 @@ export default async function governanceEvolutionRoutes(fastify: FastifyInstance
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
+    // SYSTEM_AUDIT_2026-10-14 checkpoint 10+1 — same cross-tenant FK gap
+    // this file already fixed for delegate_id (above) and granted_to
+    // (below): escalation_employee_id was only checked as a well-formed
+    // UUID, never re-validated as belonging to this tenant's profiles.
+    const escalationIds = Array.from(new Set(
+      parsed.data.stages.map(s => s.escalation_employee_id).filter((v): v is string => !!v),
+    ))
+    if (escalationIds.length > 0) {
+      const { data: foundProfiles, error: escErr } = await fastify.supabase
+        .from('profiles').select('id').eq('tenant_id', req.tenantId).in('id', escalationIds)
+      if (escErr) return serverError(req, reply, escErr, ErrorCode.QUERY_FAILED, 'Failed to validate escalation contacts')
+      const foundIds = new Set((foundProfiles ?? []).map((p: any) => p.id))
+      if (escalationIds.some(id => !foundIds.has(id))) {
+        return reply.code(400).send({ error: 'INVALID_REFERENCE', message: 'One or more escalation_employee_id values were not found in your organisation' })
+      }
+    }
+
     const { data, error } = await fastify.supabase
       .from('approval_matrices')
       .insert({
@@ -161,7 +179,28 @@ export default async function governanceEvolutionRoutes(fastify: FastifyInstance
       .select('*')
       .single()
 
-    if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create approval matrix')
+    if (error) {
+      // SYSTEM_AUDIT_2026-10-14 checkpoint 10+1 — approval_matrices has
+      // UNIQUE(tenant_id, name, entity_type) (migration 089); creating a
+      // matrix whose name+entity_type already exists is a predictable
+      // client conflict (double-submit, or recreating after an earlier
+      // partial failure), not a server fault. Matches the established
+      // error.code==='23505' → CONFLICT pattern in workflow-service.ts.
+      if (error.code === '23505') {
+        return conflictError(reply, 'MATRIX_ALREADY_EXISTS', 'A matrix with this name already exists for this entity type')
+      }
+      return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create approval matrix')
+    }
+
+    // Fresh audit finding: none of this file's governance-configuration
+    // mutations (matrices/delegations/overrides) wrote to audit_logs —
+    // exactly the kind of sensitive admin change (who approves what, who
+    // can stand in, who was granted a bypass) that CLAUDE.md's audit-history
+    // rule requires. Non-blocking: the write already succeeded.
+    await logAction(fastify.supabase, {
+      tenantId: req.tenantId, tableName: 'approval_matrices', recordId: data.id,
+      action: 'INSERT', performedBy: req.userId, newData: data,
+    })
 
     return reply.code(201).send({ data })
   })
@@ -195,6 +234,22 @@ export default async function governanceEvolutionRoutes(fastify: FastifyInstance
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
     }
 
+    // Same cross-tenant FK re-validation as POST above.
+    if (parsed.data.stages) {
+      const escalationIds = Array.from(new Set(
+        parsed.data.stages.map(s => s.escalation_employee_id).filter((v): v is string => !!v),
+      ))
+      if (escalationIds.length > 0) {
+        const { data: foundProfiles, error: escErr } = await fastify.supabase
+          .from('profiles').select('id').eq('tenant_id', req.tenantId).in('id', escalationIds)
+        if (escErr) return serverError(req, reply, escErr, ErrorCode.QUERY_FAILED, 'Failed to validate escalation contacts')
+        const foundIds = new Set((foundProfiles ?? []).map((p: any) => p.id))
+        if (escalationIds.some(id => !foundIds.has(id))) {
+          return reply.code(400).send({ error: 'INVALID_REFERENCE', message: 'One or more escalation_employee_id values were not found in your organisation' })
+        }
+      }
+    }
+
     const updatePayload: Record<string, unknown> = { updated_at: new Date().toISOString() }
     if (parsed.data.name              !== undefined) updatePayload.name              = parsed.data.name
     if (parsed.data.entity_type       !== undefined) updatePayload.entity_type       = parsed.data.entity_type
@@ -211,10 +266,22 @@ export default async function governanceEvolutionRoutes(fastify: FastifyInstance
       .select('*')
       .maybeSingle()
 
-    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update approval matrix')
+    if (error) {
+      // Same name+entity_type UNIQUE-constraint conflict as POST above —
+      // renaming (or re-typing) a matrix into collision with another.
+      if (error.code === '23505') {
+        return conflictError(reply, 'MATRIX_ALREADY_EXISTS', 'A matrix with this name already exists for this entity type')
+      }
+      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update approval matrix')
+    }
     if (!data) {
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Approval matrix not found' })
     }
+
+    await logAction(fastify.supabase, {
+      tenantId: req.tenantId, tableName: 'approval_matrices', recordId: id,
+      action: 'UPDATE', performedBy: req.userId, newData: updatePayload,
+    })
 
     return reply.send({ data })
   })
@@ -237,6 +304,11 @@ export default async function governanceEvolutionRoutes(fastify: FastifyInstance
     if (!data) {
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Approval matrix not found' })
     }
+
+    await logAction(fastify.supabase, {
+      tenantId: req.tenantId, tableName: 'approval_matrices', recordId: id,
+      action: 'UPDATE', performedBy: req.userId, newData: { is_active: false },
+    })
 
     return reply.send({ data })
   })
@@ -318,6 +390,11 @@ export default async function governanceEvolutionRoutes(fastify: FastifyInstance
 
     if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create delegation')
 
+    await logAction(fastify.supabase, {
+      tenantId: req.tenantId, tableName: 'approval_delegations', recordId: data.id,
+      action: 'INSERT', performedBy: req.userId, newData: data,
+    })
+
     return reply.code(201).send({ data })
   })
 
@@ -357,6 +434,11 @@ export default async function governanceEvolutionRoutes(fastify: FastifyInstance
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to revoke delegation')
     if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Delegation not found' })
+
+    await logAction(fastify.supabase, {
+      tenantId: req.tenantId, tableName: 'approval_delegations', recordId: id,
+      action: 'UPDATE', performedBy: req.userId, newData: { is_active: false },
+    })
 
     return reply.send({ data })
   })
@@ -441,6 +523,11 @@ export default async function governanceEvolutionRoutes(fastify: FastifyInstance
 
     if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to grant override')
 
+    await logAction(fastify.supabase, {
+      tenantId: req.tenantId, tableName: 'operational_overrides', recordId: data.id,
+      action: 'INSERT', performedBy: req.userId, newData: data,
+    })
+
     return reply.code(201).send({ data })
   })
 
@@ -475,6 +562,11 @@ export default async function governanceEvolutionRoutes(fastify: FastifyInstance
     if (!data) {
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Override not found' })
     }
+
+    await logAction(fastify.supabase, {
+      tenantId: req.tenantId, tableName: 'operational_overrides', recordId: id,
+      action: 'UPDATE', performedBy: req.userId, newData: data,
+    })
 
     return reply.send({ data })
   })

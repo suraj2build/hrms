@@ -25,7 +25,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import {
-  computeLifecycleRisks, summariseLifecycle, type LifecycleRiskItem,
+  computeLifecycleRisks, summariseLifecycle, bucketFor, severityForBucket, addDaysIso, type LifecycleRiskItem,
 } from '../../lib/lifecycle-expiry.js'
 import { computeReadiness } from '../../lib/readiness-engine.js'
 import { notifyHrAdmins } from '../../lib/notify.js'
@@ -33,6 +33,7 @@ import { resolveManagerEmployeeId, resolveCallerEmployeeId, isDirectReport } fro
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
 import { fetchTenantTz } from '../../lib/attendance-engine.js'
 import { getLocalDate } from '../../lib/org-context.js'
+import { logAction } from '../../lib/audit-service.js'
 
 const NEW_JOINER_WINDOW_DAYS = 90
 
@@ -118,35 +119,60 @@ export default async function managerTeamLifecycleRoute(fastify: FastifyInstance
         .filter(j => j.employment_type === 'probation' && !j.confirmation_date)
         .map(j => j.employee_id),
     )
-    const probationItems = teamLifecycle.filter(i => i.category === 'probation')
+    // Open probation-confirmation cycles (migration 443) for this team's
+    // probation employees — drives the "Recommended" badge (pending_hr) and
+    // overrides the formula-derived due date once HR has extended probation:
+    // that original date no longer reflects reality once extended.
+    let latestCycle = new Map<string, { status: string; extended_to_date: string | null }>()
+    if (onProbationIds.size) {
+      const { data: cycles, error: cycleErr } = await fastify.supabase
+        .from('probation_confirmations')
+        .select('employee_id, status, extended_to_date, created_at')
+        .eq('tenant_id', req.tenantId)
+        .in('employee_id', [...onProbationIds])
+        .in('status', ['pending_hr', 'extended'])
+        .order('created_at', { ascending: false })
+      if (cycleErr) return serverError(req, reply, cycleErr, ErrorCode.QUERY_FAILED, 'Failed to fetch probation confirmation cycles')
+      for (const c of (cycles ?? []) as any[]) {
+        if (!latestCycle.has(c.employee_id)) latestCycle.set(c.employee_id, { status: c.status, extended_to_date: c.extended_to_date })
+      }
+    }
+    const recommendedIds = new Set(
+      [...latestCycle.entries()].filter(([, v]) => v.status === 'pending_hr').map(([id]) => id),
+    )
+
+    const todayIso = await isoDaysAgo(fastify.supabase, req.tenantId, 0)
+    // Replace the formula-derived item for anyone with an open 'extended'
+    // cycle with one keyed off extended_to_date instead.
+    const probationItems = teamLifecycle
+      .filter(i => i.category === 'probation' && latestCycle.get(i.employee_id)?.status !== 'extended')
+      .concat(
+        [...latestCycle.entries()]
+          .filter(([, v]) => v.status === 'extended' && v.extended_to_date)
+          .map(([id, v]): LifecycleRiskItem => {
+            const days = Math.round((new Date(v.extended_to_date as string).getTime() - new Date(todayIso).getTime()) / 86_400_000)
+            const bucket = bucketFor(days)
+            return {
+              id: `probation:${id}`, category: 'probation', source_table: 'probation_confirmations', source_id: id,
+              employee_id: id, employee_name: nameOf.get(id) ?? id.slice(0, 8), employee_code: codeOf.get(id) ?? null,
+              department_id: null, department_name: null,
+              label: 'Probation confirmation', detail: 'Extended by HR',
+              due_date: v.extended_to_date as string, days_to_due: days, bucket, severity: severityForBucket(bucket),
+            }
+          }),
+      )
     const confirmationOverdue = probationItems.filter(i => i.bucket === 'overdue')
     const confirmationDue     = probationItems.filter(i => i.bucket !== 'overdue')
     const overdueIds = new Set(confirmationOverdue.map(i => i.employee_id))
     const dueIds     = new Set(confirmationDue.map(i => i.employee_id))
 
-    // Which of these already have an open (unactioned) confirmation-recommendation
-    // inbox item, so the UI can show "Recommended" instead of a re-clickable
-    // button — mirrors the same dedup check the POST endpoint enforces.
-    const confirmationIds = [...overdueIds, ...dueIds]
-    let recommendedIds = new Set<string>()
-    if (confirmationIds.length) {
-      const { data: openRecs, error: recErr } = await fastify.supabase
-        .from('inbox_items')
-        .select('entity_id')
-        .eq('tenant_id', req.tenantId)
-        .eq('entity_type', 'employees')
-        .in('entity_id', confirmationIds)
-        .in('status', ['unread', 'read', 'snoozed'])
-        .contains('metadata', { kind: 'confirmation_recommendation' })
-      if (recErr) return serverError(req, reply, recErr, ErrorCode.QUERY_FAILED, 'Failed to fetch confirmation recommendations')
-      recommendedIds = new Set((openRecs ?? []).map((r: any) => r.entity_id))
-    }
     const onProbation = [...onProbationIds].map(id => ({
       employee_id: id,
       name:        nameOf.get(id) ?? id.slice(0, 8),
       employee_code: codeOf.get(id) ?? null,
       joining_date:  joinOf.get(id) ?? null,
       confirmation_state: overdueIds.has(id) ? 'overdue' : dueIds.has(id) ? 'due' : 'on_track',
+      extended: latestCycle.get(id)?.status === 'extended',
     }))
 
     // ── Expiry risks (non-probation lifecycle categories) ──────────────────────
@@ -281,10 +307,15 @@ export default async function managerTeamLifecycleRoute(fastify: FastifyInstance
   })
 
   // ── POST /manager/team/lifecycle/confirmation-recommend ───────────────────────
+  // Creates a probation_confirmations row (migration 443) carrying a
+  // structured recommendation + feedback, instead of only firing a generic
+  // inbox notification. HR still makes the actual decision via
+  // PATCH /probation-confirmations/:id/decide.
   fastify.post('/manager/team/lifecycle/confirmation-recommend', auth, async (req: any, reply) => {
     const parsed = z.object({
-      employee_id: z.string().uuid(),
-      note:        z.string().max(1000).optional(),
+      employee_id:    z.string().uuid(),
+      recommendation: z.enum(['confirm', 'extend']),
+      feedback:       z.string().max(1000).optional(),
     }).safeParse(req.body)
     if (!parsed.success) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
@@ -301,45 +332,83 @@ export default async function managerTeamLifecycleRoute(fastify: FastifyInstance
 
     const { data: emp, error: empErr } = await fastify.supabase
       .from('employees')
-      .select('id, first_name, last_name, employee_code')
+      .select('id, first_name, last_name, employee_code, joining_date, employment_category_id')
       .eq('id', parsed.data.employee_id).eq('tenant_id', req.tenantId).maybeSingle()
     if (empErr) return serverError(req, reply, empErr, ErrorCode.QUERY_FAILED, 'Failed to fetch employee')
     if (!emp) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
+    if (!(emp as any).joining_date) return reply.code(409).send({ error: 'MISSING_JOINING_DATE', message: 'Employee has no joining date on record' })
+
+    const { data: jh, error: jhErr } = await fastify.supabase
+      .from('job_history')
+      .select('id, employment_type, confirmation_date')
+      .eq('tenant_id', req.tenantId).eq('employee_id', parsed.data.employee_id).eq('is_current', true)
+      .maybeSingle()
+    if (jhErr) return serverError(req, reply, jhErr, ErrorCode.QUERY_FAILED, 'Failed to fetch job history')
+    if (!jh || (jh as any).employment_type !== 'probation' || (jh as any).confirmation_date) {
+      return reply.code(409).send({ error: 'NOT_ON_PROBATION', message: 'Employee is not currently on probation' })
+    }
+
+    let probationDays = 90
+    if ((emp as any).employment_category_id) {
+      const { data: cat, error: catErr } = await fastify.supabase
+        .from('employment_categories')
+        .select('probation_days')
+        .eq('id', (emp as any).employment_category_id).eq('tenant_id', req.tenantId).maybeSingle()
+      if (catErr) return serverError(req, reply, catErr, ErrorCode.QUERY_FAILED, 'Failed to fetch employment category')
+      if (cat) probationDays = Number((cat as any).probation_days ?? 90)
+    }
+    const dueDate = addDaysIso((emp as any).joining_date.slice(0, 10), probationDays)
 
     const name = `${(emp as any).first_name ?? ''} ${(emp as any).last_name ?? ''}`.trim() || (emp as any).employee_code
 
-    // Dedup: don't re-notify HR while a prior recommendation for this employee
-    // is still open (unactioned) — repeated clicks previously fired a fresh
-    // notification to every HR admin every time with no server-side guard.
+    // One open (pending_hr) cycle per employee at a time — enforced by the
+    // partial unique index in migration 443, this is just a friendly 409
+    // instead of surfacing the raw constraint violation.
     const { data: existingRec, error: existingRecErr } = await fastify.supabase
-      .from('inbox_items')
+      .from('probation_confirmations')
       .select('id')
-      .eq('tenant_id', req.tenantId)
-      .eq('entity_type', 'employees')
-      .eq('entity_id', parsed.data.employee_id)
-      .in('status', ['unread', 'read', 'snoozed'])
-      .contains('metadata', { kind: 'confirmation_recommendation' })
+      .eq('tenant_id', req.tenantId).eq('employee_id', parsed.data.employee_id).eq('status', 'pending_hr')
       .limit(1)
     if (existingRecErr) return serverError(req, reply, existingRecErr, ErrorCode.QUERY_FAILED, 'Failed to check existing confirmation recommendations')
     if (existingRec && existingRec.length > 0) {
       return reply.send({ ok: true, employee_id: parsed.data.employee_id, already_recommended: true })
     }
 
-    // Reuse the existing inbox/notification system — no new workflow.
+    const { data: cycle, error: insErr } = await fastify.supabase
+      .from('probation_confirmations')
+      .insert({
+        tenant_id: req.tenantId, employee_id: parsed.data.employee_id, job_history_id: (jh as any).id,
+        due_date: dueDate, status: 'pending_hr',
+        manager_recommendation: parsed.data.recommendation,
+        manager_feedback: parsed.data.feedback?.trim() || null,
+        manager_recommended_by: req.userId, manager_recommended_at: new Date().toISOString(),
+      })
+      .select('id').single()
+    if (insErr) return serverError(req, reply, insErr, ErrorCode.INSERT_FAILED, 'Failed to record confirmation recommendation')
+
+    await logAction(fastify.supabase, {
+      tenantId: req.tenantId, tableName: 'probation_confirmations', recordId: (cycle as any).id,
+      action: 'INSERT', performedBy: req.userId, onBehalfOf: parsed.data.employee_id,
+      newData: { recommendation: parsed.data.recommendation, feedback: parsed.data.feedback ?? null },
+    })
+
+    // Reuse the existing inbox/notification system for HR visibility — the
+    // structured decision itself now lives in probation_confirmations, not
+    // in this notification.
     await notifyHrAdmins(fastify.supabase, {
       tenantId:     req.tenantId,
       senderId:     req.userId,
       item_type:    'approval_request',
       title:        `Confirmation recommended: ${name}`,
-      summary:      parsed.data.note?.trim()
-        ? `Manager recommends confirming ${name}. Note: ${parsed.data.note.trim()}`
-        : `Manager recommends confirming ${name} from probation.`,
+      summary:      parsed.data.recommendation === 'confirm'
+        ? `Manager recommends confirming ${name} from probation.`
+        : `Manager recommends extending ${name}'s probation.`,
       severity:     'info',
       entity_type:  'employees',
       entity_id:    parsed.data.employee_id,
-      action_route: `/admin/employees/${parsed.data.employee_id}`,
+      action_route: `/admin/employees/probation-confirmations`,
       action_label: 'Review confirmation',
-      metadata:     { kind: 'confirmation_recommendation', recommended_by_employee_id: myEmpId },
+      metadata:     { kind: 'confirmation_recommendation', recommended_by_employee_id: myEmpId, probation_confirmation_id: (cycle as any).id },
     })
 
     return reply.send({ ok: true, employee_id: parsed.data.employee_id })

@@ -84,6 +84,7 @@ import addressesRoutes         from './routes/employees/addresses.js'
 import separationRoutes         from './routes/employees/separation.js'
 import separationWorkflowRoutes from './routes/employees/separation-workflow.js'
 import exitInterviewRoutes      from './routes/employees/exit-interview.js'
+import probationConfirmationsRoutes from './routes/employees/probation-confirmations.js'
 import assetsRoutes              from './routes/assets/index.js'
 import intelligenceRoutes        from './routes/intelligence/index.js'
 import uatCertificationRoutes    from './routes/intelligence/uat-certification.js'
@@ -217,6 +218,7 @@ import onboardingReadinessRoutes           from './routes/onboarding/readiness.j
 import helpdeskRoutes                      from './routes/helpdesk/index.js'
 import benefitsRoutes                      from './routes/benefits/index.js'
 import recruitmentRoutes                   from './routes/recruitment/index.js'
+import publicCareersRoutes                 from './routes/recruitment/public-careers.js'
 import certificationRoutes                 from './routes/certifications/index.js'
 import securityRoutes                      from './routes/security/index.js'
 import whatsappRoutes                      from './routes/whatsapp/index.js'
@@ -554,6 +556,23 @@ async function start() {
     setInterval(enqueue, TWENTY_FOUR_HOURS)
   }, fastify.log)
 
+  // Attendance anomaly reconciler — daily scan that auto-resolves anomalies
+  // the current attendance_daily truth already contradicts (see
+  // anomaly-reconciler.ts). Anomalies are a detection signal, not a second
+  // queue that should depend on an admin remembering to click "Reconcile".
+  // Scheduling only: sets up enqueue timers. Handler registered below.
+  await safeRegisterModule('anomaly-reconciler-scanner', async () => {
+    const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1_000
+    const enqueue = () => {
+      const key = `reconcile-anomalies:${new Date().toISOString().slice(0, 10)}`
+      durableQueue.enqueue('reconcile-anomalies', {}, { idempotencyKey: key }).catch(
+        e => fastify.log.error({ err: e }, '[reconcile-anomalies] enqueue error'),
+      )
+    }
+    setTimeout(enqueue, 120_000)
+    setInterval(enqueue, TWENTY_FOUR_HOURS)
+  }, fastify.log)
+
   // Register durable queue handlers before start() — without these, every enqueued
   // job dead-letters immediately (ISSUE-011). Handlers close over fastify.supabase
   // which is available here because supabasePlugin was registered above.
@@ -627,6 +646,16 @@ async function start() {
   })
   durableQueue.register('notice-overdue-scan', async (_payload, _job) => {
     await runNoticeOverdueScan(fastify.supabase, fastify.log)
+  })
+  durableQueue.register('reconcile-anomalies', async (_payload, _job) => {
+    const { reconcileAnomaliesForTenant } = await import('./lib/anomaly-reconciler.js')
+    const tenants = await fetchAllRows<{ id: string }>((from, to) =>
+      fastify.supabase.from('tenants').select('id').in('status', ['active', 'trial']).range(from, to),
+    )
+    for (const t of tenants) {
+      try { await reconcileAnomaliesForTenant(fastify.supabase, t.id, { resolvedBy: null }, fastify.log) }
+      catch (e) { fastify.log.error({ tenant: t.id, err: e }, 'anomaly reconcile scan failed') }
+    }
   })
   // event-automation is reactive (registerEventBusAutomation wires bus listeners);
   // no standalone scan function exists — complete without action on manual trigger.
@@ -764,6 +793,7 @@ async function start() {
   await fastify.register(separationRoutes)
   await fastify.register(separationWorkflowRoutes)
   await fastify.register(exitInterviewRoutes)
+  await fastify.register(probationConfirmationsRoutes)
   await fastify.register(assetsRoutes)             // /assets/* + /employees/:id/assets[/outstanding-count]
   await fastify.register(intelligenceRoutes, { prefix: '/intelligence' }) // AI Workforce OS — read-only intelligence
   await fastify.register(uatCertificationRoutes, { prefix: '/intelligence/uat-certification' })
@@ -923,6 +953,7 @@ async function start() {
   await fastify.register(talentRoutes,                      { prefix: '/talent' })                        // Internal Talent Marketplace — /talent/roles + /talent/browse + /talent/interest
   await fastify.register(benefitsRoutes,                     { prefix: '/benefits' })                  // ESS-05 benefits enrolment — plans + employee enrolments
   await fastify.register(recruitmentRoutes,                  { prefix: '/recruitment' })                // RCT-01+ Recruitment & ATS — requisitions, candidates, applications, interviews
+  await fastify.register(publicCareersRoutes)                                                           // Public, unauthenticated careers page + apply form — /careers/:tenantSlug/*
   await fastify.register(certificationRoutes,               { prefix: '' })                            // Certification Governance — /certifications/*
   await fastify.register(securityRoutes,                    { prefix: '/security' })                   // Security Operations Workspace — /security/*
 

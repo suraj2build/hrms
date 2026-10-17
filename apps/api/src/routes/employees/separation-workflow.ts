@@ -8,6 +8,7 @@ import { isHrAdmin, resolveCallerEmployeeId, isDirectReport } from '../../lib/ma
 import { revokeEmployeeAuth } from '../../lib/user-account-service.js'
 import { serverError, conflictError, ErrorCode } from '../../lib/api-errors.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { blockIfPilotTenant } from '../../lib/pilot-guard.js'
 
 // ─── Schemas ─────────────────────────────────────────────────────────────────
 
@@ -27,6 +28,9 @@ const ffBodySchema = z.object({
   notice_period_deduction:  z.number(),
   other_deductions:         z.number().optional().default(0),
   other_additions:          z.number().optional().default(0),
+  asset_recovery_amount:    z.number().optional().default(0),
+  loan_recovery_amount:     z.number().optional().default(0),
+  advance_recovery_amount:  z.number().optional().default(0),
   notes:                    z.string().optional(),
   // optional — only checked against the update branch (a fresh insert has
   // no prior version to compare against).
@@ -424,10 +428,20 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
     // net_payable is a GENERATED column — never written by the app.
     const { data: existing } = await fastify.supabase
       .from('separation_ff_summary')
-      .select('id')
+      .select('id, status')
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
+
+    // Once approved or paid, the reviewed figures are frozen — this was the
+    // one route that could silently rewrite them with no status check at
+    // all, which made "approval" non-binding: whatever was last saved here
+    // (by anyone, at any time) is what a concurrent approve/mark-paid would
+    // actually commit, regardless of what was reviewed.
+    if (existing && (existing as any).status !== 'draft') {
+      return conflictError(reply, 'LOCKED',
+        `This F&F settlement is ${(existing as any).status} and can no longer be edited.`)
+    }
 
     // expected_version is a CAS control field, not a DB column — strip it
     // before spreading into the insert/update payload.
@@ -437,6 +451,12 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
     let statusCode = 201
 
     if (existing) {
+      // The LOCKED check above reads `existing` in a separate round-trip
+      // from this UPDATE — on its own that's a check, not an enforcement:
+      // a concurrent approve landing in between would still let this
+      // UPDATE through and silently rewrite the now-approved row. Folding
+      // .eq('status', 'draft') into the WHERE clause makes the freeze an
+      // actual property of the write, not just of what was last read.
       let updateQuery = fastify.supabase
         .from('separation_ff_summary')
         .update({
@@ -446,6 +466,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
         })
         .eq('id', existing.id)
         .eq('tenant_id', req.tenantId)
+        .eq('status', 'draft')
       if (expected_version !== undefined)
         updateQuery = updateQuery.eq('version', expected_version)
 
@@ -453,11 +474,23 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
       if (error)
         return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update F&F settlement')
       if (!data) {
-        if (expected_version !== undefined) {
-          return conflictError(reply, ErrorCode.VERSION_CONFLICT,
-            'This F&F settlement was changed by someone else. Reload and try again.')
+        // Disambiguate the 0-row CAS miss: gone entirely, no longer draft
+        // (a concurrent approve/mark-paid won the race), or — only when the
+        // caller sent expected_version — a version conflict within 'draft'.
+        const { data: current } = await fastify.supabase
+          .from('separation_ff_summary')
+          .select('status')
+          .eq('id', existing.id)
+          .eq('tenant_id', req.tenantId)
+          .maybeSingle()
+        if (!current)
+          return reply.code(404).send({ error: 'NOT_FOUND', message: 'F&F record not found' })
+        if ((current as any).status !== 'draft') {
+          return conflictError(reply, 'LOCKED',
+            `This F&F settlement is ${(current as any).status} and can no longer be edited.`)
         }
-        return reply.code(404).send({ error: 'NOT_FOUND', message: 'F&F record not found' })
+        return conflictError(reply, ErrorCode.VERSION_CONFLICT,
+          'This F&F settlement was changed by someone else. Reload and try again.')
       }
       result = data
       statusCode = 200
@@ -511,10 +544,18 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
     // Preserve any manual last_payroll_amount / other +/- already entered.
     const { data: existing } = await fastify.supabase
       .from('separation_ff_summary')
-      .select('id, last_payroll_amount, other_additions, other_deductions')
+      .select('id, status, last_payroll_amount, other_additions, other_deductions')
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
+
+    // Same freeze as POST /separation-ff above — recomputing an approved or
+    // paid settlement would silently overwrite the figures that were
+    // actually reviewed and signed off.
+    if (existing && (existing as any).status !== 'draft') {
+      return conflictError(reply, 'LOCKED',
+        `This F&F settlement is ${(existing as any).status} and can no longer be recomputed.`)
+    }
 
     const payload = {
       last_payroll_amount:     existing?.last_payroll_amount ?? 0,
@@ -523,11 +564,15 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
       notice_period_deduction: breakdown.notice_period_deduction,
       other_additions:         existing?.other_additions ?? 0,
       other_deductions:        existing?.other_deductions ?? 0,
+      asset_recovery_amount:   breakdown.asset_recovery_amount,
+      loan_recovery_amount:    breakdown.loan_recovery_amount,
+      advance_recovery_amount: breakdown.advance_recovery_amount,
       // computed metadata
       gratuity_eligible:       breakdown.gratuity_eligible,
       gratuity_years:          breakdown.gratuity_years,
       leave_encashment_days:   breakdown.leave_encashment_days,
       leave_encashment_rate:   breakdown.leave_encashment_rate,
+      leave_encashment_basis:  breakdown.leave_encashment_basis,
       notice_shortfall_days:   breakdown.notice_shortfall_days,
       salary_basis_basic:      breakdown.salary_basis_basic,
       salary_basis_gross:      breakdown.salary_basis_gross,
@@ -539,10 +584,19 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
 
     let result: any
     if (existing) {
+      // Same TOCTOU fix as POST /separation-ff — the LOCKED check above is a
+      // prior read, not an enforcement; fold the precondition into the
+      // UPDATE's own WHERE clause so a concurrent approve landing in
+      // between can't still let this recompute through.
       const { data, error } = await fastify.supabase
         .from('separation_ff_summary')
-        .update(payload).eq('id', existing.id).eq('tenant_id', req.tenantId).select().single()
+        .update(payload).eq('id', existing.id).eq('tenant_id', req.tenantId).eq('status', 'draft')
+        .select().maybeSingle()
       if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update computed F&F settlement')
+      if (!data) {
+        return conflictError(reply, 'LOCKED',
+          'This F&F settlement was approved or paid while this recompute was in flight and can no longer be recomputed.')
+      }
       result = data
     } else {
       const { data, error } = await fastify.supabase
@@ -570,7 +624,7 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
 
     const { data: ff, error: fetchErr } = await fastify.supabase
       .from('separation_ff_summary')
-      .select('id, status')
+      .select('id, status, version, computed_at, salary_basis_gross, salary_basis_basic, gratuity_amount, leave_encashment_amount, notice_period_deduction, asset_recovery_amount, loan_recovery_amount, advance_recovery_amount')
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
@@ -582,10 +636,81 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
     if (ff.status === 'approved' || ff.status === 'paid')
       return reply.code(409).send({ error: 'INVALID_STATE', message: `Cannot approve: current status is '${ff.status}'` })
 
+    // G03: approval must not lock in a STALE calculation. If this record was
+    // last computed via POST /compute (computed_at is set — a pure manual
+    // entry via POST /separation-ff, never computed, has computed_at=null
+    // and is HR's own responsibility, not something to "recompute"),
+    // re-run the SAME computation now and compare EVERY material output
+    // against what's stored — not just the salary basis. computeFnfSettlement
+    // is a pure function of (separation dates/override/waiver, employment
+    // category, gratuity_config, the last finalized slip, leave policy +
+    // balance, outstanding assets, loan balances, pending advance recovery
+    // schedules); comparing its full set of derived amounts is equivalent to
+    // comparing all of those inputs, without having to special-case each one.
+    // A correction to a finalized slip, a later finalized run, a leave-
+    // balance adjustment, a notice-date/override/waiver edit, a gratuity-
+    // config change, an asset return, a loan part-payment, or an advance
+    // recovery schedule update between compute and approve would otherwise
+    // approve a card the employee/HR never actually reviewed the current
+    // numbers for — the exact "approving stale F&F calculations" gap the
+    // original audit finding described, which filtering the salary-basis
+    // query for status='finalized' alone does not close by itself. The
+    // asset/loan/advance recovery amounts are exactly as time-sensitive as
+    // the original five fields: an asset returned, a loan part-paid, or an
+    // advance recovery schedule updated between compute and approve must
+    // block approval the same way a corrected payroll slip does.
+    if (ff.computed_at) {
+      const fresh = await computeFnfSettlement(fastify.supabase, req.tenantId, req.params.id)
+      if ('error' in fresh) {
+        return reply.code(409).send({ error: 'RECOMPUTE_FAILED', message: `Cannot verify this settlement is still current: ${fresh.error}. Resolve the issue and recompute before approving.` })
+      }
+      const diff = (a: number | null | undefined, b: number | null | undefined) => Math.abs(Number(a ?? 0) - Number(b ?? 0)) > 0.01
+      const changedFields: Record<string, { stored: number; current: number }> = {}
+      if (diff(fresh.salary_basis_gross, ff.salary_basis_gross))
+        changedFields.salary_basis_gross = { stored: Number(ff.salary_basis_gross ?? 0), current: fresh.salary_basis_gross }
+      if (diff(fresh.salary_basis_basic, ff.salary_basis_basic))
+        changedFields.salary_basis_basic = { stored: Number(ff.salary_basis_basic ?? 0), current: fresh.salary_basis_basic }
+      if (diff(fresh.gratuity_amount, (ff as any).gratuity_amount))
+        changedFields.gratuity_amount = { stored: Number((ff as any).gratuity_amount ?? 0), current: fresh.gratuity_amount }
+      if (diff(fresh.leave_encashment_amount, (ff as any).leave_encashment_amount))
+        changedFields.leave_encashment_amount = { stored: Number((ff as any).leave_encashment_amount ?? 0), current: fresh.leave_encashment_amount }
+      if (diff(fresh.notice_period_deduction, (ff as any).notice_period_deduction))
+        changedFields.notice_period_deduction = { stored: Number((ff as any).notice_period_deduction ?? 0), current: fresh.notice_period_deduction }
+      if (diff(fresh.asset_recovery_amount, (ff as any).asset_recovery_amount))
+        changedFields.asset_recovery_amount = { stored: Number((ff as any).asset_recovery_amount ?? 0), current: fresh.asset_recovery_amount }
+      if (diff(fresh.loan_recovery_amount, (ff as any).loan_recovery_amount))
+        changedFields.loan_recovery_amount = { stored: Number((ff as any).loan_recovery_amount ?? 0), current: fresh.loan_recovery_amount }
+      if (diff(fresh.advance_recovery_amount, (ff as any).advance_recovery_amount))
+        changedFields.advance_recovery_amount = { stored: Number((ff as any).advance_recovery_amount ?? 0), current: fresh.advance_recovery_amount }
+
+      if (Object.keys(changedFields).length > 0) {
+        return reply.code(409).send({
+          error:   'STALE_CALCULATION',
+          message: 'The settlement inputs have changed since this was last computed (e.g. a corrected or newly finalized payroll slip, a leave-balance adjustment, a notice/gratuity change, an asset return, a loan part-payment, or an advance recovery update). Recompute via POST /separation-ff/compute and review the updated figures before approving.',
+          changed_fields: changedFields,
+        })
+      }
+    }
+
     // Fold the 'draft' precondition into the WHERE clause — the earlier
     // SELECT is a separate query, so two concurrent approve requests could
     // both pass it before either writes, mirroring the fix already applied
     // to /separation/approve, /advance, /relieve, /archive in this file.
+    //
+    // That alone is not enough: status='draft' only rules out a concurrent
+    // APPROVE, not a concurrent EDIT. Without also binding to the exact
+    // version just validated above, a concurrent POST /compute or
+    // POST /separation-ff landing between the staleness check and this
+    // UPDATE would change the stored amounts while status stays 'draft' —
+    // this UPDATE would still match, flip status to 'approved', and commit
+    // whatever the row NOW holds, which the staleness check never actually
+    // saw. (POST /compute and POST /separation-ff now refuse to touch a
+    // non-draft row, but both are still allowed to write while status is
+    // 'draft' — exactly the window this closes.) version is bumped by
+    // trg_separation_ff_summary_version on every UPDATE (migration 430), so
+    // requiring it to still equal what we just read is equivalent to
+    // requiring the row to be byte-for-byte what the staleness check
+    // validated.
     const { data, error } = await fastify.supabase
       .from('separation_ff_summary')
       .update({
@@ -598,13 +723,29 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
       .eq('id', ff.id)
       .eq('tenant_id', req.tenantId)
       .eq('status', 'draft')
+      .eq('version', (ff as any).version)
       .select()
       .maybeSingle()
 
     if (error)
       return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to approve F&F settlement')
-    if (!data)
-      return reply.code(409).send({ error: 'ALREADY_DECIDED', message: 'This F&F settlement has already been approved or paid' })
+    if (!data) {
+      // Disambiguate why the CAS failed: already decided by someone else,
+      // vs. edited/recomputed while still draft (version drift) — the
+      // latter needs a different message since recompute-and-review is the
+      // actual remedy, not "someone already approved this."
+      const { data: current } = await fastify.supabase
+        .from('separation_ff_summary')
+        .select('status')
+        .eq('id', ff.id)
+        .eq('tenant_id', req.tenantId)
+        .maybeSingle()
+      if (current && (current as any).status !== 'draft') {
+        return reply.code(409).send({ error: 'ALREADY_DECIDED', message: 'This F&F settlement has already been approved or paid' })
+      }
+      return conflictError(reply, ErrorCode.VERSION_CONFLICT,
+        'This F&F settlement was edited or recomputed while this approval was in flight. Reload and review the current figures before approving.')
+    }
 
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
@@ -622,6 +763,83 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
   // ── PATCH /employees/:id/separation-ff/mark-paid ─────────────────────────
 
   fastify.patch('/employees/:id/separation-ff/mark-paid', hrAdminAuth, async (req: any, reply) => {
+    if (await blockIfPilotTenant(fastify.supabase, req.tenantId, reply, 'Marking a full & final settlement as paid')) return
+    if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
+
+    // Status flip + loan foreclosure + advance recovery (schedules + ledger
+    // + parent-request status) all happen inside mark_fnf_paid_atomic
+    // (migration 445, extended by 448) as ONE transaction — not a sequence
+    // of independent PostgREST round-trips. It FOR UPDATE-locks the
+    // settlement row and every source loan/advance/asset row up front (so a
+    // concurrent payroll run blocks on them rather than racing this), then
+    // validates current loan/advance/asset totals against what was actually
+    // approved before writing anything — a partial repayment or asset
+    // return landing between approve and mark-paid aborts the whole call
+    // (nothing half-applied) instead of silently paying out a different
+    // recovery than what HR reviewed.
+    //
+    // Migration 448 closes a further gap: the compute→approve window
+    // already re-validates leave_encashment_amount via the staleness check
+    // in PATCH .../approve above, but nothing previously re-checked it
+    // again in the approve→mark-paid window. mark_fnf_paid_atomic now also
+    // FOR UPDATE-locks and re-sums employee_leave_balance for the exact
+    // (leave_type_id, year) rows captured at compute time
+    // (leave_encashment_basis) and aborts with SOURCE_DRIFT if a concurrent
+    // standalone leave-encashment approval changed the balance since this
+    // settlement was approved — the same pattern as the loan/advance/asset
+    // checks, closing the last window where F&F and standalone encashment
+    // could otherwise both pay out against the same leave days.
+    const { data: rpcData, error: rpcErr } = await fastify.supabase.rpc('mark_fnf_paid_atomic', {
+      p_tenant_id:   req.tenantId,
+      p_employee_id: req.params.id,
+      p_user_id:     req.userId,
+    })
+
+    if (rpcErr) {
+      const msg = rpcErr.message ?? ''
+      if (msg.includes('NOT_FOUND:'))
+        return reply.code(404).send({ error: 'NOT_FOUND', message: msg.replace(/^.*NOT_FOUND:\s*/, '') })
+      if (msg.includes('INVALID_STATE:'))
+        return reply.code(409).send({ error: 'INVALID_STATE', message: msg.replace(/^.*INVALID_STATE:\s*/, '') })
+      if (msg.includes('ALREADY_DECIDED:'))
+        return reply.code(409).send({ error: 'ALREADY_DECIDED', message: msg.replace(/^.*ALREADY_DECIDED:\s*/, '') })
+      if (msg.includes('SOURCE_DRIFT:'))
+        return reply.code(409).send({ error: 'SOURCE_DRIFT', message: msg.replace(/^.*SOURCE_DRIFT:\s*/, '') })
+      if (msg.includes('LEAVE_BASIS_MISSING:'))
+        return reply.code(409).send({ error: 'LEAVE_BASIS_MISSING', message: msg.replace(/^.*LEAVE_BASIS_MISSING:\s*/, '') })
+      return serverError(req, reply, rpcErr, ErrorCode.UPDATE_FAILED, 'Failed to mark F&F settlement as paid')
+    }
+
+    const { data: ffRow, error: reloadErr } = await fastify.supabase
+      .from('separation_ff_summary')
+      .select('*')
+      .eq('employee_id', req.params.id)
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+    if (reloadErr)
+      return serverError(req, reply, reloadErr, ErrorCode.QUERY_FAILED, 'Marked as paid, but failed to reload the settlement')
+
+    await logAction(fastify.supabase, {
+      tenantId:    req.tenantId,
+      tableName:   'separation_ff_summary',
+      recordId:    (rpcData as any)?.id ?? ffRow?.id,
+      action:      'UPDATE',
+      performedBy: req.userId,
+      onBehalfOf:  req.params.id,
+      newData:     { status: 'paid' },
+    })
+
+    return reply.send({ data: ffRow })
+  })
+
+  // ── PATCH /employees/:id/separation-ff/reopen ─────────────────────────────
+  // Sends an 'approved' settlement back to 'draft' so HR can recompute/edit
+  // and re-approve — the only way out when mark-paid's SOURCE_DRIFT check
+  // (migration 445) blocks payment because a source loan/advance/asset
+  // balance changed since approval. Deliberately NOT available from 'paid'
+  // (money has already moved; that needs a real reversal process, not this).
+  fastify.patch('/employees/:id/separation-ff/reopen', hrAdminAuth, async (req: any, reply) => {
     if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
 
@@ -631,47 +849,122 @@ export default async function separationWorkflowRoutes(fastify: FastifyInstance)
       .eq('employee_id', req.params.id)
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
-
     if (fetchErr)
       return serverError(req, reply, fetchErr, ErrorCode.QUERY_FAILED, 'Failed to fetch F&F record')
     if (!ff)
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'F&F record not found' })
     if (ff.status !== 'approved')
-      return reply.code(409).send({ error: 'INVALID_STATE', message: `Cannot mark as paid: F&F must be approved first (current: '${ff.status}')` })
+      return reply.code(409).send({ error: 'INVALID_STATE', message: `Only an approved settlement can be reopened (current: '${ff.status}')` })
 
-    // Fold the 'approved' precondition into the WHERE clause — see the same
-    // fix on the approve endpoint above.
     const { data, error } = await fastify.supabase
       .from('separation_ff_summary')
       .update({
-        status:     'paid',
-        paid_by:    req.userId,
-        paid_at:    new Date().toISOString(),
-        updated_by: req.userId,
-        updated_at: new Date().toISOString(),
+        status:      'draft',
+        approved_by: null,
+        approved_at: null,
+        updated_by:  req.userId,
+        updated_at:  new Date().toISOString(),
       })
       .eq('id', ff.id)
       .eq('tenant_id', req.tenantId)
       .eq('status', 'approved')
       .select()
       .maybeSingle()
-
     if (error)
-      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to mark F&F settlement as paid')
+      return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to reopen F&F settlement')
     if (!data)
-      return reply.code(409).send({ error: 'ALREADY_DECIDED', message: 'This F&F settlement is no longer in approved status' })
+      return reply.code(409).send({ error: 'ALREADY_DECIDED', message: 'This F&F settlement is no longer approved' })
+
+    await logAction(fastify.supabase, {
+      tenantId: req.tenantId, tableName: 'separation_ff_summary', recordId: ff.id,
+      action: 'UPDATE', performedBy: req.userId, onBehalfOf: req.params.id,
+      newData: { status: 'draft', reopened: true },
+    })
+
+    return reply.send({ data })
+  })
+
+  // ── PATCH /employees/:id/separation-ff/correct-payment ────────────────────
+  // The controlled, audited compensating transaction reopen() explicitly
+  // defers ("money has already moved; that needs a real reversal process,
+  // not this"): reverses exactly what mark_fnf_paid_atomic wrote for a
+  // PAID settlement — foreclosed loans, recovered advances, and (migration
+  // 450) the consumed leave balance — scoped precisely to the rows that
+  // payment itself touched (never a loan/advance that separately reached
+  // the same terminal status through an ordinary payroll cycle). For when
+  // the payment failed, was cancelled, or was recorded with the wrong
+  // figures. super_admin only (money already moved once; undoing that is a
+  // bigger action than mark-paid itself, which only needs hr_admin).
+  // Requires TWO separate mandatory fields, not one: `reason` (the business
+  // reason — why this is being corrected) and `recovery_reference`
+  // (evidence that the actual money was handled — a bank reversal/UTR
+  // reference, an employee refund acknowledgement, or an explicit
+  // confirmation that no money had moved yet). A database reversal alone
+  // does not reverse a bank payment; this field exists so the DB record can
+  // never imply that question was answered when it wasn't asked. Settlement
+  // goes back to 'draft', not 'approved' — a correction can mean the
+  // approved figures themselves were wrong, so recompute/re-approve from
+  // scratch rather than risk an unexamined re-pay of stale numbers. Every
+  // loan reverted / advance-recovery row deleted / leave-balance credit is
+  // durably logged to fnf_payment_correction_log (migration 452) with its
+  // full original values, inside the same transaction as the correction.
+  fastify.patch('/employees/:id/separation-ff/correct-payment', hrAdminAuth, async (req: any, reply) => {
+    if (await blockIfPilotTenant(fastify.supabase, req.tenantId, reply, 'Correcting a paid full & final settlement')) return
+    if (req.userRole !== 'super_admin')
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Only super_admin may correct a paid F&F settlement' })
+
+    if (!await verifyEmployee(fastify, req.params.id, req.tenantId))
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
+
+    const schema = z.object({
+      reason:             z.string().trim().min(1, 'A reason is required'),
+      recovery_reference: z.string().trim().min(1, 'Recovery/refund evidence is required — a database reversal alone does not reverse a bank payment'),
+    })
+    const parsed = schema.safeParse(req.body)
+    if (!parsed.success)
+      return reply.code(400).send({ error: 'VALIDATION', message: parsed.error.issues[0].message })
+
+    const { data: rpcData, error: rpcErr } = await fastify.supabase.rpc('correct_fnf_payment_atomic', {
+      p_tenant_id:          req.tenantId,
+      p_employee_id:        req.params.id,
+      p_user_id:            req.userId,
+      p_reason:             parsed.data.reason,
+      p_recovery_reference: parsed.data.recovery_reference,
+    })
+
+    if (rpcErr) {
+      const msg = rpcErr.message ?? ''
+      if (msg.includes('NOT_FOUND:'))
+        return reply.code(404).send({ error: 'NOT_FOUND', message: msg.replace(/^.*NOT_FOUND:\s*/, '') })
+      if (msg.includes('INVALID_STATE:'))
+        return reply.code(409).send({ error: 'INVALID_STATE', message: msg.replace(/^.*INVALID_STATE:\s*/, '') })
+      if (msg.includes('REASON_REQUIRED:'))
+        return reply.code(400).send({ error: 'REASON_REQUIRED', message: msg.replace(/^.*REASON_REQUIRED:\s*/, '') })
+      if (msg.includes('RECOVERY_REFERENCE_REQUIRED:'))
+        return reply.code(400).send({ error: 'RECOVERY_REFERENCE_REQUIRED', message: msg.replace(/^.*RECOVERY_REFERENCE_REQUIRED:\s*/, '') })
+      return serverError(req, reply, rpcErr, ErrorCode.UPDATE_FAILED, 'Failed to correct F&F payment')
+    }
+
+    const { data: ffRow, error: reloadErr } = await fastify.supabase
+      .from('separation_ff_summary')
+      .select('*')
+      .eq('employee_id', req.params.id)
+      .eq('tenant_id', req.tenantId)
+      .maybeSingle()
+    if (reloadErr)
+      return serverError(req, reply, reloadErr, ErrorCode.QUERY_FAILED, 'Corrected, but failed to reload the settlement')
 
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
       tableName:   'separation_ff_summary',
-      recordId:    ff.id,
+      recordId:    (rpcData as any)?.id ?? ffRow?.id,
       action:      'UPDATE',
       performedBy: req.userId,
       onBehalfOf:  req.params.id,
-      newData:     { status: 'paid' },
+      newData:     { status: 'draft', corrected: true, reason: parsed.data.reason, recovery_reference: parsed.data.recovery_reference, ...(rpcData as any) },
     })
 
-    return reply.send({ data })
+    return reply.send({ data: ffRow, correction: rpcData })
   })
 
   // ── PATCH /employees/:id/separation/approve ───────────────────────────────

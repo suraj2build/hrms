@@ -84,20 +84,32 @@ export default async function attendanceConfidenceRoute(fastify: FastifyInstance
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
     }
 
-    const { data, error } = await fastify.supabase
-      .from('attendance_daily')
-      .select('id, date, confidence_score, confidence_level, confidence_factors, status, work_hours')
-      .eq('tenant_id', req.tenantId)
-      .eq('employee_id', employeeId)
-      .gte('date', from)
-      .lte('date', to)
-      .order('date', { ascending: false })
-
-    if (error) {
+    // fetchAllRows(): from/to are caller-supplied with no maximum-span
+    // validation (only date-format checked) — a long-enough range makes
+    // this single-employee query return more than 1,000 calendar dates,
+    // which silently truncates the response AND the total_days/avg_score/
+    // critical_days/low_days stats derived from rows.length below. Single-
+    // employee scope bounds the SHAPE of the result (one row per date,
+    // enforced by attendance_daily's UNIQUE(tenant_id, employee_id, date))
+    // but not the COUNT, which depends on the caller-chosen date span.
+    let data: any[]
+    try {
+      data = await fetchAllRows((rangeFrom, rangeTo) =>
+        fastify.supabase
+          .from('attendance_daily')
+          .select('id, date, confidence_score, confidence_level, confidence_factors, status, work_hours')
+          .eq('tenant_id', req.tenantId)
+          .eq('employee_id', employeeId)
+          .gte('date', from)
+          .lte('date', to)
+          .order('date', { ascending: false })
+          .range(rangeFrom, rangeTo),
+      )
+    } catch (error) {
       return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch confidence history')
     }
 
-    const rows = (data ?? []) as Array<{
+    const rows = data as Array<{
       id: string
       date: string
       confidence_score: number | null
@@ -107,10 +119,15 @@ export default async function attendanceConfidenceRoute(fastify: FastifyInstance
       work_hours: number | null
     }>
 
+    // Number(): confidence_score is a DECIMAL(5,2) column, which can come
+    // back as a string depending on the PostgREST client — the same
+    // coercion this codebase already applies elsewhere before arithmetic
+    // on a DECIMAL column (e.g. Number(row.days) in leave.ts). Without it,
+    // `+` on string values concatenates instead of summing.
     const scored = rows.filter((r) => r.confidence_score != null)
     const total_days   = rows.length
-    const avg_score    = scored.length > 0 ? scored.reduce((s, r) => s + (r.confidence_score ?? 0), 0) / scored.length : null
-    const min_score    = scored.length > 0 ? Math.min(...scored.map((r) => r.confidence_score ?? 100)) : null
+    const avg_score    = scored.length > 0 ? scored.reduce((s, r) => s + Number(r.confidence_score ?? 0), 0) / scored.length : null
+    const min_score    = scored.length > 0 ? Math.min(...scored.map((r) => Number(r.confidence_score ?? 100))) : null
     const critical_days = rows.filter((r) => r.confidence_level === 'critical').length
     const low_days      = rows.filter((r) => r.confidence_level === 'low').length
 
@@ -163,9 +180,11 @@ export default async function attendanceConfidenceRoute(fastify: FastifyInstance
     }
 
     const by_level: Record<string, number> = { high: 0, medium: 0, low: 0, critical: 0 }
+    // Number(): see the employee-history route above — confidence_score can
+    // come back as a string, which would make `+` concatenate instead of sum.
     const scored = rows.filter((r) => r.confidence_score != null)
     const avg_confidence_score = scored.length > 0
-      ? Math.round((scored.reduce((s, r) => s + (r.confidence_score ?? 0), 0) / scored.length) * 100) / 100
+      ? Math.round((scored.reduce((s, r) => s + Number(r.confidence_score ?? 0), 0) / scored.length) * 100) / 100
       : null
 
     for (const row of rows) {
@@ -201,24 +220,34 @@ export default async function attendanceConfidenceRoute(fastify: FastifyInstance
     const level = parsed.data.level
     const { from, to } = monthDateRange(month)
 
-    let query = fastify.supabase
-      .from('attendance_daily')
-      .select(`
-        employee_id, date, confidence_score, confidence_level,
-        employees!inner(id, first_name, last_name, employee_code)
-      `)
-      .eq('tenant_id', req.tenantId)
-      .gte('date', from)
-      .lte('date', to)
-      .order('date', { ascending: true })
+    // fetchAllRows(): tenant-wide, month-range, no employee filter — a plain
+    // query would silently under-report confidence issues for a tenant with
+    // >1,000 qualifying rows in the month. .order('date').order('id') keeps
+    // the existing chronological ordering as primary and adds a stable
+    // tie-breaker so .range() pagination is deterministic across pages.
+    let data: any[]
+    try {
+      data = await fetchAllRows((from_, to_) => {
+        let query = fastify.supabase
+          .from('attendance_daily')
+          .select(`
+            employee_id, date, confidence_score, confidence_level,
+            employees!inner(id, first_name, last_name, employee_code)
+          `)
+          .eq('tenant_id', req.tenantId)
+          .gte('date', from)
+          .lte('date', to)
+          .order('date', { ascending: true })
+          .order('id', { ascending: true })
+          .range(from_, to_)
 
-    query = level === 'all'
-      ? query.in('confidence_level', ['low', 'critical'])
-      : query.eq('confidence_level', level)
+        query = level === 'all'
+          ? query.in('confidence_level', ['low', 'critical'])
+          : query.eq('confidence_level', level)
 
-    const { data, error } = await query
-
-    if (error) {
+        return query
+      })
+    } catch (error) {
       return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch confidence issues')
     }
 
@@ -231,7 +260,7 @@ export default async function attendanceConfidenceRoute(fastify: FastifyInstance
       scores:        number[]
     }>()
 
-    for (const row of (data ?? []) as Array<Record<string, any>>) {
+    for (const row of data as Array<Record<string, any>>) {
       const emp = Array.isArray(row.employees) ? row.employees[0] : row.employees
       if (!emp) continue
 
@@ -248,7 +277,9 @@ export default async function attendanceConfidenceRoute(fastify: FastifyInstance
       const entry = byEmployee.get(empId)!
       entry.dates.push(row.date as string)
       if (row.confidence_score != null) {
-        entry.scores.push(row.confidence_score as number)
+        // Number(): see the two routes above — confidence_score can come
+        // back as a string, which would make `+` concatenate instead of sum.
+        entry.scores.push(Number(row.confidence_score))
       }
     }
 

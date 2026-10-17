@@ -71,8 +71,15 @@ export default async function companySettingsRoutes(fastify: FastifyInstance) {
 
   const PatchCompanySchema = z.object({
     name:       z.string().min(1).max(200).optional(),
-    industry:   z.string().optional(),
-    size_range: z.string().optional(),
+    // Fresh audit finding: ALLOWED_INDUSTRIES/ALLOWED_SIZES above were
+    // declared but never actually checked — the frontend's <select> only
+    // ever offers these values (plus an unselected "" option, allowed here
+    // too since Settings.tsx's CompanyProfileCard always PATCHes the whole
+    // form, blank fields included), but a direct API call could otherwise
+    // set either field to any arbitrary string, with nothing at this layer
+    // (or in setup.ts's own equally-unchecked z.string()) stopping it.
+    industry:   z.enum(['', ...ALLOWED_INDUSTRIES] as [string, ...string[]]).optional(),
+    size_range: z.enum(['', ...ALLOWED_SIZES] as [string, ...string[]]).optional(),
     country:    z.string().optional(),
     timezone:   z.string().min(1, 'timezone must not be empty').optional(),
     logo_url:   z.string().optional().nullable(),

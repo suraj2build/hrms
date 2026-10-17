@@ -20,7 +20,7 @@ import { eventBus } from '../../lib/event-bus.js'
 import { writeLedgerEntry, dateToMonth } from '../../lib/ledger-writer.js'
 import { orchestrateWorkforceEvent } from '../../lib/workforce-orchestrator.js'
 import {
-  isHrAdmin, resolveCallerEmployeeId, getDirectReportIds,
+  isHrAdmin, resolveCallerEmployeeId, getImmediateReportIds,
 } from '../../lib/manager-scope.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
@@ -313,6 +313,26 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
   // ── POST /attendance/regularisation/bulk-approve ──────────────────────────────
   // Manager bulk approves team requests.
   // P6.5 security fix: every request in the batch must belong to a direct report.
+  //
+  // CONTRACT (SYSTEM_AUDIT_2026-10-14 checkpoint 7, stated explicitly per the
+  // continued audit's correction — this is NOT all-or-nothing transactional
+  // atomicity across the batch): once the ownership prevalidation above
+  // passes (which DOES guarantee zero mutations if any id is unauthorized —
+  // that check runs before any item is touched), each AUTHORIZED id commits
+  // INDEPENDENTLY via its own approve_regularisation_atomic transaction. A
+  // runtime failure on one id (already-actioned, now-locked period, a
+  // transient DB error) does not roll back or block any other id in the
+  // batch — this is per-item partial success. Always responds 200; the
+  // authoritative per-item outcome is `results` (`{id, ok, error}`) and
+  // `summary` (`{approved, failed, total}`). Callers (including this
+  // route's own callers in the web app) MUST surface `summary.failed` —
+  // treating a 200 response as unconditional success is a real UI defect,
+  // not a hypothetical one (see checkpoint 7's fixes to
+  // ManagerTeamRegularisation.tsx, ManagerRegularisationQueue.tsx, and
+  // useOperationalQueue.ts). Retries are safe without an Idempotency-Key:
+  // an id that already succeeded re-reads as non-'pending' and is refused
+  // with an explicit CONFLICT, never silently re-approved or double-
+  // applied to punches/balance.
   fastify.post('/attendance/regularisation/bulk-approve', auth, async (req: any, reply) => {
     const schema = z.object({ ids: z.array(z.string().uuid()).min(1).max(50) })
     const parsed = schema.safeParse(req.body)
@@ -328,10 +348,20 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
     }
 
     // Direct-report ownership guard — HR admins bypass; managers are scoped.
+    // SYSTEM_AUDIT_2026-10-14: this comment has always said "direct report"
+    // (one level), but the check below used getDirectReportIds — the full
+    // subordinate tree — so it let a manager-of-managers past this gate for
+    // a grandchild's request. approveRegularisation() itself still correctly
+    // refuses it downstream (validateApprover is immediate-manager-only), so
+    // this was never a security hole, but it produced a confusing partial
+    // result: the pre-check says "authorized", the per-item call then fails
+    // with an unrelated-looking FORBIDDEN instead of being rejected cleanly
+    // here. Use the one-level helper so this gate matches what the batch can
+    // actually do.
     if (!isHrAdmin(req.userRole)) {
       const myEmpId = await resolveCallerEmployeeId(fastify.supabase, req.userId, req.tenantId)
       if (!myEmpId) return reply.code(403).send({ error: 'FORBIDDEN', message: 'No employee record linked to your profile' })
-      const reportIds = await getDirectReportIds(fastify.supabase, req.tenantId, myEmpId)
+      const reportIds = await getImmediateReportIds(fastify.supabase, req.tenantId, myEmpId)
       const reportSet = new Set(reportIds)
 
       const { data: regs } = await fastify.supabase
@@ -376,12 +406,20 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
               if (approved.requested_check_in) punchRows.push({ tenant_id: req.tenantId, employee_id: approved.employee_id, punched_at: approved.requested_check_in, direction: 'IN', source: 'regularisation', notes: `Regularisation ${id}` })
               if (approved.requested_check_out) punchRows.push({ tenant_id: req.tenantId, employee_id: approved.employee_id, punched_at: approved.requested_check_out, direction: 'OUT', source: 'regularisation', notes: `Regularisation ${id}` })
               if (punchRows.length > 0) {
-                await fastify.supabase.from('attendance_punch_logs').insert(punchRows).then(() => {}, () => {})
+                // Same uidx_punch_logs_dedup collision risk as the single-approve
+                // route below (e.g. a "forgot checkout" regularisation re-specifies
+                // the already-punched check-in alongside the genuinely-missing
+                // check-out) — upsert with ignoreDuplicates instead of a plain
+                // insert, so one colliding row doesn't sink the whole batch.
+                const { error: punchErr } = await fastify.supabase
+                  .from('attendance_punch_logs')
+                  .upsert(punchRows, { onConflict: 'tenant_id,employee_id,punched_at,direction', ignoreDuplicates: true })
+                if (punchErr) req.log.warn({ err: punchErr, reg_id: id }, 'punch_logs insert failed after bulk regularisation approval')
               }
               await recomputeRange(fastify.supabase, {
                 tenant_id: req.tenantId, employee_id: approved.employee_id,
                 from_date: approved.date, to_date: approved.date, changed_by: req.userId,
-              }).catch(() => {})
+              }).catch((e) => { req.log.warn({ err: e, reg_id: id }, 'attendance recompute failed after bulk regularisation approval') })
 
               // In-process event bus (PEND-75 follow-up) — mirrors the single
               // approve route's emission below; bulk-approve previously fired
@@ -423,6 +461,8 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
   // ── POST /attendance/regularisation/bulk-reject ───────────────────────────────
   // Manager bulk rejects team requests.
   // P6.5 security fix: every request in the batch must belong to a direct report.
+  // CONTRACT: same per-item partial-success contract as bulk-approve above —
+  // see that route's comment.
   fastify.post('/attendance/regularisation/bulk-reject', auth, async (req: any, reply) => {
     const schema = z.object({
       ids: z.array(z.string().uuid()).min(1).max(50),
@@ -441,10 +481,13 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
     }
 
     // Direct-report ownership guard — HR admins bypass; managers are scoped.
+    // SYSTEM_AUDIT_2026-10-14: same fix as bulk-approve above — use the
+    // one-level helper so this gate matches what rejectRegularisation()'s
+    // own validateApprover check (immediate-manager-only) will actually allow.
     if (!isHrAdmin(req.userRole)) {
       const myEmpId = await resolveCallerEmployeeId(fastify.supabase, req.userId, req.tenantId)
       if (!myEmpId) return reply.code(403).send({ error: 'FORBIDDEN', message: 'No employee record linked to your profile' })
-      const reportIds = await getDirectReportIds(fastify.supabase, req.tenantId, myEmpId)
+      const reportIds = await getImmediateReportIds(fastify.supabase, req.tenantId, myEmpId)
       const reportSet = new Set(reportIds)
 
       const { data: regs } = await fastify.supabase
@@ -607,9 +650,16 @@ export default async function regularisationRoute(fastify: FastifyInstance) {
     }
 
     if (punchRows.length > 0) {
+      // A regularisation form collects both check-in and check-out even when
+      // only one was actually missing (e.g. "forgot checkout" — the employee
+      // already has a genuine IN punch). A plain insert() of both rows as one
+      // batch fails outright on the uidx_punch_logs_dedup collision from the
+      // pre-existing punch, losing the genuinely-new row too. Upsert with
+      // ignoreDuplicates so the already-present punch is skipped and the
+      // actually-missing one still gets written.
       const { error: punchErr } = await fastify.supabase
         .from('attendance_punch_logs')
-        .insert(punchRows)
+        .upsert(punchRows, { onConflict: 'tenant_id,employee_id,punched_at,direction', ignoreDuplicates: true })
       if (punchErr) {
         req.log.warn({ err: punchErr, reg_id: id }, 'punch_logs insert failed after regularisation approval')
       }

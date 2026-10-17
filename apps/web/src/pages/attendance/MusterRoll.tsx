@@ -127,7 +127,9 @@ const STATUS_CELL: Record<string, string> = {
   no_punch:      'bg-destructive/10 text-destructive ring-1 ring-destructive/40',
   // ── By muster_code (overrides the status-based colour when code is present) ─
   PWO:     'bg-success/30 text-success ring-1 ring-success/40',
+  PWO_H:   'bg-success/30 text-success ring-1 ring-success/40',
   PHL:     'bg-success/30 text-success ring-1 ring-success/40',
+  PHL_H:   'bg-success/30 text-success ring-1 ring-success/40',
   OD:      'bg-success/20 text-success',
   WFH:     'bg-success/20 text-success',
   TOUR:    'bg-success/20 text-success',
@@ -1025,8 +1027,12 @@ export function MusterRoll() {
                                   const status     = rec?.status ?? null
                                   const musterCode = rec?.muster_code ?? null
                                   // Prefer the specific muster_code for display; fall back to STATUS_SHORT
+                                  // PWO_H/PHL_H (DEFECT-04, PR #30 UAT 2026-10-12): a half-day
+                                  // worked on a weekly-off/holiday, kept visually distinct from
+                                  // the full-day PWO/PHL chip rather than showing the raw code.
+                                  const SHORT_OVERRIDE: Record<string, string> = { PWO_H: 'PWO½', PHL_H: 'PHL½' }
                                   const short   = status
-                                    ? (musterCode ?? STATUS_SHORT[status] ?? status.slice(0, 2).toUpperCase())
+                                    ? (musterCode ? (SHORT_OVERRIDE[musterCode] ?? musterCode) : (STATUS_SHORT[status] ?? status.slice(0, 2).toUpperCase()))
                                     : ''
                                   // Colour: use muster_code entry first, then status entry
                                   const cellCls = status
@@ -1034,8 +1040,9 @@ export function MusterRoll() {
                                         ? STATUS_CELL[musterCode]
                                         : (STATUS_CELL[status] ?? 'bg-muted text-muted-foreground'))
                                     : ''
+                                  const workedHalfDay = musterCode === 'PWO_H' || musterCode === 'PHL_H'
                                   const tooltipText = status
-                                    ? `${emp.name} · ${d}\nStatus: ${musterCode ?? status}${rec?.work_hours ? `\nHours: ${rec.work_hours}h` : ''}${rec?.late_minutes ? `\nLate: ${rec.late_minutes}m` : ''}${FORENSICS_LINKABLE.has(status) ? '\n↗ Open forensics' : ''}`
+                                    ? `${emp.name} · ${d}\nStatus: ${musterCode ?? status}${workedHalfDay ? ' (half day worked)' : ''}${rec?.work_hours ? `\nHours: ${rec.work_hours}h` : ''}${rec?.late_minutes ? `\nLate: ${rec.late_minutes}m` : ''}${FORENSICS_LINKABLE.has(status) ? '\n↗ Open forensics' : ''}`
                                     : `${emp.name} · ${d}\nNo record`
 
                                   return (
@@ -1146,9 +1153,11 @@ export function MusterRoll() {
                         { code: 'MIS',  label: 'Missing Punch',        cls: 'bg-destructive/10 text-destructive ring-1 ring-destructive/40' },
                         { code: 'HLF',  label: 'Half Day',             cls: 'bg-muted text-muted-foreground' },
                         { code: 'HL',   label: 'Holiday',              cls: 'bg-info/20 text-info' },
-                        { code: 'PHL',  label: 'Present on Holiday',   cls: 'bg-success/30 text-success ring-1 ring-success/40' },
+                        { code: 'PHL',  label: 'Present on Holiday (full day)',   cls: 'bg-success/30 text-success ring-1 ring-success/40' },
+                        { code: 'PHL½', label: 'Present on Holiday (half day)',  cls: 'bg-success/30 text-success ring-1 ring-success/40' },
                         { code: 'WO',   label: 'Weekly Off / Weekend', cls: 'bg-muted/30 text-muted-foreground/50' },
-                        { code: 'PWO',  label: 'Present on W/Off',     cls: 'bg-success/30 text-success ring-1 ring-success/40' },
+                        { code: 'PWO',  label: 'Present on W/Off (full day)',    cls: 'bg-success/30 text-success ring-1 ring-success/40' },
+                        { code: 'PWO½', label: 'Present on W/Off (half day)',    cls: 'bg-success/30 text-success ring-1 ring-success/40' },
                         { code: 'CL',   label: 'Leave (CL/EL/SL…)',   cls: 'bg-accent/20 text-accent-foreground' },
                         { code: 'CO',   label: 'Comp Off',             cls: 'bg-info/20 text-info' },
                         { code: 'LWP',  label: 'Leave Without Pay',    cls: 'bg-destructive/20 text-destructive' },
@@ -1277,7 +1286,7 @@ export function MusterRoll() {
                   </div>
                 )}
                 <Link
-                  to="/admin/payroll/readiness"
+                  to="/admin/payroll-readiness"
                   className="mt-2 flex items-center gap-1 text-[11px] text-primary hover:underline"
                 >
                   Payroll readiness <ChevronRight className="h-3 w-3" />

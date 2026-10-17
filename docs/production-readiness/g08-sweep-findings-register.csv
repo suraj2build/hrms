@@ -1,0 +1,99 @@
+file,approx_line,register,classification,justification_or_fix,commit
+apps/api/src/lib/absconding-engine.ts,108,unbounded-query,FALSE_POSITIVE,"scoped to a single employee_id over the caller's lookback window (THRESHOLDS.termination+1 ≈ 22 days) — cannot plausibly exceed the 1,000-row cap",32f12e32
+apps/api/src/lib/absconding-engine.ts,144,unbounded-query,FALSE_POSITIVE,"scoped to a single employee_id over the caller's lookback window (THRESHOLDS.termination+1 ≈ 22 days) — cannot plausibly exceed the 1,000-row cap",32f12e32
+apps/api/src/lib/absconding-engine.ts,909,unbounded-query,FALSE_POSITIVE,"chunkIds is a slice of 100 ids (loop above) — result is bounded to <=100 rows, well under the 1,000-row cap",32f12e32
+apps/api/src/lib/absconding-engine.ts,972,unbounded-query,FALSE_POSITIVE,"chunkIds is a slice of 100 ids (loop above) — result is bounded to <=100 rows, well under the 1,000-row cap",32f12e32
+apps/api/src/lib/absconding-engine.ts,1014,tenant-isolation,TRUE_POSITIVE_REPAIRED,(true positive — code fix; see commit diff for exact change),32f12e32
+apps/api/src/lib/accrual-engine.ts,390,tenant-isolation,FALSE_POSITIVE,cfLedInserts rows already carry tenant_id (pushed with tenant_id: tenantId above) — insert payload is tenant-scoped even though the literal isn't inline in this query chain,32f12e32
+apps/api/src/lib/accrual-engine.ts,400,tenant-isolation,FALSE_POSITIVE,cfAlUpserts rows already carry tenant_id (pushed with tenant_id: tenantId above) — upsert payload is tenant-scoped even though the literal isn't inline in this query chain,32f12e32
+apps/api/src/lib/attendance-api-scheduler.ts,193,tenant-isolation,TRUE_POSITIVE_REPAIRED,(true positive — code fix; see commit diff for exact change),32f12e32
+apps/api/src/lib/attendance-engine.ts,656,unbounded-query,FALSE_POSITIVE,"scoped to a single employee_id over a single-day (or single-shift) punch window — cannot plausibly exceed the 1,000-row cap",32f12e32
+apps/api/src/lib/attendance-engine.ts,1395,tenant-isolation,FALSE_POSITIVE,"dbRows come from computeDay(), whose returned row always carries tenant_id — upsert payload is tenant-scoped even though the literal isn't inline in this query chain",32f12e32
+apps/api/src/lib/attendance-reconciliation.ts,106,tenant-isolation,FALSE_POSITIVE,chunk rows already carry tenant_id (spread with tenant_id: tenantId above) — insert payload is tenant-scoped even though the literal isn't inline in this query chain,32f12e32
+apps/api/src/lib/attendance-state-service.ts,146,tenant-isolation,FALSE_POSITIVE,"payload already carries tenant_id (built above as { tenant_id: tenantId, ... }) and onConflict is keyed on tenant_id — upsert is tenant-scoped even though the literal isn't inline in this query chain",32f12e32
+apps/api/src/lib/import-engine/chunk-executor.ts,346,tenant-isolation,TRUE_POSITIVE_REPAIRED,(true positive — code fix; see commit diff for exact change),32f12e32
+apps/api/src/lib/import-engine/chunk-executor.ts,491,tenant-isolation,TRUE_POSITIVE_REPAIRED,(true positive — code fix; see commit diff for exact change),32f12e32
+apps/api/src/lib/import-engine/salary-upload.ts,1166,tenant-isolation,TRUE_POSITIVE_REPAIRED,(true positive — code fix; see commit diff for exact change),32f12e32
+apps/api/src/lib/import-engine/salary-upload.ts,1190,tenant-isolation,TRUE_POSITIVE_REPAIRED,(true positive — code fix; see commit diff for exact change),32f12e32
+apps/api/src/lib/import-engine/salary-upload.ts,1199,tenant-isolation,TRUE_POSITIVE_REPAIRED,(true positive — code fix; see commit diff for exact change),32f12e32
+apps/api/src/lib/import-engine/validator.ts,1266,unbounded-query,FALSE_POSITIVE,"chunked to 100 ids/request, <=100 rows per query, well under the 1,000-row cap",32f12e32
+apps/api/src/lib/import-engine/validator.ts,1304,unbounded-query,FALSE_POSITIVE,"chunked to 100 codes/request, <=100 rows per query, well under the 1,000-row cap",32f12e32
+apps/api/src/lib/import-pipeline/service.ts,241,tenant-isolation,TRUE_POSITIVE_REPAIRED,(true positive — code fix; see commit diff for exact change),32f12e32
+apps/api/src/lib/import-pipeline/service.ts,270,tenant-isolation,TRUE_POSITIVE_REPAIRED,(true positive — code fix; see commit diff for exact change),32f12e32
+apps/api/src/lib/import-pipeline/service.ts,278,tenant-isolation,TRUE_POSITIVE_REPAIRED,(true positive — code fix; see commit diff for exact change),32f12e32
+apps/api/src/lib/leave-entitlement-service.ts,440,tenant-isolation,FALSE_POSITIVE,balUpserts rows already carry tenant_id (built with tenant_id: tenantId above) — upsert payload is tenant-scoped even though the literal isn't inline in this query chain,32f12e32
+apps/api/src/lib/leave-entitlement-service.ts,694,tenant-isolation,FALSE_POSITIVE,upserts rows already carry tenant_id (pushed with tenant_id: tenantId above) — upsert payload is tenant-scoped even though the literal isn't inline in this query chain,32f12e32
+apps/api/src/lib/leave-event-engine.ts,368,tenant-isolation,TRUE_POSITIVE_REPAIRED,(true positive — code fix; see commit diff for exact change),32f12e32
+apps/api/src/lib/leave-jobs.ts,493,tenant-isolation,FALSE_POSITIVE,ledInserts rows already carry tenant_id (pushed with tenant_id: tenantId above) — upsert payload is tenant-scoped even though the literal isn't inline in this query chain,32f12e32
+apps/api/src/lib/leave-jobs.ts,515,tenant-isolation,FALSE_POSITIVE,balUpserts rows already carry tenant_id (pushed with tenant_id: tenantId above) — upsert payload is tenant-scoped even though the literal isn't inline in this query chain,32f12e32
+apps/api/src/lib/leave-jobs.ts,803,tenant-isolation,FALSE_POSITIVE,balInserts rows already carry tenant_id (mapped with tenant_id: tenantId above) — insert payload is tenant-scoped even though the literal isn't inline in this query chain,32f12e32
+apps/api/src/lib/leave-jobs.ts,1006,tenant-isolation,TRUE_POSITIVE_REPAIRED,(true positive — code fix; see commit diff for exact change),32f12e32
+apps/api/src/lib/leave-jobs.ts,1232,tenant-isolation,FALSE_POSITIVE,balUpserts rows already carry tenant_id (pushed with tenant_id: tenantId above) — upsert payload is tenant-scoped even though the literal isn't inline in this query chain,32f12e32
+apps/api/src/lib/leave-jobs.ts,1871,tenant-isolation,TRUE_POSITIVE_REPAIRED,(true positive — code fix; see commit diff for exact change),32f12e32
+apps/api/src/lib/notify.ts,118,tenant-isolation,FALSE_POSITIVE,`rows` (built above) already stamps tenant_id: opts.tenantId on every row — not visible to the scanner through the variable indirection,32f12e32
+apps/api/src/lib/onboarding-orchestrator.ts,382,tenant-isolation,FALSE_POSITIVE,`rows` (built above) already stamps tenant_id: opts.tenantId on every row — not visible to the scanner through the variable indirection,32f12e32
+apps/api/src/lib/payroll-accounting-engine.ts,643,unbounded-query,TRUE_POSITIVE_REPAIRED,"chunked to EMP_META_CHUNK (100) ids per request via .slice() above — bounded well under the 1,000-row cap",c36a4853
+apps/api/src/lib/salary-config-store.ts,246,tenant-isolation,FALSE_POSITIVE,`rows` (built above) already stamps tenant_id: tenantId on every row — not visible to the scanner through the variable indirection,32f12e32
+apps/api/src/lib/shift-resolution-engine.ts,324,unbounded-query,FALSE_POSITIVE,"chunkIds is a slice of 100 ids (loop above) — result is bounded to <=100 rows, well under the 1,000-row cap",32f12e32
+apps/api/src/lib/verification-retry-scanner.ts,52,tenant-isolation,FALSE_POSITIVE,deliberate cross-tenant background scan (polls every tenant's due retries on a schedule) — each row's own tenant_id is carried through and scoped correctly in the per-row orchestrator.verify() calls below,32f12e32
+apps/api/src/lib/webhook-retry-scheduler.ts,41,tenant-isolation,FALSE_POSITIVE,"deliberate cross-tenant background scan (polls every tenant's due retries on a schedule) — each row's own tenant_id is passed into service.retryDelivery(d.id, d.tenant_id) below, scoping the actual retry correctly",32f12e32
+apps/api/src/lib/webhook-service.ts,173,tenant-isolation,TRUE_POSITIVE_REPAIRED,(true positive — code fix; see commit diff for exact change),32f12e32
+apps/api/src/lib/webhook-service.ts,196,tenant-isolation,TRUE_POSITIVE_REPAIRED,(true positive — code fix; see commit diff for exact change),32f12e32
+apps/api/src/lib/webhook-service.ts,323,tenant-isolation,TRUE_POSITIVE_REPAIRED,(true positive — code fix; see commit diff for exact change),32f12e32
+apps/api/src/lib/webhook-service.ts,341,tenant-isolation,TRUE_POSITIVE_REPAIRED,(true positive — code fix; see commit diff for exact change),32f12e32
+apps/api/src/lib/wo-credit-reconciler.ts,106,tenant-isolation,FALSE_POSITIVE,"wo_credit_ladder has no tenant_id column (migration 253 — scoped via parent wo_credit_structure.tenant_id by RLS); structById's keys were already filtered by .eq('tenant_id', tenantId) above, so this join-through-parent is tenant-scoped",32f12e32
+apps/api/src/routes/attendance/anomalies.ts,146,unbounded-query,FALSE_POSITIVE,"chunkIds is a slice of 100 ids (loop above) — result is bounded to <=100 rows, well under the 1,000-row cap",32f12e32
+apps/api/src/routes/attendance/health-index.ts,126,unbounded-query,FALSE_POSITIVE,"idsByScope.employee is distinct scope_ids from one page of results (limit <= 500, validated above) — bounded well under the 1,000-row cap",32f12e32
+apps/api/src/routes/attendance/health-index.ts,503,unbounded-query,FALSE_POSITIVE,"chunkIds is a slice of 100 ids (loop above) — result is bounded to <=100 rows, well under the 1,000-row cap",32f12e32
+apps/api/src/routes/attendance/leave.ts,1160,unbounded-query,FALSE_POSITIVE,"chunkIds is a slice of 100 ids (loop above) — result is bounded to <=100 rows, well under the 1,000-row cap",32f12e32
+apps/api/src/routes/attendance/leave.ts,1193,unbounded-query,FALSE_POSITIVE,"chunkIds is a slice of 100 ids (loop above) — result is bounded to <=100 rows, well under the 1,000-row cap",32f12e32
+apps/api/src/routes/attendance/muster-upload.ts,297,unbounded-query,FALSE_POSITIVE,"write-only .upsert() with no .select() — no rows are read back, so the 1,000-row read cap doesn't apply (scanner's write-op detection doesn't recognize .upsert(), only .insert()/.update()/.delete())",32f12e32
+apps/api/src/routes/attendance/overtime.ts,347,unbounded-query,FALSE_POSITIVE,"chunkIds is a slice of 100 ids (loop above) — result is bounded to <=100 rows, well under the 1,000-row cap",32f12e32
+apps/api/src/routes/attendance/wo-credit.ts,210,unbounded-query,FALSE_POSITIVE,"chunkIds is a slice of 100 ids (loop above) — result is bounded to <=100 rows, well under the 1,000-row cap",32f12e32
+apps/api/src/routes/attendance/work-sessions.ts,67,unbounded-query,FALSE_POSITIVE,"chunkIds is a slice of 100 ids (loop above) — result is bounded to <=100 rows, well under the 1,000-row cap",32f12e32
+apps/api/src/routes/attendance/workforce-optimization.ts,1072,tenant-isolation,FALSE_POSITIVE,batch rows already carry tenant_id (balanceUpserts.push includes tenant_id: req.tenantId above) — upsert payload is tenant-scoped even though the literal isn't inline in this query chain,32f12e32
+apps/api/src/routes/compensation/revisions.ts,829,unbounded-query,FALSE_POSITIVE,"chunkIds.length <= 100 (sliced above), further narrowed by is_active=true (at most one row per employee) — well under PostgREST's 1,000-row cap",32f12e32
+apps/api/src/routes/employees/user-account.ts,347,tenant-isolation,FALSE_POSITIVE,"profile.id came from the tenant-filtered lookup above (.eq('tenant_id', tenantId)), so this id already belongs to this tenant",32f12e32
+apps/api/src/routes/governance/intelligence.ts,35,unbounded-query,TRUE_POSITIVE_REPAIRED,(true positive — code fix; see commit diff for exact change),32f12e32
+apps/api/src/routes/import/index.ts,261,tenant-isolation,FALSE_POSITIVE,"activeJob.id came from the tenant-filtered query above (.eq('tenant_id', req.tenantId)), so this id already belongs to this tenant",32f12e32
+apps/api/src/routes/letters/index.ts,729,tenant-isolation,TRUE_POSITIVE_REPAIRED,(true positive — code fix; see commit diff for exact change),32f12e32
+apps/api/src/routes/letters/index.ts,808,tenant-isolation,TRUE_POSITIVE_REPAIRED,(true positive — code fix; see commit diff for exact change),32f12e32
+apps/api/src/routes/manager/team-leave-context.ts,82,unbounded-query,FALSE_POSITIVE,"bounded to one manager's direct-report cohort (span-of-control), not the employees table at large",32f12e32
+apps/api/src/routes/masters/leave-policy-assignments.ts,128,unbounded-query,FALSE_POSITIVE,"chunked to 100 ids/request, <=100 rows per query, well under the 1,000-row cap",32f12e32
+apps/api/src/routes/masters/leave-policy-assignments.ts,150,unbounded-query,TRUE_POSITIVE_REPAIRED,(true positive — code fix; see commit diff for exact change),32f12e32
+apps/api/src/routes/notifications/ess-operational.ts,315,unbounded-query,FALSE_POSITIVE,"single employee, 7-day window — at most a handful of rows, nowhere near the 1,000-row cap",32f12e32
+apps/api/src/routes/onboarding/pre-joinee.ts,671,tenant-isolation,FALSE_POSITIVE,`row` (defined above) already includes tenant_id: tenantId in its object literal — not visible to the scanner through the variable indirection,32f12e32
+apps/api/src/routes/onboarding/sessions.ts,618,tenant-isolation,TRUE_POSITIVE_REPAIRED,(true positive — code fix; see commit diff for exact change),32f12e32
+apps/api/src/routes/onboarding/sessions.ts,843,tenant-isolation,TRUE_POSITIVE_REPAIRED,(true positive — code fix; see commit diff for exact change),32f12e32
+apps/api/src/routes/payroll/arrears.ts,256,unbounded-query,FALSE_POSITIVE,"chunkIds.length <= 100 (sliced above) — well under PostgREST's 1,000-row cap",32f12e32
+apps/api/src/routes/payroll/compensation-master.ts,387,tenant-isolation,TRUE_POSITIVE_REPAIRED,(true positive — code fix; see commit diff for exact change),32f12e32
+apps/api/src/routes/payroll/compensation-revisions.ts,290,tenant-isolation,FALSE_POSITIVE,"`snapshots` rows above already set tenant_id: req.tenantId per row (lines 269, 280)",32f12e32
+apps/api/src/routes/payroll/compensation-revisions.ts,391,tenant-isolation,TRUE_POSITIVE_REPAIRED,(true positive — code fix; see commit diff for exact change),32f12e32
+apps/api/src/routes/payroll/forensics.ts,170,tenant-isolation,TRUE_POSITIVE_REPAIRED,(true positive — code fix; see commit diff for exact change),32f12e32
+apps/api/src/routes/payroll/loans.ts,376,tenant-isolation,FALSE_POSITIVE,`schedules` rows above already set tenant_id: req.tenantId per row (line 364),32f12e32
+apps/api/src/routes/payroll/payout-batches.ts,267,tenant-isolation,FALSE_POSITIVE,`obligations` rows built by buildPayoutObligations() already set tenant_id: tenantId per row,32f12e32
+apps/api/src/routes/payroll/runs.ts,189,unbounded-query,FALSE_POSITIVE,"one employee, one FY window — at most 12 monthly slips, far under the 1,000-row cap",32f12e32
+apps/api/src/routes/payroll/runs.ts,792,tenant-isolation,TRUE_POSITIVE_REPAIRED,(true positive — code fix; see commit diff for exact change),32f12e32
+apps/api/src/routes/payroll/runs.ts,906,tenant-isolation,FALSE_POSITIVE,buildPayrollBlockers() sets tenant_id: tenantId on every row (payroll-blocker-engine.ts),32f12e32
+apps/api/src/routes/payroll/runs.ts,1044,tenant-isolation,FALSE_POSITIVE,buildPayrollBlockers() sets tenant_id: tenantId on every row (payroll-blocker-engine.ts),32f12e32
+apps/api/src/routes/payroll/runs.ts,1092,tenant-isolation,TRUE_POSITIVE_REPAIRED,(true positive — code fix; see commit diff for exact change),32f12e32
+apps/api/src/routes/payroll/runs.ts,1637,tenant-isolation,TRUE_POSITIVE_REPAIRED,(true positive — code fix; see commit diff for exact change),32f12e32
+apps/api/src/routes/payroll/runs.ts,2247,tenant-isolation,TRUE_POSITIVE_REPAIRED,(true positive — code fix; see commit diff for exact change),32f12e32
+apps/api/src/routes/payroll/runs.ts,2289,unbounded-query,FALSE_POSITIVE,"chunkIds.length <= 100 (sliced above) — well under PostgREST's 1,000-row cap",32f12e32
+apps/api/src/routes/payroll/runs.ts,2390,tenant-isolation,TRUE_POSITIVE_REPAIRED,(true positive — code fix; see commit diff for exact change),32f12e32
+apps/api/src/routes/payroll/runs.ts,2536,tenant-isolation,TRUE_POSITIVE_REPAIRED,(true positive — code fix; see commit diff for exact change),32f12e32
+apps/api/src/routes/payroll/runs.ts,2626,tenant-isolation,TRUE_POSITIVE_REPAIRED,(true positive — code fix; see commit diff for exact change),32f12e32
+apps/api/src/routes/payroll/runs.ts,2657,tenant-isolation,TRUE_POSITIVE_REPAIRED,(true positive — code fix; see commit diff for exact change),32f12e32
+apps/api/src/routes/payroll/runs.ts,3192,unbounded-query,FALSE_POSITIVE,"chunked at CODE_CHUNK (500) per request — under PostgREST's 1,000-row cap",32f12e32
+apps/api/src/routes/payroll/runs.ts,3560,unbounded-query,FALSE_POSITIVE,"chunkIds.length <= 100 (sliced above) — well under PostgREST's 1,000-row cap",32f12e32
+apps/api/src/routes/payroll/runs.ts,3625,tenant-isolation,TRUE_POSITIVE_REPAIRED,"slipRow built by buildSlipRow(tenantId, ...) above already sets tenant_id",32f12e32
+apps/api/src/routes/payroll/runs.ts,3646,tenant-isolation,TRUE_POSITIVE_REPAIRED,(true positive — code fix; see commit diff for exact change),32f12e32
+apps/api/src/routes/payroll/slips.ts,228,unbounded-query,FALSE_POSITIVE,"one employee's own finalized slips — one row per month of tenure, nowhere near the 1,000-row cap in practice",32f12e32
+apps/api/src/routes/payroll/slips.ts,317,unbounded-query,FALSE_POSITIVE,"one employee, bounded to `months` (1–24) via the cutoff filter below",32f12e32
+apps/api/src/routes/payroll/statutory-recon.ts,277,tenant-isolation,FALSE_POSITIVE,`rowsToInsert` entries above already set tenant_id: tenantId per row (line 261),32f12e32
+apps/api/src/routes/payroll/statutory/ptax.ts,442,unbounded-query,TRUE_POSITIVE_REPAIRED,chunked to SITE_CHUNK (100) ids per request above,c36a4853
+apps/api/src/routes/payroll/variable-pay.ts,245,unbounded-query,FALSE_POSITIVE,"chunkIds.length <= 100 (sliced above) — well under PostgREST's 1,000-row cap",32f12e32
+apps/api/src/routes/payroll/variable-pay.ts,268,tenant-isolation,FALSE_POSITIVE,`payoutRows` above already sets tenant_id: req.tenantId per row (line 264),32f12e32
+apps/api/src/routes/surveys/index.ts,810,unbounded-query,FALSE_POSITIVE,"chunked to 100 ids/request, <=100 rows per query, well under the 1,000-row cap",32f12e32
+apps/api/src/routes/surveys/index.ts,871,unbounded-query,FALSE_POSITIVE,"chunked to 100 ids/request, <=100 rows per query, well under the 1,000-row cap",32f12e32
+apps/api/src/routes/surveys/index.ts,1041,unbounded-query,TRUE_POSITIVE_REPAIRED,"chunked to 100 ids/request, <=100 rows per query, well under the 1,000-row cap",32f12e32

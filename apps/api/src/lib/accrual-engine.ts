@@ -11,6 +11,7 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { fetchAllRows } from './supabase-paginate.js'
+import { round2, computeCleanGrossPay, computeFlatMarginalTds } from './payroll-engine.js'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -33,6 +34,15 @@ export interface AccrualResult {
   total_days_credited: number
   skipped:            number
   errors:             string[]
+  /**
+   * Employee+leave-type pairs blocked this run because leave_policy_rules
+   * (System B, leave-entitlement-service.ts) ALSO has an active applicable
+   * rule for them — recorded in leave_accrual_conflicts rather than
+   * credited by either system (SYSTEM_AUDIT_2026-10-14 checkpoint 14; see
+   * migration 470's header). Optional for the same reason as BatchResult.
+   * conflicted in leave-entitlement-service.ts.
+   */
+  conflicted?: number
 }
 
 // ── Helper: pro-rate days for partial months ──────────────────────────────────
@@ -56,6 +66,106 @@ function proratedDays(
   return parseFloat(((daysPerPeriod * daysWorked) / daysInMonth).toFixed(2))
 }
 
+// ── Atomic run claim (DEFECT-02, PR #30 UAT 2026-10-12) ───────────────────────
+//
+// Attempts to atomically claim the (tenant_id, run_period, leave_type_id) run
+// slot for this call alone, using leave_accrual_runs' own unique constraint as
+// the race-safe mechanism (the same claim-before-side-effects pattern
+// comp-off.ts's approval route already uses — SYSCERT_AUDIT_2026-08-02.md H6).
+//
+// Returns the claimed row's id, or null if this call should skip (a prior
+// 'success' run already exists, or another call currently holds the 'running'
+// claim). A prior 'partial' or 'failed' run is reclaimable — HR retrying a
+// failed run is a real, intended use case, not something this claim should
+// block forever.
+async function claimAccrualRun(
+  supabase:      SupabaseClient,
+  tenantId:      string,
+  runPeriod:     string,
+  leaveTypeId:   string,
+  nowIso:        string,
+  staleBeforeIso: string,
+): Promise<string | null> {
+  const { data: inserted, error: insertErr } = await supabase
+    .from('leave_accrual_runs')
+    .insert({
+      tenant_id:           tenantId,
+      run_period:          runPeriod,
+      leave_type_id:       leaveTypeId,
+      employees_credited:  0,
+      total_days_credited: 0,
+      status:              'running',
+      ran_at:              nowIso,
+    })
+    .select('id')
+
+  if (!insertErr && (inserted?.length ?? 0) > 0) {
+    return (inserted as Array<{ id: string }>)[0].id
+  }
+
+  // Insert lost the race (or a prior run already exists for this slot) — a
+  // real constraint violation is the only reason this should fail; anything
+  // else is a genuine error, not a race, and should not silently claim.
+  if (insertErr && insertErr.code !== '23505') {
+    return null
+  }
+
+  // Try to reclaim a previous 'partial' or 'failed' run. Matches 0 rows if
+  // the existing row is 'success' (already done — correctly skip) or
+  // 'running' (someone else's claim may be live right now).
+  const { data: reclaimed } = await supabase
+    .from('leave_accrual_runs')
+    .update({ status: 'running', ran_at: nowIso })
+    .eq('tenant_id', tenantId)
+    .eq('run_period', runPeriod)
+    .eq('leave_type_id', leaveTypeId)
+    .in('status', ['partial', 'failed'])
+    .select('id')
+
+  if ((reclaimed?.length ?? 0) > 0) {
+    return (reclaimed as Array<{ id: string }>)[0].id
+  }
+
+  // Reclaim a STALE 'running' claim (migration 459): a process that claimed
+  // this run and then crashed before the finalizing UPDATE used to leave it
+  // stuck in 'running' forever — unretryable by design, because the old
+  // per-employee crediting loop below was not safe to resume (it would
+  // double-credit whoever the crashed attempt already wrote). That is no
+  // longer true: credit_monthly_accrual_batch() checks per-employee
+  // idempotency against leave_accrual_ledger inside the same statement that
+  // writes it, so resuming a stale claim just skips whoever is already
+  // credited and continues with the rest. A 'running' row is only "stale"
+  // if its ran_at (stamped at claim time, same column the finalize UPDATE
+  // would have refreshed) is older than the caller's threshold — a row
+  // claimed moments ago by a genuinely live run must NOT match this.
+  const { data: staleReclaimed } = await supabase
+    .from('leave_accrual_runs')
+    .update({ status: 'running', ran_at: nowIso })
+    .eq('tenant_id', tenantId)
+    .eq('run_period', runPeriod)
+    .eq('leave_type_id', leaveTypeId)
+    .eq('status', 'running')
+    .lt('ran_at', staleBeforeIso)
+    .select('id')
+
+  if ((staleReclaimed?.length ?? 0) > 0) {
+    return (staleReclaimed as Array<{ id: string }>)[0].id
+  }
+  return null
+}
+
+// A 'running' claim older than this is assumed to belong to a crashed
+// process, not a live one — see claimAccrualRun's stale-reclaim branch.
+const STALE_RUNNING_CLAIM_MS = 15 * 60 * 1000
+
+// Chunk size for credit_monthly_accrual_batch() calls. Keeps each database
+// transaction short (bounded lock/row-count) and gives interruption
+// recovery a granularity finer than "the whole tenant" — if the process
+// dies mid-run, only the chunk in flight at that moment is lost work; every
+// earlier chunk already committed (with its own idempotency guarantee) and
+// every later chunk has simply not started yet.
+const ACCRUAL_BATCH_SIZE = 500
+
 // ── Core: run monthly accrual for one tenant ─────────────────────────────────
 
 export async function runMonthlyAccrual(
@@ -68,13 +178,20 @@ export async function runMonthlyAccrual(
   const result: AccrualResult = { employees_credited: 0, total_days_credited: 0, skipped: 0, errors: [] }
 
   // ── Fetch active accrual rules for the period ──────────────────────────────
+  // Standard interval-overlap check: a rule applies to this period if it was
+  // effective at ANY point during it — effective_from on or before the period's
+  // LAST day, and effective_to (if set) on or after the period's FIRST day.
+  // Comparing effective_from against the period's first day instead would wrongly
+  // exclude any rule created mid-period (e.g. an HR admin adding a rule today and
+  // running this same month's accrual — the ordinary case right after setup).
   const periodDate = `${periodYear}-${String(periodMonth).padStart(2, '0')}-01`
+  const periodEndDate = new Date(Date.UTC(periodYear, periodMonth, 0)).toISOString().slice(0, 10)
   const { data: rules, error: rulesErr } = await supabase
     .from('leave_accrual_rules')
     .select('*')
     .eq('tenant_id', tenantId)
     .eq('is_active', true)
-    .lte('effective_from', periodDate)
+    .lte('effective_from', periodEndDate)
     .or(`effective_to.is.null,effective_to.gte.${periodDate}`)
 
   if (rulesErr || !rules?.length) {
@@ -108,135 +225,118 @@ export async function runMonthlyAccrual(
     return result
   }
 
-  // ── Idempotency: check if already run for this period+rule combo ───────────
-  const { data: existingRuns } = await supabase
-    .from('leave_accrual_runs')
-    .select('leave_type_id')
-    .eq('tenant_id', tenantId)
-    .eq('run_period', runPeriod)
-    .eq('status', 'success')
-
-  const alreadyRunTypes = new Set((existingRuns ?? []).map((r: { leave_type_id: string }) => r.leave_type_id))
-
   // Computed once — same for every employee in this accrual run
   const periodLastDay = new Date(Date.UTC(periodYear, periodMonth, 0)).toISOString().slice(0, 10)
   const nowIso = new Date().toISOString()
 
   // ── Process each rule ──────────────────────────────────────────────────────
   for (const rule of monthlyRules as AccrualRule[]) {
-    if (alreadyRunTypes.has(rule.leave_type_id)) {
+    // DEFECT-02 (PR #30 Attendance/Leave UAT, 2026-10-12): the old idempotency
+    // check was a pre-check SELECT against leave_accrual_runs, with the whole
+    // employee-crediting loop below it and a terminal upsert only at the very
+    // end. Two genuinely overlapping calls for the same tenant+period+rule
+    // (an HR admin double-clicking "Run Accrual", or a manual trigger
+    // overlapping a scheduled run) could both pass that pre-check — neither
+    // had written the terminal row yet — and proceed to credit employees in
+    // parallel: a lost-update race on employee_leave_balance (an absolute SET
+    // of a pre-fetched balance + days, not an atomic increment), not reliably
+    // prevented by the leave_accrual_ledger pre-check-then-insert alone (that
+    // protects only the ledger's own rows, not the balance cache). Fixed the
+    // same way comp-off.ts's approval route already does (SYSCERT_AUDIT_2026
+    // -08-02.md H6 pattern): claim the run FIRST via a real INSERT against
+    // leave_accrual_runs' own unique constraint (tenant_id, run_period,
+    // leave_type_id, migration 454 added a 'running' status to its check
+    // constraint for this) — the loser of a genuine race gets a real Postgres
+    // 23505 back immediately, before either side has touched a single
+    // employee's balance.
+    const staleBeforeIso = new Date(Date.now() - STALE_RUNNING_CLAIM_MS).toISOString()
+    const claimedRunId = await claimAccrualRun(supabase, tenantId, runPeriod, rule.leave_type_id, nowIso, staleBeforeIso)
+    if (!claimedRunId) {
       result.skipped++
       continue
     }
 
     let employeesCredited = 0
     let totalDays = 0
+    let employeesConflicted = 0
     const runErrors: string[] = []
 
-    // Batch-fetch existing balances so we can compute new balances in memory
-    // without a per-employee SELECT (eliminates ISSUE-030).
-    const { data: existingBalances, error: balFetchErr } = await supabase
-      .from('employee_leave_balance')
-      .select('employee_id, balance')
-      .eq('tenant_id', tenantId)
-      .eq('leave_type_id', rule.leave_type_id)
-      .eq('year', periodYear)
-
-    if (balFetchErr) {
-      runErrors.push(`Balance pre-fetch failed: ${balFetchErr.message}`)
-    }
-
-    const balanceMap = new Map<string, number>(
-      (existingBalances ?? []).map((b: { employee_id: string; balance: number }) => [b.employee_id, Number(b.balance)])
-    )
-
-    const balUpserts: Record<string, unknown>[] = []
-    const ledInserts: Record<string, unknown>[] = []
-    const alUpserts:  Record<string, unknown>[] = []
-
+    // days_per_period is DECIMAL(5,2) — PostgREST serializes it as a string. Number()
+    // it here: proratedDays()'s full-month branch (`joining <= periodStart`) returns
+    // its `daysPerPeriod` argument UNCHANGED, so for any employee who joined before
+    // this period (i.e. most employees, every month) `days` stayed a raw string,
+    // which previously broke `currentBalance + days` string-concatenation downstream.
+    const daysPerPeriod = Number(rule.days_per_period)
+    const employeeDays: Array<{ employee_id: string; days: number }> = []
     for (const emp of employees as Array<{ id: string; joining_date: string }>) {
       const days = rule.prorate_on_joining
-        ? proratedDays(rule.days_per_period, emp.joining_date, periodYear, periodMonth)
-        : rule.days_per_period
-
-      if (days <= 0) continue
-
-      const currentBalance = balanceMap.get(emp.id) ?? 0
-      const newBalance = parseFloat((currentBalance + days).toFixed(2))
-
-      balUpserts.push({
-        tenant_id:     tenantId,
-        employee_id:   emp.id,
-        leave_type_id: rule.leave_type_id,
-        year:          periodYear,
-        balance:       newBalance,
-        updated_at:    nowIso,
-      })
-
-      ledInserts.push({
-        tenant_id:     tenantId,
-        employee_id:   emp.id,
-        leave_type_id: rule.leave_type_id,
-        year:          periodYear,
-        txn_type:      'accrual',
-        delta:         days,
-        balance_after: newBalance,
-        notes:         `Monthly accrual — ${runPeriod}`,
-      })
-
-      alUpserts.push({
-        tenant_id:     tenantId,
-        employee_id:   emp.id,
-        leave_type_id: rule.leave_type_id,
-        year:          periodYear,
-        accrual_type:  'monthly',
-        days,
-        accrued_on:    periodLastDay,
-        is_expired:    false,
-        notes:         `Monthly accrual — ${runPeriod}`,
-      })
-
-      employeesCredited++
-      totalDays = parseFloat((totalDays + days).toFixed(2))
+        ? proratedDays(daysPerPeriod, emp.joining_date, periodYear, periodMonth)
+        : daysPerPeriod
+      if (days > 0) employeeDays.push({ employee_id: emp.id, days })
     }
 
-    // Batch write: 3 calls per rule regardless of employee count
-    // (was 4 × N_employees sequential calls — ISSUE-030 through ISSUE-033).
-    if (balUpserts.length) {
-      const { error: balErr } = await supabase
-        .from('employee_leave_balance')
-        .upsert(balUpserts, { onConflict: 'tenant_id,employee_id,leave_type_id,year' })
-      if (balErr) runErrors.push(`Balance batch failed: ${balErr.message}`)
+    // Credit in bounded chunks via ONE atomic SQL statement per chunk
+    // (credit_monthly_accrual_batch, migration 459) instead of a client-side
+    // read-balances / compute-in-memory / write-balances-and-two-ledgers
+    // sequence. That old sequence had no shared transaction across its
+    // steps, computed each employee's new balance from a pre-fetch that was
+    // never paginated (silently capped at PostgREST's max-rows ceiling —
+    // an omitted employee's real balance would be overwritten to
+    // `0 + days` instead of `existing + days`), and had no idempotency
+    // check on employee_leave_balance or leave_balance_ledger — so a retry
+    // after a partial failure, or two genuinely concurrent runs, could
+    // double-credit. The batch function instead does a true atomic
+    // increment (`balance = balance + delta`, serialized against concurrent
+    // leave approval/cancellation by Postgres's own row lock, never a
+    // client-computed overwrite) and skips any employee already credited
+    // for this exact run inside the SAME statement that credits the rest —
+    // safe to call repeatedly, and safe to resume after any interruption,
+    // chunk-by-chunk. A failed chunk is recorded and the loop continues
+    // with the remaining chunks rather than abandoning the whole rule.
+    for (let i = 0; i < employeeDays.length; i += ACCRUAL_BATCH_SIZE) {
+      const chunk = employeeDays.slice(i, i + ACCRUAL_BATCH_SIZE)
+      const { data: batchData, error: batchErr } = await supabase.rpc('credit_monthly_accrual_batch', {
+        p_tenant_id:       tenantId,
+        p_leave_type_id:   rule.leave_type_id,
+        p_year:            periodYear,
+        p_period_last_day: periodLastDay,
+        p_run_period:      runPeriod,
+        p_employee_days:   chunk,
+      })
 
-      const { error: ledErr } = await supabase
-        .from('leave_balance_ledger')
-        .insert(ledInserts)
-      if (ledErr) runErrors.push(`Ledger batch failed: ${ledErr.message}`)
-
-      const { error: alErr } = await supabase
-        .from('leave_accrual_ledger')
-        .upsert(alUpserts, { onConflict: 'tenant_id,employee_id,leave_type_id,year,accrual_type,accrued_on', ignoreDuplicates: true })
-      if (alErr) runErrors.push(`Accrual ledger batch failed: ${alErr.message}`)
+      if (batchErr) {
+        runErrors.push(`Batch ${Math.floor(i / ACCRUAL_BATCH_SIZE) + 1} failed: ${batchErr.message}`)
+        continue
+      }
+      const row = (Array.isArray(batchData) ? batchData[0] : batchData) as
+        { employees_credited?: number; total_days?: number; employees_conflicted?: number } | null
+      employeesCredited += Number(row?.employees_credited ?? 0)
+      totalDays = parseFloat((totalDays + Number(row?.total_days ?? 0)).toFixed(2))
+      // SYSTEM_AUDIT_2026-10-14 checkpoint 14 — migration 470's extension
+      // to credit_monthly_accrual_batch: an employee in this chunk whose
+      // leave type ALSO has an active leave_policy_rules (System B) rule
+      // covering them is excluded from this credit and recorded in
+      // leave_accrual_conflicts instead of being double-credited.
+      employeesConflicted += Number(row?.employees_conflicted ?? 0)
     }
 
-    // Record the run
-    await supabase.from('leave_accrual_runs').upsert(
-      {
-        tenant_id:           tenantId,
-        run_period:          runPeriod,
-        leave_type_id:       rule.leave_type_id,
-        employees_credited:  employeesCredited,
-        total_days_credited: totalDays,
-        status:              runErrors.length ? 'partial' : 'success',
-        error_message:       runErrors.length ? runErrors.join('; ') : null,
-        ran_at:              nowIso,
-      },
-      { onConflict: 'tenant_id,run_period,leave_type_id' },
-    )
+    // Finalize the claimed run — a plain UPDATE on the row this call alone
+    // claimed above, not an upsert (no one else can race this row now).
+    await supabase.from('leave_accrual_runs').update({
+      employees_credited:  employeesCredited,
+      total_days_credited: totalDays,
+      status:              runErrors.length ? 'partial' : 'success',
+      error_message:       runErrors.length ? runErrors.join('; ') : null,
+      ran_at:              nowIso,
+    }).eq('id', claimedRunId)
 
     result.employees_credited += employeesCredited
     result.total_days_credited = parseFloat((result.total_days_credited + totalDays).toFixed(2))
     if (runErrors.length) result.errors.push(...runErrors)
+    if (employeesConflicted > 0) {
+      result.conflicted = (result.conflicted ?? 0) + employeesConflicted
+      result.errors.push(`${employeesConflicted} employee(s) skipped for leave type ${rule.leave_type_id} — also configured in the named-policy accrual system; see leave_accrual_conflicts`)
+    }
   }
 
   return result
@@ -381,6 +481,7 @@ export async function processCarryForward(
         )
       }
 
+      // lint-tenant-ok: cfLedInserts rows already carry tenant_id (pushed with tenant_id: tenantId above) — insert payload is tenant-scoped even though the literal isn't inline in this query chain
       const { error: cfLedErr } = await supabase.from('leave_balance_ledger').insert(cfLedInserts)
       if (cfLedErr) {
         console.warn(
@@ -390,6 +491,7 @@ export async function processCarryForward(
       }
 
       const { error: cfAlErr } = await supabase
+        // lint-tenant-ok: cfAlUpserts rows already carry tenant_id (pushed with tenant_id: tenantId above) — upsert payload is tenant-scoped even though the literal isn't inline in this query chain
         .from('leave_accrual_ledger')
         .upsert(cfAlUpserts, { onConflict: 'tenant_id,employee_id,leave_type_id,year,accrual_type,accrued_on', ignoreDuplicates: true })
       if (cfAlErr) {
@@ -405,6 +507,61 @@ export async function processCarryForward(
 }
 
 // ── Process encashment approval ───────────────────────────────────────────────
+
+/**
+ * G12: the payout and withholding figures the audit found entirely missing
+ * ("mark-paid only changes status, no proven disbursement path"). Computed
+ * once at approval time and stored on the request row.
+ *
+ * rate_per_day mirrors lib/fnf-settlement-engine.ts's own leave-encashment
+ * formula (last payroll gross / 26) so an employee sees the same per-day
+ * rate whether they encash standalone or at separation — using the CLEAN
+ * gross (payroll-engine.ts's computeCleanGrossPay), not the raw column: an
+ * earlier one-time encashment payout folded into that same slip's gross_pay
+ * must not inflate the rate a LATER encashment request computes for itself.
+ *
+ * tds_amount is a FLAT withholding at the employee's current marginal tax
+ * slab (looked up from their latest tds_monthly_projections row this FY +
+ * it_tax_slabs) — a real, working computation, but deliberately NOT a
+ * Section 10(10AA) exemption computation (government vs non-government
+ * treatment, the ₹25L lifetime cap). That needs tax/compliance sign-off
+ * before go-live; this conservatively withholds 0 rather than guessing
+ * when no projection exists yet this FY (e.g. payroll hasn't run for this
+ * employee this year), instead of assuming a rate.
+ */
+async function computeEncashmentPayout(
+  supabase:   SupabaseClient,
+  tenantId:   string,
+  employeeId: string,
+  days:       number,
+): Promise<{ ratePerDay: number; grossAmount: number; tdsAmount: number; netAmount: number }> {
+  const { data: lastSlip } = await supabase
+    .from('payroll_slips')
+    .select('gross_pay, month, component_breakdown')
+    .eq('tenant_id', tenantId)
+    .eq('employee_id', employeeId)
+    .order('month', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  // Clean gross: excludes any one-time payout (e.g. an EARLIER standalone
+  // encashment, payroll-engine.ts's applyEncashmentPayout) folded into this
+  // slip's gross_pay — otherwise a second encashment request computed off
+  // the same slip would overstate its own rate_per_day using a basis that
+  // already includes someone else's one-time payment.
+  const cleanGross = computeCleanGrossPay(
+    Number((lastSlip as any)?.gross_pay ?? 0),
+    ((lastSlip as any)?.component_breakdown ?? []) as Array<{ code?: string; monthly_amount?: number }>,
+  )
+  const ratePerDay  = round2(cleanGross / 26)
+  const grossAmount = round2(days * ratePerDay)
+
+  // Factored into payroll-engine.ts's computeFlatMarginalTds (SYSTEM_AUDIT_2026-10-14)
+  // so arrears/variable-pay's one-time payouts reuse this SAME tested
+  // slab-lookup instead of each re-implementing it.
+  const tdsAmount = await computeFlatMarginalTds(supabase, tenantId, employeeId, grossAmount)
+
+  return { ratePerDay, grossAmount, tdsAmount, netAmount: round2(grossAmount - tdsAmount) }
+}
 
 export async function processEncashment(
   supabase:       SupabaseClient,
@@ -423,14 +580,30 @@ export async function processEncashment(
   if (fetchErr || !req) return { ok: false, message: 'Encashment request not found' }
   if (req.status !== 'pending') return { ok: false, message: `Request is already ${req.status}` }
 
-  // Check encashment is allowed in accrual rule
-  const { data: rule } = await supabase
+  // Check encashment is allowed in accrual rule.
+  // SYSTEM_AUDIT_2026-10-14 checkpoint 14 — leave_accrual_rules is
+  // explicitly versioned (effective_from/effective_to + a unique
+  // constraint on (tenant_id, leave_type_id, effective_from)), matching
+  // the date-scoped lookup the monthly accrual job already uses
+  // (monthlyAccrualJob below). This used to be a plain `.eq('is_active',
+  // true).maybeSingle()` with no date filter — a FUTURE-dated rule version
+  // would apply immediately instead of waiting for its effective date, and
+  // a second active version at all would make .maybeSingle() throw (more
+  // than one row), not silently ignore one. Fixed to mirror
+  // request_leave_encashment_atomic's own correction (migration 467):
+  // pick the most recent version whose window actually covers today.
+  const todayStr = new Date().toISOString().slice(0, 10)
+  const { data: ruleRows } = await supabase
     .from('leave_accrual_rules')
     .select('encashable, max_encashable_per_year')
     .eq('tenant_id', tenantId)
     .eq('leave_type_id', req.leave_type_id)
     .eq('is_active', true)
-    .maybeSingle()
+    .lte('effective_from', todayStr)
+    .or(`effective_to.is.null,effective_to.gte.${todayStr}`)
+    .order('effective_from', { ascending: false })
+    .limit(1)
+  const rule = ruleRows?.[0] ?? null
 
   if (!rule?.encashable) {
     return { ok: false, message: 'This leave type does not allow encashment' }
@@ -453,6 +626,11 @@ export async function processEncashment(
   if (deductErr) return { ok: false, message: `Failed to deduct balance: ${deductErr.message}` }
   if (!deducted) return { ok: false, message: `Insufficient balance for ${req.days} day(s) encashment` }
 
+  // G12: compute what this approval is actually worth, and what will be
+  // withheld, so approval carries a real payout figure HR can review —
+  // the audit's "no proven disbursement path" gap starts here.
+  const payout = await computeEncashmentPayout(supabase, tenantId, req.employee_id, req.days)
+
   // Status update — conditioned on still 'pending' and checked for affected
   // rows. Previously this had no status guard, no tenant_id filter, and its
   // error was never checked, so it could silently no-op while the balance
@@ -460,9 +638,13 @@ export async function processEncashment(
   const { data: updatedRows, error: statusErr } = await supabase
     .from('leave_encashment_requests')
     .update({
-      status:      'approved',
-      approved_by: approverId,
-      approved_at: new Date().toISOString(),
+      status:       'approved',
+      approved_by:  approverId,
+      approved_at:  new Date().toISOString(),
+      rate_per_day: payout.ratePerDay,
+      gross_amount: payout.grossAmount,
+      tds_amount:   payout.tdsAmount,
+      net_amount:   payout.netAmount,
     })
     .eq('id', encashmentId)
     .eq('tenant_id', tenantId)
@@ -527,5 +709,5 @@ export async function processEncashment(
       source_request_id: encashmentId,
     }, { onConflict: 'tenant_id,accrual_type,source_request_id,year', ignoreDuplicates: true })
 
-  return { ok: true, message: `Encashment approved — ${req.days} days deducted` }
+  return { ok: true, message: `Encashment approved — ${req.days} days deducted, net payout ₹${payout.netAmount}` }
 }

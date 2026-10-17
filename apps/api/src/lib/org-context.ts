@@ -35,14 +35,20 @@ const ORG_CTX_ID_CHUNK = 100
 
 /** Runs `queryFn` once per chunk of `ids` and concatenates the results.
  *  Safe for per-employee dedup logic downstream: each employee's rows
- *  always land in a single chunk since chunking splits the input id list. */
+ *  always land in a single chunk since chunking splits the input id list.
+ *  Throws on a chunk's query error rather than silently continuing with a
+ *  partial result — org context (site/roster/timezone) feeds attendance
+ *  computation directly, so a swallowed chunk failure would silently
+ *  resolve some employees to the wrong (or no) site/roster for this run,
+ *  not just an incomplete display list. */
 async function fetchChunked<T>(
   ids: string[],
-  queryFn: (chunk: string[]) => PromiseLike<{ data: T[] | null }>,
+  queryFn: (chunk: string[]) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
 ): Promise<T[]> {
   const all: T[] = []
   for (let i = 0; i < ids.length; i += ORG_CTX_ID_CHUNK) {
-    const { data } = await queryFn(ids.slice(i, i + ORG_CTX_ID_CHUNK))
+    const { data, error } = await queryFn(ids.slice(i, i + ORG_CTX_ID_CHUNK))
+    if (error) throw new Error(`org-context: chunked query failed: ${error.message}`)
     if (data) all.push(...data)
   }
   return all
@@ -50,11 +56,22 @@ async function fetchChunked<T>(
 
 // ── Exported interfaces ───────────────────────────────────────────────────────
 
-/** Minimal applicability fields on a holiday row (no date needed for single-date checks). */
+/** Minimal applicability fields on a holiday row (no date needed for single-date checks).
+ *
+ * `holiday_group_ids` — SYSTEM_AUDIT_2026-10-14 checkpoint 28: a holiday can be
+ * assigned to MULTIPLE groups (the `holiday_group_assignments` junction table,
+ * set via POST /masters/holidays/group-assignments). The legacy single
+ * `holiday_calendar.holiday_group_id` column only ever held the first of
+ * those groups, which every consumer of this type used to read — so a
+ * holiday assigned to groups [B, A] applied correctly to group B's
+ * employees but silently NOT to group A's, even though the admin UI showed
+ * it assigned to both. Callers must fetch the full assignment set (e.g. via
+ * a `holiday_group_assignments(group_id)` embed) and pass it here; an empty
+ * array means "no group restriction" (global, same as the old `null`). */
 export interface HolidayApplicability {
-  site_id:           string | null
-  location_id:       string | null
-  holiday_group_id?: string | null
+  site_id:            string | null
+  location_id:        string | null
+  holiday_group_ids:  string[]
 }
 
 /** Full holiday row with date — used in date-range queries (leave engine). */
@@ -62,6 +79,27 @@ export interface HolidayRowWithDate extends HolidayApplicability {
   date:        string
   name:        string
   is_optional: boolean
+}
+
+/** Shape of a `holiday_calendar` row selected with a
+ *  `holiday_group_assignments(group_id)` embed (the FK is
+ *  holiday_group_assignments.holiday_id -> holiday_calendar.id). */
+export interface RawHolidayRowWithGroupEmbed {
+  site_id:                   string | null
+  location_id:               string | null
+  holiday_group_assignments: { group_id: string }[] | null
+}
+
+/** Flattens a `holiday_group_assignments(group_id)` embed into the
+ *  `holiday_group_ids: string[]` shape `isHolidayForEmployee`/`getHolidayDates`
+ *  expect. Every holiday query feeding either of those two functions must
+ *  embed the junction table and map through this (not just read the legacy
+ *  `holiday_group_id` column) — see the audit note on `HolidayApplicability`. */
+export function withHolidayGroupIds<T extends RawHolidayRowWithGroupEmbed>(
+  row: T,
+): Omit<T, 'holiday_group_assignments'> & { holiday_group_ids: string[] } {
+  const { holiday_group_assignments, ...rest } = row
+  return { ...rest, holiday_group_ids: (holiday_group_assignments ?? []).map((a) => a.group_id) }
 }
 
 /** Resolved organisational context for one employee on one date. */
@@ -130,10 +168,10 @@ export function isHolidayForEmployee(
 ): boolean {
   return holidays.some((h) => {
     // Global = no site, no location, no group scoping.
-    if (!h.site_id && !h.location_id && !h.holiday_group_id)             return true  // all-India
-    if (ctx.site_id          && h.site_id    === ctx.site_id)            return true  // site
-    if (ctx.work_location_id && h.location_id === ctx.work_location_id)  return true  // location
-    if (ctx.site_holiday_group_id && h.holiday_group_id === ctx.site_holiday_group_id) return true  // group
+    if (!h.site_id && !h.location_id && h.holiday_group_ids.length === 0)      return true  // all-India
+    if (ctx.site_id          && h.site_id    === ctx.site_id)                  return true  // site
+    if (ctx.work_location_id && h.location_id === ctx.work_location_id)        return true  // location
+    if (ctx.site_holiday_group_id && h.holiday_group_ids.includes(ctx.site_holiday_group_id)) return true  // group (any assigned group)
     return false
   })
 }
@@ -151,8 +189,8 @@ export function getHolidayDates(
   ctx:      Pick<EmployeeOrgContext, 'site_id' | 'work_location_id' | 'site_holiday_group_id'>,
 ): Set<string> {
   // Separate by applicability tier (priority: location > site > group > global)
-  const globals   = holidays.filter((h) => !h.site_id && !h.location_id && !h.holiday_group_id)
-  const groupHols = holidays.filter((h) => h.holiday_group_id != null && h.holiday_group_id === ctx.site_holiday_group_id)
+  const globals   = holidays.filter((h) => !h.site_id && !h.location_id && h.holiday_group_ids.length === 0)
+  const groupHols = holidays.filter((h) => ctx.site_holiday_group_id != null && h.holiday_group_ids.includes(ctx.site_holiday_group_id))
   const siteHols  = holidays.filter((h) => h.site_id    !== null && h.site_id    === ctx.site_id)
   const locHols   = holidays.filter((h) => h.location_id !== null && h.location_id === ctx.work_location_id)
 
@@ -354,12 +392,19 @@ export async function resolveEmployeeOrgContextBatch(
   }>()
 
   if (uniqueSiteIds.length > 0) {
-    const { data: siteRows } = await supabase
-      .from('sites')
-      .select('id, timezone, default_roster_id, default_rotation_policy_id, default_shift_id, holiday_group_id')
-      .eq('tenant_id', tenantId)
-      .in('id', uniqueSiteIds)
-    for (const s of (siteRows ?? []) as {
+    // Chunked defensively via the same fetchChunked() used above for
+    // job_history — sites is a HIGH_CARDINALITY_TABLES entry in
+    // check-unbounded-queries.mjs even though a tenant's physical/virtual
+    // site count is normally small; chunking costs nothing and removes the
+    // ambiguity rather than relying on that normally holding.
+    const siteRows = await fetchChunked(uniqueSiteIds, (chunk) =>
+      supabase
+        .from('sites')
+        .select('id, timezone, default_roster_id, default_rotation_policy_id, default_shift_id, holiday_group_id')
+        .eq('tenant_id', tenantId)
+        .in('id', chunk),
+    )
+    for (const s of siteRows as {
       id:                           string
       timezone:                     string
       default_roster_id:            string | null

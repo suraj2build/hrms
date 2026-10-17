@@ -551,6 +551,19 @@ export default async function leaveAccrualLifecycleRoutes(fastify: FastifyInstan
     // trades the old "some entries silently skipped" partial-success
     // semantics for a single audit-trail insert covering the whole batch —
     // either every entry in the request releases, or none do.
+    //
+    // SYSTEM_AUDIT_2026-10-14 (attendance namespace, round 2) — that
+    // all-or-nothing claim only covered the INSERT in isolation. The two
+    // writes below are still separate round trips: if the INSERT succeeds
+    // but the following UPDATE fails (network blip, transient DB error),
+    // the audit trail would permanently say these entries were released
+    // while leave_accrual_ledger still holds them — an inconsistent state
+    // with no automatic recovery (the entries stay un-releasable since a
+    // retry would duplicate the audit rows). Compensate by deleting the
+    // just-inserted audit rows (scoped to this exact released_at + tenant,
+    // so it can't touch any other release) before returning the error, so
+    // a failed call leaves the ledger as the only source of truth again
+    // and is safe to retry.
     const releasedAt = new Date().toISOString()
     const { error: releaseErr } = await fastify.supabase.from('leave_entitlement_releases').insert(
       (entries as any[]).map(entry => ({
@@ -580,6 +593,20 @@ export default async function leaveAccrualLifecycleRoutes(fastify: FastifyInstan
       .in('id', entryIds)
 
     if (clearErr) {
+      // Roll back the audit rows just inserted — best effort, but logged
+      // separately so an operator can reconcile manually if this also fails.
+      const { error: rollbackErr } = await fastify.supabase
+        .from('leave_entitlement_releases')
+        .delete()
+        .eq('tenant_id', req.tenantId)
+        .eq('released_at', releasedAt)
+        .in('ledger_entry_id', entryIds)
+      if (rollbackErr) {
+        fastify.log.error(
+          { err: rollbackErr, tenant_id: req.tenantId, entry_ids: entryIds, released_at: releasedAt },
+          'leave/lifecycle/release: failed to roll back audit rows after ledger update failure — manual reconciliation required',
+        )
+      }
       return serverError(req, reply, clearErr, ErrorCode.UPDATE_FAILED, 'Failed to clear hold dates')
     }
 

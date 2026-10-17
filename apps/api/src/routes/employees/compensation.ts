@@ -236,8 +236,11 @@ function shapeComponents(rawComponents: any[]): any[] {
       calculation_type:     c.calculation_type,
       value:                c.value,
       sequence:             c.sequence,
-      monthly_amount:       c.computed_monthly,
-      annual_amount:        c.computed_annual,
+      // computed_monthly/computed_annual are NUMERIC — coerce here at the source so
+      // every consumer of shapeComponents() (incl. computeTotals()'s reduces below)
+      // gets real numbers, not PostgREST's string serialization (G13 sweep).
+      monthly_amount:       Number(c.computed_monthly ?? 0),
+      annual_amount:        Number(c.computed_annual ?? 0),
     }))
 }
 

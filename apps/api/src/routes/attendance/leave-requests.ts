@@ -29,7 +29,7 @@ import {
   reverseApprovedLeaveRequest,
   getPendingApprovalsForManager,
 }                               from '../../lib/approval-service.js'
-import { getDirectReportIds }   from '../../lib/manager-scope.js'
+import { getDirectReportIds, getImmediateReportIds, isDirectReport, isHrAdmin } from '../../lib/manager-scope.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
@@ -53,6 +53,13 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
   // ── POST /leave-requests ────────────────────────────────────────────────────
   fastify.post('/leave-requests', auth, async (req: any, reply) => {
     const schema = z.object({
+      /**
+       * HR admin / manager override: raise this request on behalf of another
+       * employee. HR admins may target any employee in the tenant; managers
+       * are restricted to their own direct reports. Silently ignored (falls
+       * back to the caller's own employee_id) for every other role.
+       */
+      employee_id:     z.string().uuid().optional(),
       leave_type_id:   z.string().uuid(),
       from_date:       z.string().regex(dateRe, 'from_date must be YYYY-MM-DD'),
       to_date:         z.string().regex(dateRe, 'to_date must be YYYY-MM-DD'),
@@ -89,12 +96,42 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
 
-    const employeeId = (profile as { employee_id: string | null } | null)?.employee_id
-    if (!employeeId) {
+    const myEmployeeId = (profile as { employee_id: string | null } | null)?.employee_id
+    if (!myEmployeeId) {
       return reply.code(400).send({
         error:   'NO_EMPLOYEE_RECORD',
         message: 'Your profile is not linked to an employee record',
       })
+    }
+
+    // On-behalf resolution: HR admins may target any employee in the
+    // tenant; managers only their own direct reports (retail/ops staff
+    // without reliable personal ESS access are the motivating case).
+    let employeeId = myEmployeeId
+    let onBehalfOf: string | null = null
+    if (parsed.data.employee_id && parsed.data.employee_id !== myEmployeeId) {
+      const targetId = parsed.data.employee_id
+      if (isHrAdmin(req.userRole)) {
+        const { data: targetEmp } = await fastify.supabase
+          .from('employees')
+          .select('id')
+          .eq('id', targetId)
+          .eq('tenant_id', req.tenantId)
+          .maybeSingle()
+        if (!targetEmp) {
+          return reply.code(400).send({ error: 'NOT_FOUND', message: 'Employee not found in your organisation' })
+        }
+        employeeId = targetId
+        onBehalfOf = targetId
+      } else if (req.userRole === 'manager') {
+        const isReport = await isDirectReport(fastify.supabase, req.tenantId, myEmployeeId, targetId)
+        if (!isReport) {
+          return reply.code(403).send({ error: 'FORBIDDEN', message: 'You may only raise leave for your own direct reports' })
+        }
+        employeeId = targetId
+        onBehalfOf = targetId
+      }
+      // Any other role: silently ignored, falls back to the caller's own employee_id.
     }
 
     // Idempotency: optional header lets callers replay on network retry
@@ -139,7 +176,7 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
         tenant_id:      req.tenantId,
         actor_id:    req.userId,
         actor_type:  'user',
-        payload:     { from_date: parsed.data.from_date, to_date: parsed.data.to_date, leave_type_id: parsed.data.leave_type_id },
+        payload:     { from_date: parsed.data.from_date, to_date: parsed.data.to_date, leave_type_id: parsed.data.leave_type_id, on_behalf_of: onBehalfOf },
         correlation_id: req.correlationId ?? undefined,
       })
       const responseBody = { data: result.value }
@@ -191,6 +228,7 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
     const isHrAdmin = (HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)
     const isManager = req.userRole === 'manager'
     let employeeId  = parsed.data.employee_id
+    let reportScope: string[] | undefined
 
     if (!isHrAdmin) {
       // Resolve caller's own employee_id (always needed for manager + employee paths)
@@ -221,8 +259,19 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
           })
         }
         // employeeId stays as the validated direct-report id
+      } else if (isManager && !employeeId && parsed.data.status === 'APPROVED') {
+        // Approved-leave tab (ApprovalInbox.tsx's Approved sub-tab): each row
+        // renders a "cancel approval" action, which goes through
+        // reverseApprovedLeaveRequest -> validateApprover — immediate manager
+        // only, never the full subordinate tree. This previously used
+        // getDirectReportIds (the deep tree), which would surface a
+        // grandchild's approved leave with a clickable cancel button that
+        // always 403'd (SYSTEM_AUDIT_2026-10-14 — same class of defect fixed
+        // for /approvals/pending-count and the overtime/comp-off queues).
+        // Scope to immediate reports only, matching the action's real authority.
+        reportScope = await getImmediateReportIds(fastify.supabase, req.tenantId, myEmployeeId)
       } else {
-        // Plain employee (or manager not supplying a param) → scope to self
+        // Plain employee (or manager not supplying a param, any other status) → scope to self
         employeeId = myEmployeeId
       }
     }
@@ -249,6 +298,7 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
       .select('id', { count: 'exact', head: true })
       .eq('tenant_id', req.tenantId)
     if (employeeId)                        countQ = countQ.eq('employee_id', employeeId) as any
+    else if (reportScope)                   countQ = countQ.in('employee_id', reportScope) as any
     if (parsed.data.status)                countQ = countQ.eq('status', parsed.data.status) as any
     if ((parsed.data as any).from_date)    countQ = countQ.gte('from_date', (parsed.data as any).from_date) as any
     if ((parsed.data as any).to_date)      countQ = countQ.lte('to_date', (parsed.data as any).to_date) as any
@@ -256,6 +306,7 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
     const [result, { count }] = await Promise.all([
       listLeaveRequests(fastify.supabase, req.tenantId, {
         employeeId,
+        employeeIds: reportScope,
         status:    parsed.data.status,
         fromDate:  (parsed.data as any).from_date,
         toDate:    (parsed.data as any).to_date,
@@ -318,11 +369,20 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
     const { id } = req.params as { id: string }
 
     try {
+      const { data: callerProfile } = await fastify.supabase
+        .from('profiles')
+        .select('employee_id')
+        .eq('id', req.userId)
+        .eq('tenant_id', req.tenantId)
+        .maybeSingle()
+      const myEmployeeId = (callerProfile as { employee_id: string | null } | null)?.employee_id
+
       const result = await cancelLeaveRequest(
         fastify.supabase,
         req.tenantId,
         id,
         req.userId,
+        myEmployeeId,
       )
 
       if (!result.ok) {
@@ -420,6 +480,20 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
   fastify.post('/leave-requests/:id/cancel-approved', auth, async (req: any, reply) => {
     const { id } = req.params as { id: string }
 
+    const schema = z.object({
+      reason: z.string().max(500).optional(),
+    })
+    // req.body is undefined when the caller sends no body at all (e.g. a plain
+    // POST with no payload) — z.object({}).safeParse(undefined) fails validation
+    // even though every field here is optional, so default to {} first.
+    const parsed = schema.safeParse(req.body ?? {})
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error:   'VALIDATION_ERROR',
+        message: parsed.error.issues[0]?.message,
+      })
+    }
+
     try {
       const result = await reverseApprovedLeaveRequest(fastify.supabase, {
         tenantId:  req.tenantId,
@@ -429,6 +503,7 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
           approverRole: req.userRole,
           tenantId:     req.tenantId,
         },
+        reversalReason: parsed.data.reason,
       })
 
       if (!result.ok) {
@@ -625,12 +700,22 @@ export default async function leaveRequestsRoutes(fastify: FastifyInstance) {
     const isHrAdmin = (HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)
 
     // Manager scope: resolve direct-report employee ids (empty => count nothing).
+    // SYSTEM_AUDIT_2026-10-14: this badge is meant to tell the manager how many
+    // items await THEIR action, but every underlying approve/reject action across
+    // all four tables (leave: validateApprover; regularisation: validateApprover;
+    // overtime: authorizeOtTarget; comp-off: authorizeCompOffTarget) authorizes
+    // only the employee's IMMEDIATE manager — never the full subordinate tree.
+    // Counting via getDirectReportIds (the deep tree) let a manager-of-managers
+    // see a nonzero badge for items several levels down that would always 403
+    // if acted on — and that /approvals/pending (the list behind this badge,
+    // scoped via getPendingApprovalsForManager's own immediate-only query)
+    // doesn't even show. Scope to immediate reports only, matching real authority.
     let reportIds: string[] | null = null
     if (!isHrAdmin) {
       const { data: profile } = await fastify.supabase
         .from('profiles').select('employee_id').eq('id', req.userId).eq('tenant_id', tenantId).maybeSingle()
       const myEmpId = (profile as { employee_id: string | null } | null)?.employee_id
-      reportIds = myEmpId ? await getDirectReportIds(fastify.supabase, tenantId, myEmpId) : []
+      reportIds = myEmpId ? await getImmediateReportIds(fastify.supabase, tenantId, myEmpId) : []
     }
 
     const countPending = async (table: string, statusVal: string): Promise<number> => {

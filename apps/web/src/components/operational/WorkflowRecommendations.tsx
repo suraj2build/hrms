@@ -76,7 +76,7 @@ function buildRecommendations(data: RecommendationSourceData): Recommendation[] 
     title:       `Payroll blocked — ${data.payrollBlockers} issue${data.payrollBlockers > 1 ? 's' : ''} need fixing`,
     count:       data.payrollBlockers,
     actionLabel: 'Fix Blockers',
-    actionRoute: '/admin/payroll/blockers',
+    actionRoute: '/admin/payroll',
     dismissible: false,
   })
 

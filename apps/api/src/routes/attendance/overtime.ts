@@ -27,7 +27,7 @@ import {
   rejectOtRequest,
 }                               from '../../lib/ot-engine.js'
 import {
-  isHrAdmin, resolveCallerEmployeeId, getDirectReportIds, isDirectReport,
+  isHrAdmin, resolveCallerEmployeeId, getImmediateReportIds, isDirectReport,
 }                               from '../../lib/manager-scope.js'
 import { isMonthLocked, monthOf } from '../../lib/period-lock.js'
 import { isSelfApproval } from '../../lib/approval-guards.js'
@@ -341,12 +341,23 @@ export default async function overtimeRoutes(fastify: FastifyInstance) {
     const empIds = [...agg.entries()].filter(([, v]) => v.ot > 0 || v.approved > 0).map(([id]) => id)
     if (empIds.length === 0) return reply.send({ data: [] })
 
-    const { data: emps } = await fastify.supabase
-      .from('employees')
-      .select('id, first_name, last_name, employee_code')
-      .eq('tenant_id', req.tenantId)
-      .in('id', empIds)
-    const empMap = new Map((emps ?? []).map((e: any) => [e.id, e]))
+    // Chunked: empIds is every employee with overtime in the period,
+    // tenant-wide — can exceed a single .in() URL's safe size.
+    const emps: any[] = []
+    for (let i = 0; i < empIds.length; i += 100) {
+      const chunkIds = empIds.slice(i, i + 100)
+      const { data, error: empsErr } = await fastify.supabase
+        // lint-query-ok: chunkIds is a slice of 100 ids (loop above) — result is bounded to <=100 rows, well under the 1,000-row cap
+        .from('employees')
+        .select('id, first_name, last_name, employee_code')
+        .eq('tenant_id', req.tenantId)
+        .in('id', chunkIds)
+      // Surface rather than silently drop this chunk's employees from the
+      // overtime report.
+      if (empsErr) return serverError(req, reply, empsErr, ErrorCode.QUERY_FAILED, 'Failed to resolve employee names for overtime report')
+      if (data) emps.push(...data)
+    }
+    const empMap = new Map(emps.map((e: any) => [e.id, e]))
 
     const rows = empIds.map((id) => {
       const a = agg.get(id)!
@@ -401,10 +412,18 @@ export default async function overtimeRoutes(fastify: FastifyInstance) {
       // HR admin sees everything; optional employee filter
       if (parsed.data.employee_id) q = q.eq('employee_id', parsed.data.employee_id)
     } else if (req.userRole === 'manager') {
-      // P6.0b — managers are scoped to their direct reports
+      // SYSTEM_AUDIT_2026-10-14: this list is the live data source for the
+      // manager approval queue (ManagerTeamOvertimeRequests.tsx, embedded in
+      // ApprovalInbox's Overtime tab) — approve/reject on any item it shows
+      // goes through authorizeOtTarget below, which only authorizes the
+      // employee's IMMEDIATE manager (isDirectReport, one level). Scoping
+      // this list to the full subordinate tree (getDirectReportIds) let a
+      // manager-of-managers see a grandchild's pending request with a
+      // clickable Approve button that always 403'd. Scope to immediate
+      // reports only, matching the action's real authority.
       const myEmpId = await resolveCallerEmployeeId(fastify.supabase, req.userId, req.tenantId)
       if (!myEmpId) return reply.send({ data: [] })
-      const reportIds = await getDirectReportIds(fastify.supabase, req.tenantId, myEmpId)
+      const reportIds = await getImmediateReportIds(fastify.supabase, req.tenantId, myEmpId)
       if (!reportIds.length) return reply.send({ data: [] })
       if (parsed.data.employee_id && !reportIds.includes(parsed.data.employee_id)) {
         return reply.send({ data: [] })
@@ -558,7 +577,8 @@ export default async function overtimeRoutes(fastify: FastifyInstance) {
     )
 
     if (!result.ok) {
-      return reply.code(400).send({ error: 'APPROVAL_FAILED', message: result.error })
+      const code = result.code === 'PERIOD_LOCKED' ? 409 : 400
+      return reply.code(code).send({ error: result.code ?? 'APPROVAL_FAILED', message: result.error })
     }
 
     // Audit (F5) — OT approvals affect pay and were previously unlogged.

@@ -600,12 +600,13 @@ export async function listLeaveRequests(
   supabase:   SupabaseClient,
   tenantId:   string,
   filters: {
-    employeeId?: string
-    status?:     string
-    fromDate?:   string
-    toDate?:     string
-    limit?:      number
-    offset?:     number
+    employeeId?:  string
+    employeeIds?: string[]   // scope to a manager's reporting line when no single employeeId is given
+    status?:      string
+    fromDate?:    string
+    toDate?:      string
+    limit?:       number
+    offset?:      number
   } = {},
 ): Promise<LeaveRequestResult<LeaveRequestRow[]>> {
   let q = supabase
@@ -614,7 +615,8 @@ export async function listLeaveRequests(
     .eq('tenant_id', tenantId)
     .order('created_at', { ascending: false })
 
-  if (filters.employeeId) q = q.eq('employee_id', filters.employeeId)
+  if (filters.employeeId)            q = q.eq('employee_id', filters.employeeId)
+  else if (filters.employeeIds)      q = q.in('employee_id', filters.employeeIds)
   if (filters.status)     q = q.eq('status', filters.status)
   if (filters.fromDate)   q = q.gte('from_date', filters.fromDate)
   if (filters.toDate)     q = q.lte('to_date',   filters.toDate)
@@ -640,7 +642,8 @@ export async function cancelLeaveRequest(
   supabase:   SupabaseClient,
   tenantId:   string,
   requestId:  string,
-  requestedBy: string,   // must match the original requested_by
+  requestedBy: string,   // must match the original requested_by...
+  ownerEmployeeId?: string | null,   // ...OR the caller is the leave's own employee (who may not be who filed it — see "raise on behalf")
 ): Promise<LeaveRequestResult<LeaveRequestRow>> {
   // Fetch and validate
   const existing = await getLeaveRequest(supabase, tenantId, requestId)
@@ -655,10 +658,11 @@ export async function cancelLeaveRequest(
     }
   }
 
-  if (req.requested_by !== requestedBy) {
+  const isOwner = !!ownerEmployeeId && req.employee_id === ownerEmployeeId
+  if (req.requested_by !== requestedBy && !isOwner) {
     return {
       ok:    false,
-      error: { type: 'VALIDATION_ERROR', message: 'Only the requester can cancel their own leave request' },
+      error: { type: 'VALIDATION_ERROR', message: 'Only the requester or the leave owner can cancel this leave request' },
     }
   }
 

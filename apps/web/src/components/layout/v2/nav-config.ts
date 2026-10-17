@@ -45,6 +45,7 @@
 import {
   // Domain icons
   Users,
+  UserCheck,
   Clock,
   CalendarDays,
   DollarSign,
@@ -245,6 +246,7 @@ export const DOMAINS: Domain[] = [
       '/admin/onboarding/module',
       '/admin/onboarding/pre-joinee',
       '/admin/employees/separation',
+      '/admin/employees/probation-confirmations',
       '/admin/assets',
       '/admin/recruitment',
       '/admin/workforce/center',
@@ -274,6 +276,7 @@ export const DOMAINS: Domain[] = [
           { id: 'onboarding',            label: 'Onboarding',           route: '/admin/onboarding',            exact: true,  icon: UserPlus,     keywords: ['new hire', 'joining', 'new employee', 'induction', 'pre-joining'] },
           { id: 'onboarding-checklists', label: 'Onboarding Checklists', route: '/admin/onboarding/module',                   icon: GraduationCap, keywords: ['onboarding tasks', 'new hire checklist', 'joining checklist', 'induction tasks'] },
           { id: 'separation-workflow',   label: 'Separation',           route: '/admin/employees/separation',                 icon: LogOut,       keywords: ['exit', 'offboarding', 'resignation', 'termination', 'fnf', 'full and final', 'exit process', 'notice period'] },
+          { id: 'probation-confirmations', label: 'Probation Confirmations', route: '/admin/employees/probation-confirmations', icon: UserCheck,  keywords: ['probation', 'confirmation', 'confirm employee', 'extend probation', 'probation due', 'probation overdue', 'confirmation date'] },
           { id: 'absconding-cases',      label: 'Absconding Cases',     route: '/admin/absconding',                           icon: UserX,        badge: 'NEW', keywords: ['absconding', 'unauthorised absence', 'ua', 'no show', 'absconded', 'abandonment', 'missing employee', 'absent without leave', 'awol'] },
           { id: 'expiry-management',     label: 'Expiry Management',    route: '/admin/workforce/expiry-management',           icon: CalendarClock, keywords: ['expiry', 'lifecycle', 'document expiry', 'visa expiry', 'passport expiry', 'contract expiry', 'contract renewal', 'probation confirmation', 'probation due', 'identity expiry', 'expiring documents', 'work permit', 'renewal due'] },
           { id: 'certifications',        label: 'Certifications',       route: '/admin/workforce/certifications',              icon: BadgeCheck,    keywords: ['certification', 'license', 'professional credential', 'certificate', 'renewal', 'cert expiry', 'license renewal', 'AWS certification', 'professional development', 'compliance certification'] },
@@ -343,7 +346,6 @@ export const DOMAINS: Domain[] = [
           { id: 'att-upload',     label: 'Punch Intake',         route: '/admin/attendance/upload-workspace', icon: Upload, keywords: ['upload attendance', 'import attendance', 'punch upload', 'biometric upload', 'swipe data', 'attendance import'] },
           { id: 'muster',         label: 'Muster Roll',          route: '/admin/attendance/muster',           icon: BookOpen,  keywords: ['daily attendance register', 'attendance report', 'present absent', 'muster'] },
           { id: 'muster-upload',  label: 'Muster Upload',        route: '/admin/attendance/muster-upload',    icon: FileUp,    keywords: ['upload muster', 'muster import', 'import muster data'] },
-          { id: 'anomalies',      label: 'Anomalies',            route: '/admin/attendance/anomalies',        icon: AlertTriangle, keywords: ['late', 'absent', 'missing punch', 'attendance issues', 'irregularities', 'half day'] },
           { id: 'regularisation', label: 'Approvals',            route: '/admin/attendance/regularisation',   icon: CheckSquare,   keywords: ['attendance approval', 'regularize', 'regularisation', 'correction request', 'approve attendance', 'WFH'] },
           { id: 'att-periods',    label: 'Periods (Lock/Close)', route: '/admin/attendance/periods',          icon: CalendarClock, keywords: ['attendance lock', 'period close', 'month end', 'lock attendance', 'period management'] },
         ],
@@ -359,6 +361,11 @@ export const DOMAINS: Domain[] = [
       {
         label: 'Analytics & Audit',
         items: [
+          // Moved out of Operations — regularisation (above) is the real
+          // correction flow; this is a read-only detection/monitoring view,
+          // auto-reconciled daily (see anomaly-reconciler.ts), not a second
+          // queue for an admin to triage by hand.
+          { id: 'anomalies',      label: 'Anomalies',            route: '/admin/attendance/anomalies',        icon: AlertTriangle, keywords: ['late', 'absent', 'missing punch', 'attendance issues', 'irregularities', 'half day'] },
           { id: 'att-exceptions', label: 'Exceptions',  route: '/admin/attendance/exceptions', icon: AlertTriangle, keywords: ['attendance exceptions', 'issues', 'discrepancies', 'flagged attendance', 'attendance problems'] },
           { id: 'att-forensics',  label: 'Timeline',    route: '/admin/attendance/forensics',  icon: Activity,      keywords: ['attendance history', 'employee timeline', 'audit trail', 'attendance log', 'deep dive', 'drill down'] },
           { id: 'who-is-in',      label: 'Who Is In',   route: '/admin/attendance/who-is-in',  icon: Users,         keywords: ['live attendance', 'real-time', 'present today', 'absent today', 'on time', 'check in', 'current status'] },
@@ -478,6 +485,7 @@ export const DOMAINS: Domain[] = [
           { id: 'fbp-recon',      label: 'FBP Reconciliation',  route: '/admin/payroll/fbp',            icon: Receipt,    keywords: ['FBP', 'flexible benefit plan', 'flexi benefit', 'FBP declaration', 'flexible pay', 'flexi pay'] },
           { id: 'variable-pay',   label: 'Variable Pay',        route: '/admin/payroll/variable-pay',   icon: TrendingUp, keywords: ['incentive', 'bonus', 'performance pay', 'variable component', 'incentive pay'] },
           { id: 'arrears',        label: 'Arrear Payments',     route: '/admin/payroll/arrears',        icon: RotateCcw,  keywords: ['arrear', 'back pay', 'retroactive pay', 'previous month', 'pending salary'] },
+          { id: 'adjustments',    label: 'Payroll Adjustments', route: '/admin/payroll/adjustments',    icon: ClipboardList, keywords: ['adjustment', 'frozen period', 'locked period', 'retroactive correction', 'LOP correction', 'statutory correction'] },
         ],
       },
       {

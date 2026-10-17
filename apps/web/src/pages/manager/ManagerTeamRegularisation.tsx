@@ -20,7 +20,7 @@ import { useState, useRef }                      from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast }                                 from 'sonner'
 import {
-  ClipboardList, Check, X, RefreshCw, Loader2, AlertTriangle,
+  ClipboardList, Check, X, RefreshCw, Loader2, AlertTriangle, RotateCcw, XCircle,
 } from 'lucide-react'
 import { api }           from '@/lib/api/client'
 import { PageContainer } from '@/components/layout/PageContainer'
@@ -55,6 +55,23 @@ interface BulkResult {
   summary:  { approved?: number; rejected?: number; failed: number; total: number }
 }
 
+// SYSTEM_AUDIT_2026-10-14 checkpoint 10 — the user correctly rejected
+// checkpoint 9's toast-only fix as still temporary: once it's gone, there
+// is no persistent record of which request needs attention. FailedItem
+// is the durable (component-state, not toast) record of a bulk action's
+// failures — request id, employee, date, the server's own error message,
+// and which action to retry — rendered in a panel that stays until the
+// manager retries or dismisses it, not until a timer fires.
+interface FailedItem {
+  id:           string
+  employeeName: string
+  employeeCode: string | null
+  date:         string
+  error:        string
+  action:       'approve' | 'reject'
+  rejectReason?: string
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function fmtTime(ts: string | null) {
@@ -72,6 +89,7 @@ function typeLabel(t: string | null) {
 export function ManagerTeamRegularisation() {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [rejectDialogOpen, setRejectDialogOpen] = useState(false)
+  const [lastFailures, setLastFailures] = useState<FailedItem[]>([])
   const qc = useQueryClient()
 
   const { data, isFetching, refetch } = useQuery<{ data: RegReq[]; total: number }>({
@@ -81,6 +99,28 @@ export function ManagerTeamRegularisation() {
   })
 
   const rows = data?.data ?? []
+
+  // Resolve a bulk result's failed ids into durable FailedItem records
+  // (request id, employee, date, error, which action to retry) against
+  // the row list AS IT STOOD when the action was taken — the row may
+  // already be gone from `rows` by the time this runs (refetch can land
+  // first), so this must read from a snapshot, not the live query data.
+  function toFailedItems(res: BulkResult, snapshot: RegReq[], action: 'approve' | 'reject', rejectReason?: string): FailedItem[] {
+    return (res.results ?? [])
+      .filter(r => !r.ok)
+      .map(r => {
+        const row = snapshot.find(s => s.id === r.id)
+        return {
+          id:           r.id,
+          employeeName: row?.employee_name ?? 'Unknown employee',
+          employeeCode: row?.employee_code ?? null,
+          date:         row?.date ?? '—',
+          error:        r.error ?? 'Failed',
+          action,
+          rejectReason,
+        }
+      })
+  }
 
   function toggleAll() {
     if (selected.size === rows.length) setSelected(new Set())
@@ -102,8 +142,25 @@ export function ManagerTeamRegularisation() {
     onSuccess:  (res: BulkResult) => {
       bulkApproveKey.current = crypto.randomUUID()
       const { approved = 0, failed, total } = res.summary
-      toast.success(`Approved ${approved} of ${total}${failed > 0 ? ` · ${failed} failed` : ''}`)
-      setSelected(new Set())
+      const failures = toFailedItems(res, rows, 'approve')
+      // SYSTEM_AUDIT_2026-10-14 checkpoints 7-10: per-item partial success,
+      // not all-or-nothing. Checkpoint 9 named failed items in the toast,
+      // but the user correctly flagged a toast as still temporary — once
+      // it fades there's no durable record. setLastFailures below is the
+      // persistent one (request id, employee, date, error, retry action,
+      // stays until dismissed or retried). The toast remains as the
+      // immediate signal.
+      if (failed > 0) {
+        toast.warning(`Approved ${approved} of ${total} · ${failed} failed`, { duration: 8000 })
+      } else {
+        toast.success(`Approved ${approved} of ${total}`)
+      }
+      setLastFailures(failures)
+      // Retain only the failed ids in the selection — a follow-up click on
+      // the SAME "Approve N" button in the toolbar now retries only what
+      // actually failed, never re-submitting the ids that already
+      // succeeded (the toolbar button's own count reflects this).
+      setSelected(new Set(failures.map(f => f.id)))
       // Same /attendance/regularisation/team data also backs the HR-admin
       // queue (['reg-pending']), the ESS approvals tracker
       // (['ess-approvals-corrections']), and the employee's own status page
@@ -124,11 +181,17 @@ export function ManagerTeamRegularisation() {
     mutationFn: ({ ids, reason }: { ids: string[]; reason?: string }) =>
       api.post('/attendance/regularisation/bulk-reject', { ids, rejection_reason: reason || undefined },
         { headers: { 'Idempotency-Key': bulkRejectKey.current } }) as Promise<BulkResult>,
-    onSuccess:  (res: BulkResult) => {
+    onSuccess:  (res: BulkResult, variables) => {
       bulkRejectKey.current = crypto.randomUUID()
       const { rejected = 0, failed, total } = res.summary
-      toast.success(`Rejected ${rejected} of ${total}${failed > 0 ? ` · ${failed} failed` : ''}`)
-      setSelected(new Set())
+      const failures = toFailedItems(res, rows, 'reject', variables.reason)
+      if (failed > 0) {
+        toast.warning(`Rejected ${rejected} of ${total} · ${failed} failed`, { duration: 8000 })
+      } else {
+        toast.success(`Rejected ${rejected} of ${total}`)
+      }
+      setLastFailures(failures)
+      setSelected(new Set(failures.map(f => f.id)))
       setRejectDialogOpen(false)
       qc.invalidateQueries({ queryKey: ['manager-team-regularisation'] })
       qc.invalidateQueries({ queryKey: ['reg-pending'] })
@@ -138,6 +201,39 @@ export function ManagerTeamRegularisation() {
     },
     onError: (err: unknown) => toast.error(err instanceof Error ? err.message : 'Bulk reject failed'),
   })
+
+  // SYSTEM_AUDIT_2026-10-14 checkpoint 10 — single-item retry from the
+  // persistent failures panel below. Retrying does not resubmit the whole
+  // original batch (which would re-approve/re-reject the items that
+  // already succeeded) — it targets only this one id via the existing
+  // single-item endpoints.
+  const retryMut = useMutation({
+    mutationFn: (item: FailedItem) =>
+      item.action === 'approve'
+        ? api.post(`/attendance/regularisation/${item.id}/approve`, {})
+        : api.post(`/attendance/regularisation/${item.id}/reject`, { rejection_reason: item.rejectReason || undefined }),
+    onSuccess: (_res, item) => {
+      toast.success(`${item.action === 'approve' ? 'Approved' : 'Rejected'} ${item.employeeName}'s request`)
+      setLastFailures(prev => prev.filter(f => f.id !== item.id))
+      setSelected(prev => { const next = new Set(prev); next.delete(item.id); return next })
+      qc.invalidateQueries({ queryKey: ['manager-team-regularisation'] })
+      qc.invalidateQueries({ queryKey: ['reg-pending'] })
+      qc.invalidateQueries({ queryKey: ['ess-approvals-corrections'] })
+      qc.invalidateQueries({ queryKey: ['regularization-my'] })
+      qc.invalidateQueries({ queryKey: ['manager-pending-approvals-count'] })
+    },
+    onError: (err: unknown, item) => {
+      // Still failed — update this row's error message in place rather
+      // than silently dropping it from the panel.
+      const message = err instanceof Error ? err.message : 'Retry failed'
+      setLastFailures(prev => prev.map(f => f.id === item.id ? { ...f, error: message } : f))
+      toast.error(`Retry failed for ${item.employeeName}`)
+    },
+  })
+
+  function dismissFailure(id: string) {
+    setLastFailures(prev => prev.filter(f => f.id !== id))
+  }
 
   const selectedIds = Array.from(selected)
   const isBusy = bulkApproveMut.isPending || bulkRejectMut.isPending
@@ -154,6 +250,51 @@ export function ManagerTeamRegularisation() {
           </Button>
         }
       />
+
+      {/* SYSTEM_AUDIT_2026-10-14 checkpoint 10 — persistent failures panel.
+          Stays on screen (component state, not a toast) until the manager
+          retries or dismisses each row, so a mixed-result bulk action
+          leaves a durable, actionable record instead of only a fading
+          toast naming counts/employees. */}
+      {lastFailures.length > 0 && (
+        <div className="mb-4 rounded-lg border border-warning/40 bg-warning/5 p-3">
+          <div className="mb-2 flex items-center justify-between">
+            <p className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
+              <AlertTriangle className="h-4 w-4 text-warning" />
+              {lastFailures.length} request{lastFailures.length !== 1 ? 's' : ''} need attention
+            </p>
+            <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setLastFailures([])}>
+              Dismiss all
+            </Button>
+          </div>
+          <div className="space-y-1.5">
+            {lastFailures.map(f => (
+              <div key={f.id} className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-xs">
+                <span className="font-mono text-muted-foreground" title={f.id}>{f.id.slice(0, 8)}…</span>
+                <span className="font-medium">{f.employeeName}</span>
+                {f.employeeCode && <span className="text-muted-foreground">({f.employeeCode})</span>}
+                <span className="tabular-nums text-muted-foreground">{f.date}</span>
+                <span className="rounded bg-muted px-1.5 py-0.5 uppercase text-[10px] font-semibold text-muted-foreground">{f.action}</span>
+                <span className="min-w-0 flex-1 truncate text-destructive" title={f.error}>{f.error}</span>
+                <Button
+                  size="sm" variant="outline" className="h-6 gap-1 px-2 text-xs"
+                  disabled={retryMut.isPending}
+                  onClick={() => retryMut.mutate(f)}
+                >
+                  <RotateCcw className="h-3 w-3" /> Retry
+                </Button>
+                <Button
+                  size="sm" variant="ghost" className="h-6 w-6 p-0"
+                  onClick={() => dismissFailure(f.id)}
+                  title="Dismiss"
+                >
+                  <XCircle className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Bulk action toolbar */}
       {rows.length > 0 && (

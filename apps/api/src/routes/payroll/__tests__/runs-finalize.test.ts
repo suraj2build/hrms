@@ -171,6 +171,7 @@ function buildBaseSupabase(opts: MockOpts) {
       update: () => genericChain({ data: [{ id: RUN_ID }], error: null }),
     }),
     payroll_freeze_log: () => ({ select: () => genericChain({ data: null, error: null }) }),
+    tenants:            () => ({ select: () => genericChain({ data: { is_pilot: false }, error: null }) }),
     payroll_slips: () => ({
       select: () => {
         let statusFilter: string | undefined
@@ -188,9 +189,23 @@ function buildBaseSupabase(opts: MockOpts) {
       update: slipUpdateSpy,
     }),
     attendance_daily: () => ({ select: () => genericChain({ data: [{ employee_id: EMP_ID, day_fraction: 1 }], error: null }, { paged: true }) }),
+    // LOCKED — the attendance-closure gate (runs.ts, right before the
+    // maker-checker commit point) rejects with 423 ATTENDANCE_NOT_LOCKED
+    // when this reads as OPEN/missing; tests here need to reach past it to
+    // exercise the maker-checker commit, which now happens AFTER this gate.
+    attendance_period_locks: () => ({ select: () => genericChain({ data: { state: 'LOCKED' }, error: null }) }),
     payroll_run_blockers:    () => ({ select: () => genericChain({ data: [], error: null }) }),
-    payroll_validation_runs: () => ({ select: () => genericChain({ data: null, error: null }) }),
-    leave_requests:          () => ({ select: () => genericChain({ data: opts.staleRows ?? [], error: null }) }),
+    // A completed, non-blocking validation run — the validation-run gate
+    // (also now ahead of the deferred maker-checker commit point) rejects
+    // with 422 VALIDATION_NOT_CLEARED when no such run is found.
+    payroll_validation_runs: () => ({ select: () => genericChain({
+      data: { id: 'val-1', status: 'completed', is_payroll_blocked: false, error_count: 0, completed_at: '2099-06-01T00:00:00.000Z' },
+      error: null,
+    }) }),
+    // paged: true — leave_requests is now read via fetchAllRows() (see
+    // runs.ts's staleness guard); without this, range() ignores `from` and
+    // keeps returning the same non-empty page forever, hanging the test.
+    leave_requests:          () => ({ select: () => genericChain({ data: opts.staleRows ?? [], error: null }, { paged: true }) }),
     payroll_statutory_settings: () => ({ select: () => genericChain({ data: { tds_enabled: false, tds_default_regime: 'new' }, error: null }) }),
   }
 
@@ -256,6 +271,7 @@ async function buildApp(
   userRole: string,
   userId: string,
   makerChecker?: ReturnType<typeof buildMakerCheckerTable>,
+  rpcOverride?: (fnName: string, params: any) => Promise<{ data: unknown; error: unknown }> | undefined,
 ) {
   const { from, slipUpdateSpy } = buildBaseSupabase(opts)
   const app = Fastify({ logger: false })
@@ -276,6 +292,25 @@ async function buildApp(
         return { select: () => makerChecker.selectChain(), insert: makerChecker.insertSpy, update: makerChecker.updateSpy }
       }
       return from(tableName)
+    },
+    // SYSTEM_AUDIT_2026-10-14 checkpoint 10: the finalize route now fuses the
+    // attendance-lock re-check AND both seal writes (slip finalize + run
+    // finalize) into one finalize_payroll_run_atomic call (migration 464),
+    // replacing the separate recheck + Step 1 + Step 2 calls checkpoint 9
+    // had. Default to success (mirroring the LOCKED state the
+    // attendance_period_locks table mock above represents) and simulate
+    // the slip-finalize side effect via slipUpdateSpy so downstream
+    // behavior under test (dual control / gross-to-net) still sees it as
+    // having happened — the real RPC does this server-side in SQL; here
+    // it's simulated so the mock's observable effects match production.
+    rpc: (fnName: string, params: any) => {
+      const overridden = rpcOverride?.(fnName, params)
+      if (overridden) return overridden
+      if (fnName === 'finalize_payroll_run_atomic') {
+        slipUpdateSpy({ status: 'finalized' })
+        return Promise.resolve({ data: { run_id: RUN_ID, status: 'finalized', slips_finalized: 1 }, error: null })
+      }
+      return Promise.resolve({ data: null, error: null })
     },
   } as any)
   app.decorate('eventPublisher', { publish: vi.fn() } as any)
@@ -349,6 +384,52 @@ describe('POST /payroll/runs/:id/finalize — dual control (C2/P2.4)', () => {
     await inject(checkerApp) // checker-002 — distinct from both maker and creator
 
     expect(mc.updateSpy).toHaveBeenCalledWith(expect.objectContaining({ checker_id: 'checker-002', status: 'approved' }))
+  })
+})
+
+// ── Attendance-lock + seal fused into one transaction (checkpoint 10) ────────
+
+describe('POST /payroll/runs/:id/finalize — finalize_payroll_run_atomic (lock + seal fused)', () => {
+  it('refuses to finalize (423 ATTENDANCE_REOPENED) when the fused RPC reports the period is no longer locked, and finalizes nothing', async () => {
+    // Dual control OFF (simplest path) — the top-of-handler gate read
+    // attendance_period_locks as LOCKED (the table mock, unchanged), but
+    // finalize_payroll_run_atomic's own in-transaction re-check (through
+    // the SAME advisory lock the period-lock writers use, held across
+    // its own seal writes too) reports the period was reopened —
+    // simulating a concurrent unlock landing during the staleness-
+    // recompute window, before this RPC ever got to seal anything.
+    process.env.PAYROLL_FINALIZE_DUAL_CONTROL = 'false'
+    const { app, slipUpdateSpy } = await buildApp(
+      { run: runRow() }, 'hr_admin', 'sole-operator-001', undefined,
+      (fnName) => fnName === 'finalize_payroll_run_atomic'
+        ? Promise.resolve({ data: null, error: { message: 'CONFLICT: ATTENDANCE_REOPENED: Attendance for 2099-06 is open.' } })
+        : undefined,
+    )
+
+    const res = await inject(app)
+
+    expect(res.statusCode).toBe(423)
+    expect(JSON.parse(res.body).error).toBe('ATTENDANCE_REOPENED')
+    expect(slipUpdateSpy).not.toHaveBeenCalled()   // nothing was sealed
+  })
+
+  it('force_finalize bypasses the attendance-lock check inside the fused RPC (matching the original gate\'s own force_finalize bypass)', async () => {
+    process.env.PAYROLL_FINALIZE_DUAL_CONTROL = 'false'
+    const { app, slipUpdateSpy } = await buildApp(
+      { run: runRow() }, 'super_admin', 'sole-operator-001', undefined,
+      // force_finalize must pass p_check_attendance_lock: false — only
+      // simulate the ATTENDANCE_REOPENED failure if the route failed to
+      // pass that through (which would mean force_finalize stopped
+      // bypassing the gate, a regression this test exists to catch).
+      (fnName, params) => fnName === 'finalize_payroll_run_atomic' && params?.p_check_attendance_lock !== false
+        ? Promise.resolve({ data: null, error: { message: 'CONFLICT: ATTENDANCE_REOPENED: should never be reached under force_finalize' } })
+        : undefined,
+    )
+
+    const res = await inject(app, { force_finalize: true, override_reason: 'test: bypass re-check' })
+
+    expect(res.statusCode).toBe(200)
+    expect(slipUpdateSpy).toHaveBeenCalled()
   })
 })
 

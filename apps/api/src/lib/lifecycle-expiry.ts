@@ -80,7 +80,7 @@ function daysBetween(fromIso: string, toIso: string): number {
   return Math.round((b - a) / 86_400_000)
 }
 
-function addDaysIso(iso: string, days: number): string {
+export function addDaysIso(iso: string, days: number): string {
   const t = Date.parse(iso + 'T00:00:00Z') + days * 86_400_000
   return isoOf(new Date(t))
 }

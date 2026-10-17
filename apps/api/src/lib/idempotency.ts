@@ -26,10 +26,70 @@
  * periodic cleanup job; old rows don't affect correctness, only storage).
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { createHash } from 'node:crypto'
 
 interface CachedResponse {
   status_code: number
   response:    unknown
+}
+
+// SYSTEM_AUDIT_2026-10-14 checkpoint 13 — surfaced while reviewing the
+// encashment-request route's idempotency handling for "same-key reuse
+// with a different payload": nothing in this module ever compared the
+// CURRENT request body against whatever was stored under a reused key —
+// checkIdempotency replays the first request's response unconditionally.
+// A client that reuses an Idempotency-Key across two meaningfully
+// different submissions (a genuine bug, or an accidental key collision)
+// silently gets back the FIRST request's result describing a DIFFERENT
+// request than the one it just sent, and the second request is silently
+// dropped — never inserted, never reported as rejected either.
+//
+// hashIdempotencyPayload + getStoredRequestHash are opt-in additions
+// (claimIdempotency/storeIdempotency gained an optional trailing
+// `requestHash` param; checkIdempotency's signature and return type are
+// UNCHANGED) — every one of this module's ~136 existing call sites that
+// doesn't pass a hash keeps behaving exactly as before. A caller that
+// wants this protection calls getStoredRequestHash BEFORE checkIdempotency
+// and refuses with 409 on a mismatch, instead of ever reaching the replay
+// path.
+
+/** Stable fingerprint of a request payload for idempotency-key reuse detection. */
+export function hashIdempotencyPayload(payload: unknown): string {
+  // Sort object keys recursively so semantically-identical payloads with
+  // different key ordering (e.g. different JSON.stringify input order from
+  // different clients) still hash identically.
+  const canonical = JSON.stringify(payload, (_key, value) => {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      return Object.keys(value).sort().reduce((acc: Record<string, unknown>, k) => {
+        acc[k] = (value as Record<string, unknown>)[k]
+        return acc
+      }, {})
+    }
+    return value
+  })
+  return createHash('sha256').update(canonical).digest('hex')
+}
+
+/**
+ * Read back the request_hash stored for a key (from a prior claimIdempotency/
+ * storeIdempotency call that supplied one), without disturbing anything.
+ * Returns null if the key has never been seen, or was stored by a caller
+ * that didn't opt into hashing.
+ */
+export async function getStoredRequestHash(
+  supabase: SupabaseClient,
+  tenantId: string,
+  key:      string,
+  scope:    string,
+): Promise<string | null> {
+  const scopedKey = `${scope}::${key}`
+  const { data } = await supabase
+    .from('idempotency_keys')
+    .select('request_hash')
+    .eq('tenant_id', tenantId)
+    .eq('key', scopedKey)
+    .maybeSingle()
+  return (data as { request_hash: string | null } | null)?.request_hash ?? null
 }
 
 // Sentinel status_code written by claimIdempotency() while the real work is
@@ -78,15 +138,22 @@ export async function checkIdempotency(
  * "in progress" until the key's normal TTL cleanup runs.
  */
 export async function claimIdempotency(
-  supabase: SupabaseClient,
-  tenantId: string,
-  key:      string,
-  scope:    string,
+  supabase:    SupabaseClient,
+  tenantId:    string,
+  key:         string,
+  scope:       string,
+  requestHash?: string,
 ): Promise<boolean> {
   const scopedKey = `${scope}::${key}`
   const { error } = await supabase
     .from('idempotency_keys')
-    .insert({ tenant_id: tenantId, key: scopedKey, status_code: CLAIM_IN_PROGRESS_STATUS, response: null })
+    .insert({
+      tenant_id:    tenantId,
+      key:          scopedKey,
+      status_code:  CLAIM_IN_PROGRESS_STATUS,
+      response:     null,
+      ...(requestHash !== undefined ? { request_hash: requestHash } : {}),
+    })
   if (!error) return true
   if (error.code === '23505') return false  // another request already holds this key
   // Any other insert failure (transient DB error) — fail safe by not
@@ -121,12 +188,13 @@ export async function releaseIdempotencyClaim(
  * response has already been sent to the client).
  */
 export async function storeIdempotency(
-  supabase:    SupabaseClient,
-  tenantId:    string,
-  key:         string,
-  scope:       string,
-  statusCode:  number,
+  supabase:     SupabaseClient,
+  tenantId:     string,
+  key:          string,
+  scope:        string,
+  statusCode:   number,
   responseBody: unknown,
+  requestHash?: string,
 ): Promise<void> {
   const scopedKey = `${scope}::${key}`
   await supabase
@@ -137,6 +205,7 @@ export async function storeIdempotency(
         key:         scopedKey,
         status_code: statusCode,
         response:    responseBody,
+        ...(requestHash !== undefined ? { request_hash: requestHash } : {}),
       },
       { onConflict: 'tenant_id,key' },
     )

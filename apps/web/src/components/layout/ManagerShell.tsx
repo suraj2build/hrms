@@ -22,6 +22,7 @@ import { EventToast }       from '@/components/notifications'
 import { useIsMobile }      from '@/hooks/useIsMobile'
 import { MobileEssShell }   from '@/components/mobile/MobileEssShell'
 import { CommandPaletteProvider } from '@/components/operational/CommandPalette'
+import { PilotEnvironmentBanner } from './PilotEnvironmentBanner'
 
 function ShellPageLoader() {
   return (
@@ -65,6 +66,7 @@ export function ManagerShell() {
         <ManagerSidebar />
         <div className="flex flex-col flex-1 overflow-hidden">
           <Topbar />
+          <PilotEnvironmentBanner />
           <div className="flex flex-1 overflow-hidden">
             <main className="min-w-0 flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
               <EventToast />

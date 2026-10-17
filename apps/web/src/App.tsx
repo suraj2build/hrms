@@ -91,6 +91,8 @@ const AdminSuccession             = lazy(() => import('./pages/admin/AdminSucces
 const AdminCalibration            = lazy(() => import('./pages/admin/AdminCalibration').then(m => ({ default: m.AdminCalibration })))
 const AdminTalentMarketplace      = lazy(() => import('./pages/admin/AdminTalentMarketplace').then(m => ({ default: m.AdminTalentMarketplace })))
 const CandidatePortal    = lazy(() => import('@/pages/portal/CandidatePortal').then(m => ({ default: m.CandidatePortal })))
+const CareersList        = lazy(() => import('@/pages/careers/CareersList').then(m => ({ default: m.CareersList })))
+const CareersApply       = lazy(() => import('@/pages/careers/CareersApply').then(m => ({ default: m.CareersApply })))
 const Documents         = lazy(() => import('@/pages/documents/Documents').then(m => ({ default: m.Documents })))
 const Reports           = lazy(() => import('@/pages/reports/Reports').then(m => ({ default: m.Reports })))
 const ReportingHub      = lazy(() => import('@/pages/reports/ReportingHub').then(m => ({ default: m.ReportingHub })))
@@ -106,6 +108,7 @@ const HRReviewWorkspace    = lazy(() => import('@/pages/onboarding/HRReviewWorks
 const OnboardingModule     = lazy(() => import('@/pages/onboarding/OnboardingModule').then(m => ({ default: m.OnboardingModule })))
 const PreJoinPortal        = lazy(() => import('@/pages/onboarding/PreJoinPortal').then(m => ({ default: m.PreJoinPortal })))
 const SeparationWorkflow   = lazy(() => import('@/pages/employees/SeparationWorkflow').then(m => ({ default: m.SeparationWorkflow })))
+const ProbationConfirmations = lazy(() => import('@/pages/employees/ProbationConfirmations').then(m => ({ default: m.ProbationConfirmations })))
 
 const MusterRoll             = lazy(() => import('@/pages/attendance/MusterRoll').then(m => ({ default: m.MusterRoll })))
 const AttendanceAudit        = lazy(() => import('@/pages/attendance/AttendanceAudit').then(m => ({ default: m.AttendanceAudit })))
@@ -288,6 +291,7 @@ const LoansAndAdvances      = lazy(() => import('@/pages/payroll/LoansAndAdvance
 const Reimbursements        = lazy(() => import('@/pages/payroll/Reimbursements').then(m => ({ default: m.Reimbursements })))
 const VariablePay           = lazy(() => import('@/pages/payroll/VariablePay').then(m => ({ default: m.VariablePay })))
 const ArrearEngine          = lazy(() => import('@/pages/payroll/ArrearEngine').then(m => ({ default: m.ArrearEngine })))
+const AdjustmentsQueue      = lazy(() => import('@/pages/payroll/AdjustmentsQueue').then(m => ({ default: m.AdjustmentsQueue })))
 // Statutory
 const EPFManagement         = lazy(() => import('@/pages/payroll/statutory/EPFManagement').then(m => ({ default: m.EPFManagement })))
 const ESIManagement         = lazy(() => import('@/pages/payroll/statutory/ESIManagement').then(m => ({ default: m.ESIManagement })))
@@ -703,6 +707,8 @@ export default function App() {
               <Route path="/auth/callback" element={<AuthCallback />} />
               <Route path="/pre-join/:token"          element={<PreJoinPortal />} />
               <Route path="/portal/candidate/:token" element={<CandidatePortal />} />
+              <Route path="/careers/:tenantSlug"              element={<CareersList />} />
+              <Route path="/careers/:tenantSlug/:openingId"   element={<CareersApply />} />
 
               {/* ── Admin portal: /admin/* ─────────────────────────────────── */}
               <Route element={<AdminShellV2 />}>
@@ -771,6 +777,7 @@ export default function App() {
                 <Route path="/admin/onboarding/:sessionId/review" element={<HRReviewWorkspace />} />
                 <Route path="/admin/onboarding/module"            element={<OnboardingModule />} />
                 <Route path="/admin/employees/separation"         element={<SeparationWorkflow />} />
+                <Route path="/admin/employees/probation-confirmations" element={<ProbationConfirmations />} />
 
                 {/* Attendance */}
                 <Route path="/admin/attendance"                   element={<Navigate to="/admin/attendance/center" replace />} />
@@ -892,6 +899,7 @@ export default function App() {
                 <Route path="/admin/payroll/fbp"                      element={<FbpReconciliation />} />
                 <Route path="/admin/payroll/variable-pay"             element={<VariablePay />} />
                 <Route path="/admin/payroll/arrears"                  element={<ArrearEngine />} />
+                <Route path="/admin/payroll/adjustments"              element={<AdjustmentsQueue />} />
                 {/* Statutory */}
                 <Route path="/admin/payroll/statutory/epf"            element={<EPFManagement />} />
                 <Route path="/admin/payroll/statutory/esi"            element={<ESIManagement />} />

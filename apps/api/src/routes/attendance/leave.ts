@@ -22,6 +22,9 @@ import {
 import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
 import { isSelfApproval } from '../../lib/approval-guards.js'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { getLockedMonths, monthsInRange } from '../../lib/period-lock.js'
+import { fetchTenantTz } from '../../lib/attendance-engine.js'
+import { getLocalDate } from '../../lib/org-context.js'
 import { logAction, logBulkAction } from '../../lib/audit-service.js'
 import { emitEvent } from '../../lib/event-emitter.js'
 import { eventBus }  from '../../lib/event-bus.js'
@@ -372,6 +375,25 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       return forbidden(reply, 'SELF_APPROVAL_FORBIDDEN', 'You cannot approve your own leave application.')
     }
 
+    // SYSTEM_AUDIT_2026-10-14: the canonical leave flow (approveLeaveRequest in
+    // approval-service.ts) hard-blocks approval once the affected period is
+    // locked — this legacy table-level flow had only a "payroll freeze guard"
+    // further below that still lets the approval through and queues a
+    // best-effort reconciliation adjustment afterward. That's a materially
+    // weaker guarantee for a route that is live and HTTP-reachable (confirmed
+    // registered in index.ts, `/attendance/leave/*`) regardless of whether the
+    // current frontend calls it — an HR admin hitting this endpoint directly
+    // could still rewrite attendance_daily and deduct leave balance for a
+    // period payroll already finalized. Mirror the canonical flow's hard
+    // block exactly, checked before any balance/attendance mutation.
+    const lockedMonths = await getLockedMonths(
+      fastify.supabase, req.tenantId as string, monthsInRange(app.from_date as string, app.to_date as string),
+    )
+    if (lockedMonths.size) {
+      return conflictError(reply, 'PERIOD_LOCKED',
+        `Cannot approve — the pay period ${[...lockedMonths].sort()[0]} is locked. Reopen the period before approving this request.`)
+    }
+
     // Fetch leave type for paid flag + sandwich flag. Tenant-scoped — the FK
     // only requires existence (not tenant match), so an unscoped lookup here
     // would use another tenant's is_paid/allow_sandwich flags to decide this
@@ -403,27 +425,19 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       return serverError(req, reply, err, ErrorCode.COMPUTE_FAILED, 'Failed to compute working leave days')
     }
 
-    // Pre-approve balance check + atomic deduction (paid leave only).
-    // C6-P1: Use checked_deduct_leave_balance instead of deduct_leave_balance.
-    // The old RPC clamped silently to GREATEST(0, balance-days), which diverged
-    // the ledger (full amount) from the cache (clamped amount). The new RPC deducts
-    // ONLY when balance >= days and returns FALSE if the check fails — ensuring
-    // the ledger and cache always move by the same delta.
-    //
-    // Ordering is deliberate: deduction comes BEFORE the status update so that a
-    // concurrent second approval for the same employee fails atomically at the DB
-    // level (race condition guard), not at the application-level validateBalance
-    // check which reads a stale snapshot.
-    let paidYear: number | null = null
-    if (lt?.is_paid) {
-      paidYear = new Date(app.from_date as string).getFullYear()
+    // Pre-approve balance read (advisory only — the atomic RPC below is the
+    // authoritative, race-safe check; this just produces a clean 422 with a
+    // helpful message before paying for the RPC round trip in the common
+    // insufficient-balance case).
+    const isPaid = lt?.is_paid ?? false
+    if (isPaid) {
       const check = await validateBalance(
         fastify.supabase,
         app.tenant_id    as string,
         app.employee_id  as string,
         app.leave_type_id as string,
         workingDays.computed_days,
-        paidYear,
+        new Date(app.from_date as string).getFullYear(),
       )
       if (!check.valid) {
         return reply.code(422).send({
@@ -431,93 +445,51 @@ export default async function leaveRoute(fastify: FastifyInstance) {
           message: check.message ?? 'Insufficient leave balance',
         })
       }
+    }
 
-      // Atomic deduction gate — only succeeds when balance >= computed_days.
-      const { data: deducted, error: deductErr } = await fastify.supabase.rpc('checked_deduct_leave_balance', {
-        p_tenant_id:     app.tenant_id,
-        p_employee_id:   app.employee_id,
-        p_leave_type_id: app.leave_type_id,
-        p_days:          workingDays.computed_days,
-        p_year:          paidYear,
-      })
-      if (deductErr) {
-        return serverError(req, reply, deductErr, ErrorCode.BALANCE_DEDUCT_FAILED, 'Failed to deduct leave balance')
+    // SYSTEM_AUDIT_2026-10-14 (migration 461): approve atomically — FOR
+    // UPDATE on the application row, a fresh in-transaction period-lock
+    // check, the strict balance deduction, the consumption ledger row, and
+    // the status UPDATE all happen inside ONE RPC transaction. This
+    // replaces what used to be 3 separate round trips (a balance read, a
+    // separate checked_deduct_leave_balance RPC, then a separate status
+    // UPDATE) — besides closing the period-lock TOCTOU race migration 461
+    // exists for, it also closes a narrower pre-existing gap: a crash
+    // between the old deduct-RPC call and the old status UPDATE could leave
+    // balance deducted with the application still 'pending'. See the
+    // migration's header for the full rationale.
+    const { data: approveResult, error: approveErr } = await fastify.supabase.rpc(
+      'approve_legacy_leave_application_atomic',
+      {
+        p_tenant_id:      req.tenantId,
+        p_application_id: id,
+        p_approver_id:    req.userId,
+        p_approved_at:    new Date().toISOString(),
+        p_is_paid:        isPaid,
+        p_working_days:   workingDays.computed_days,
+      },
+    )
+
+    if (approveErr) {
+      const msg = approveErr.message ?? ''
+      if (msg.includes('PERIOD_LOCKED:')) {
+        return conflictError(reply, 'PERIOD_LOCKED', msg.replace(/^.*PERIOD_LOCKED:\s*/, ''))
       }
-      if (!deducted) {
+      if (msg.includes('INSUFFICIENT_BALANCE:')) {
         return reply.code(422).send({
           error:   'INSUFFICIENT_BALANCE',
           message: 'Insufficient leave balance (concurrent conflict — balance changed since validation)',
         })
       }
-    }
-
-    // Approve — conditioned on status still being 'pending'. The atomic RPC
-    // above only guards the BALANCE against a double-deduction (it fails if
-    // insufficient balance remains); it does nothing to stop two concurrent
-    // approve requests for the SAME application from both passing the
-    // status !== 'pending' check above and both reaching this UPDATE. Without
-    // the .eq('status','pending') guard + affected-row check here, both
-    // requests would deduct balance (succeeding as long as it covers 2x the
-    // days) and both would write status='approved' — a real double-deduction
-    // with the ledger (deduped by source_request_id below) showing only one
-    // entry while the cached balance is short by 2x. Race-losing request
-    // rolls back its own deduction and returns a conflict instead.
-    const { data: updatedRows, error: updateError } = await fastify.supabase
-      .from('leave_applications')
-      .update({
-        status:       'approved',
-        approved_by:  req.userId,
-        approved_at:  new Date().toISOString(),
-        working_days: workingDays.computed_days,   // authoritative roster-aware duration
-      })
-      .eq('id', id)
-      .eq('tenant_id', req.tenantId)
-      .eq('status', 'pending')
-      .select('id')
-
-    if (updateError) {
-      return serverError(req, reply, updateError, ErrorCode.UPDATE_FAILED, 'Failed to approve application')
-    }
-
-    if (!updatedRows?.length) {
-      // Lost the race — another request already actioned this application
-      // between our initial fetch and this UPDATE. Roll back the balance
-      // deduction we already made above (paid leave only) so the cache
-      // doesn't stay permanently short. Mirrors the cancel handler's
-      // reversal pattern (credit_leave_balance + a deduped 'reversal' ledger
-      // row keyed by source_request_id) further down in this file.
-      if (lt?.is_paid && paidYear !== null) {
-        const { error: ledgerErr } = await fastify.supabase
-          .from('leave_accrual_ledger')
-          .upsert({
-            tenant_id:         app.tenant_id,
-            employee_id:       app.employee_id,
-            leave_type_id:     app.leave_type_id,
-            year:              paidYear,
-            accrual_type:      'reversal',
-            days:              workingDays.computed_days,
-            accrued_on:        new Date().toISOString().slice(0, 10),
-            is_expired:        false,
-            notes:             `Reversal — lost race on concurrent approval of application ${id}`,
-            source_request_id: id,
-          }, { onConflict: 'tenant_id,accrual_type,source_request_id,year', ignoreDuplicates: true })
-        if (ledgerErr) {
-          req.log.error({ err: ledgerErr, id }, 'leave approve: race-rollback ledger write failed — balance may be double-deducted')
-        }
-
-        const { error: creditErr } = await fastify.supabase.rpc('credit_leave_balance', {
-          p_tenant_id:     app.tenant_id,
-          p_employee_id:   app.employee_id,
-          p_leave_type_id: app.leave_type_id,
-          p_days:          workingDays.computed_days,
-          p_year:          paidYear,
-        })
-        if (creditErr) {
-          req.log.error({ err: creditErr, id }, 'leave approve: race-rollback credit_leave_balance failed — balance may be double-deducted')
-        }
+      if (msg.includes('CONFLICT:')) {
+        return conflictError(reply, 'ALREADY_ACTIONED', 'This application was already actioned by another request')
       }
-      return conflictError(reply, 'ALREADY_ACTIONED', 'This application was already actioned by another request')
+      if (msg.includes('NOT_FOUND:')) {
+        return notFound(reply, 'NOT_FOUND', 'Application not found')
+      }
+      return serverError(req, reply, approveErr, ErrorCode.UPDATE_FAILED, 'Failed to approve application')
     }
+    void approveResult   // RPC's own JSONB echo — not currently needed by the response below
 
     // Apply leave days to attendance_daily — ONLY on roster working dates.
     // Holidays / weekly-offs inside the span are intentionally NOT written, so
@@ -527,7 +499,6 @@ export default async function leaveRoute(fastify: FastifyInstance) {
     const leaveDates = workingDays.counted_dates && workingDays.counted_dates.length > 0
       ? workingDays.counted_dates
       : expandDateRange(app.from_date as string, app.to_date as string)
-    const isPaid = lt?.is_paid ?? false
 
     // Fetch pre-existing status + fraction so a half-day leave can MERGE with a
     // half-day present already recorded for the date (0.5 worked + 0.5 leave → 1.0)
@@ -600,27 +571,9 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       req.log,
     )
 
-    // C6-P1: Write the signed consumption row to leave_accrual_ledger (the
-    // authoritative balance ledger) AFTER the cache deduction has already
-    // succeeded via checked_deduct_leave_balance above. Ledger and cache are
-    // guaranteed to move by the same delta.
-    if (lt?.is_paid && paidYear !== null) {
-      const { error: ledgerErr } = await fastify.supabase
-        .from('leave_accrual_ledger')
-        .upsert({
-          tenant_id:         app.tenant_id,
-          employee_id:       app.employee_id,
-          leave_type_id:     app.leave_type_id,
-          year:              paidYear,
-          accrual_type:      'consumption',
-          days:              -Math.abs(workingDays.computed_days),
-          accrued_on:        app.from_date,
-          is_expired:        false,
-          notes:             `Leave consumed ${app.from_date}…${app.to_date}`,
-          source_request_id: app.id,
-        }, { onConflict: 'tenant_id,accrual_type,source_request_id,year', ignoreDuplicates: true })
-      if (ledgerErr) req.log.warn({ err: ledgerErr }, 'leave consumption ledger write failed — approval committed, balance deducted')
-    }
+    // Consumption ledger row is now written inside approve_legacy_leave_
+    // application_atomic (migration 461), atomically with the balance
+    // deduction and status change — no separate JS-level write needed here.
 
     // Sandwich leave: apply bridging if allowed
     if (lt?.allow_sandwich) {
@@ -874,25 +827,51 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       }
     }
 
-    // Mark as cancelled. Fold the precondition into the WHERE clause — this
-    // UPDATE had no .eq('status','approved') guard, so a concurrent approve
-    // (which correctly locks/rechecks status) or reject that lands between
-    // our fetch above and this write would otherwise be silently clobbered to
-    // 'cancelled' with no balance/ledger reconciliation on that other path.
-    const { data: cancelledRows, error: cancelErr } = await fastify.supabase
-      .from('leave_applications')
-      .update({ status: 'cancelled' })
-      .eq('id', id)
-      .eq('tenant_id', req.tenantId)
-      .eq('status', 'approved')
-      .select('id')
+    // F2 (SYSTEM_AUDIT_2026-10-14 continued audit, mirroring
+    // reverseApprovedLeaveRequest's `req.from_date < todayLocal` guard in
+    // approval-service.ts): block cancellation once the leave range has
+    // already started. The RPC below credits back the FULL days and wipes
+    // attendance_daily for the ENTIRE range — correct for a leave that
+    // hasn't started, but wrong once days have already been taken: it
+    // would over-credit the balance and retroactively flip already-elapsed
+    // attendance away from LEAVE. This legacy path previously had no such
+    // guard at all, unlike the canonical reversal flow.
+    const tzForCancel = await fetchTenantTz(fastify.supabase, req.tenantId)
+    const todayLocal   = getLocalDate(new Date().toISOString(), tzForCancel)
+    if ((app.from_date as string) < todayLocal) {
+      return conflictError(
+        reply, 'ALREADY_STARTED',
+        'Cannot cancel — this leave has already started. Cancelling a partially- or fully-elapsed ' +
+        'leave would incorrectly credit back days already taken; contact support for a manual correction.',
+      )
+    }
+
+    // F1 (SYSTEM_AUDIT_2026-10-14 continued audit): status check + period-lock
+    // check + status UPDATE + ledger reversal + balance restore are now one
+    // atomic RPC call (migration 461's cancel_legacy_leave_application_atomic)
+    // instead of four separate round trips with no shared transaction and no
+    // period-lock awareness at all — the same class of gap the legacy approve
+    // handler had before this round's fix, and the same "fold the check into
+    // the mutating transaction" remedy.
+    const isPaid = lt?.is_paid ?? false
+    const { data: cancelResult, error: cancelErr } = await fastify.supabase.rpc(
+      'cancel_legacy_leave_application_atomic',
+      {
+        p_tenant_id:       req.tenantId,
+        p_application_id:  id,
+        p_is_paid:         isPaid,
+        p_days_to_restore: daysToRestore,
+      },
+    )
 
     if (cancelErr) {
+      const msg = cancelErr.message ?? ''
+      if (msg.includes('PERIOD_LOCKED:')) return conflictError(reply, 'PERIOD_LOCKED', msg.replace(/^.*PERIOD_LOCKED:\s*/, ''))
+      if (msg.includes('CONFLICT:')) return conflictError(reply, 'ALREADY_ACTIONED', 'Application was already actioned by another request')
+      if (msg.includes('NOT_FOUND:')) return notFound(reply, 'NOT_FOUND', 'Application not found')
       return serverError(req, reply, cancelErr, ErrorCode.UPDATE_FAILED, 'Failed to cancel application')
     }
-    if (!cancelledRows?.length) {
-      return conflictError(reply, 'ALREADY_ACTIONED', 'Application was already actioned by another request')
-    }
+    void cancelResult
 
     // Reverse attendance_daily rows that were created by this leave approval.
     // Rows with computed_source='leave_approval' within the leave date range are
@@ -910,51 +889,9 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       req.log.warn({ err: dailyErr }, 'leave cancel: attendance_daily reversal failed — cancellation committed')
     }
 
-    // Restore leave balance and write reversal ledger row (paid leave only)
-    if (lt?.is_paid && daysToRestore && daysToRestore > 0) {
-      const year = new Date(app.from_date as string).getFullYear()
-
-      // C6: idempotent reversal row in leave_accrual_ledger.
-      // source_request_id = original leave application id, accrual_type = 'reversal'
-      // ensures at most one reversal per leave. This block is now reachable
-      // at most once per application — the cancel UPDATE above only succeeds
-      // once (folded status='approved' precondition) — so credit_leave_balance
-      // (which is not itself idempotent) can't be double-invoked via a retry.
-      const { error: ledgerErr } = await fastify.supabase
-        .from('leave_accrual_ledger')
-        .upsert({
-          tenant_id:         app.tenant_id,
-          employee_id:       app.employee_id,
-          leave_type_id:     app.leave_type_id,
-          year,
-          accrual_type:      'reversal',
-          days:              daysToRestore,
-          accrued_on:        new Date().toISOString().slice(0, 10),
-          is_expired:        false,
-          notes:             `Leave reversal — cancelled application ${app.from_date}…${app.to_date}`,
-          source_request_id: app.id,
-        }, { onConflict: 'tenant_id,accrual_type,source_request_id,year', ignoreDuplicates: true })
-
-      if (ledgerErr) {
-        req.log.warn({ err: ledgerErr }, 'leave cancel: reversal ledger write failed — cancellation committed')
-      }
-
-      // Restore cache balance
-      const { error: creditErr } = await fastify.supabase.rpc('credit_leave_balance', {
-        p_tenant_id:     app.tenant_id,
-        p_employee_id:   app.employee_id,
-        p_leave_type_id: app.leave_type_id,
-        p_days:          daysToRestore,
-        p_year:          year,
-      })
-      if (creditErr) {
-        req.log.warn({ err: creditErr }, 'leave cancel: credit_leave_balance failed — cancellation committed, ledger reversed')
-      }
-    }
-
     return reply.send({
       message:          'Leave cancelled successfully',
-      days_restored:    daysToRestore ?? 0,
+      days_restored:    isPaid && daysToRestore ? daysToRestore : 0,
     })
   })
 
@@ -1141,39 +1078,71 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       return reply.send({ data: [] })
     }
 
-    // Bulk fetch leave balances + employee info + accrual totals for the team
-    const [{ data: employees }, { data: balances }, { data: accrualRows }] = await Promise.all([
-      fastify.supabase
-        .from('employees')
-        .select('id, first_name, last_name, employee_code, departments(name)')
-        .eq('tenant_id', tenantId)
-        .in('id', teamEmployeeIds),
+    // Bulk fetch leave balances + employee info + accrual totals for the
+    // team, chunked: teamEmployeeIds is a manager's full recursive org
+    // subtree (getDirectReportIds() -> get_all_subordinates(), up to 10
+    // levels deep) or the tenant's full headcount for HR admin — can exceed
+    // a single .in() URL's safe size. All four lookups share the same id
+    // list, so chunk once and reuse per chunk.
+    const employees: any[] = []
+    const balances: any[] = []
+    const accrualRows: any[] = []
+    const compData: any[] | null = includeLiability ? [] : null
+    try {
+      for (let i = 0; i < teamEmployeeIds.length; i += 100) {
+        const chunkIds = teamEmployeeIds.slice(i, i + 100)
+        const [
+          { data: empChunk, error: empErr },
+          { data: balChunk, error: balErr },
+          { data: accChunk, error: accErr },
+        ] = await Promise.all([
+          fastify.supabase
+            // lint-query-ok: chunkIds is a slice of 100 ids (loop above) — result is bounded to <=100 rows, well under the 1,000-row cap
+            .from('employees')
+            .select('id, first_name, last_name, employee_code, departments(name)')
+            .eq('tenant_id', tenantId)
+            .in('id', chunkIds),
 
-      fastify.supabase
-        .from('employee_leave_balance')
-        .select('employee_id, leave_type_id, balance, year, leave_types(id, name, is_paid)')
-        .eq('tenant_id', tenantId)
-        .in('employee_id', teamEmployeeIds)
-        .eq('year', year),
+          fastify.supabase
+            .from('employee_leave_balance')
+            .select('employee_id, leave_type_id, balance, year, leave_types(id, name, is_paid)')
+            .eq('tenant_id', tenantId)
+            .in('employee_id', chunkIds)
+            .eq('year', year),
 
-      fastify.supabase
-        .from('leave_accrual_ledger')
-        .select('employee_id, leave_type_id, days')
-        .eq('tenant_id', tenantId)
-        .in('employee_id', teamEmployeeIds)
-        .eq('year', year)
-        .gt('days', 0),
-    ])
+          fastify.supabase
+            .from('leave_accrual_ledger')
+            .select('employee_id, leave_type_id, days')
+            .eq('tenant_id', tenantId)
+            .in('employee_id', chunkIds)
+            .eq('year', year)
+            .gt('days', 0),
+        ])
+        // Surface rather than silently under-report this chunk of the
+        // team's balances/accrual/compensation — this feeds a leave
+        // liability and balance report, not just a display list.
+        if (empErr) throw empErr
+        if (balErr) throw balErr
+        if (accErr) throw accErr
+        if (empChunk) employees.push(...empChunk)
+        if (balChunk) balances.push(...balChunk)
+        if (accChunk) accrualRows.push(...accChunk)
 
-    // Optional: fetch compensation to compute leave liability value
-    const compData = includeLiability
-      ? (await fastify.supabase
-          .from('employee_compensations')
-          .select('employee_id, ctc_monthly')
-          .eq('tenant_id', tenantId)
-          .eq('is_active', true)
-          .in('employee_id', teamEmployeeIds)).data
-      : null
+        if (includeLiability) {
+          const { data: compChunk, error: compErr } = await fastify.supabase
+            // lint-query-ok: chunkIds is a slice of 100 ids (loop above) — result is bounded to <=100 rows, well under the 1,000-row cap
+            .from('employee_compensations')
+            .select('employee_id, ctc_monthly')
+            .eq('tenant_id', tenantId)
+            .eq('is_active', true)
+            .in('employee_id', chunkIds)
+          if (compErr) throw compErr
+          if (compChunk) compData!.push(...compChunk)
+        }
+      }
+    } catch (error) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch team leave balances')
+    }
 
     // ctc_monthly lookup: employee_id → daily_rate (ctc_monthly / 26)
     const dailyRateByEmp: Record<string, number> = {}
@@ -1339,20 +1308,55 @@ export default async function leaveRoute(fastify: FastifyInstance) {
       return validationError(reply, ErrorCode.VALIDATION_ERROR, parsed.error.issues[0]?.message ?? 'Validation failed')
     }
     const year = parsed.data.year ?? new Date().getFullYear()
+
+    // DEFECT-09 (found during the PR #30 live-screen Attendance/Leave UAT,
+    // 2026-10-12): this route used to .upsert() employee_leave_balance
+    // directly, writing only the denormalized cache the UI/payroll reads —
+    // never leave_accrual_ledger, the authoritative audit trail
+    // leave-reconciliation.ts checks the cache against. Every balance set
+    // this way surfaced as a balance_drift/replay_drift reconciliation
+    // error (severity 'error') the moment the scheduler ran, for every
+    // employee it was used on. set_opening_balance() (migration 272) is the
+    // existing, already-ledger-consistent RPC for exactly this — it just
+    // REPLACES the single 'opening_balance' ledger row and recomputes the
+    // cache from the ledger's full sum, so to land on the admin's typed
+    // total we net out any other (non-opening-balance) ledger activity
+    // already on the books for this employee+type+year first — matching
+    // migration 268's own one-time reconciliation formula.
+    const { data: otherLedgerRows, error: ledgerFetchErr } = await fastify.supabase
+      .from('leave_accrual_ledger')
+      .select('days')
+      .eq('tenant_id', req.tenantId)
+      .eq('employee_id', parsed.data.employee_id)
+      .eq('leave_type_id', parsed.data.leave_type_id)
+      .eq('year', year)
+      .eq('is_expired', false)
+      .neq('accrual_type', 'opening_balance')
+
+    if (ledgerFetchErr) return serverError(req, reply, ledgerFetchErr, ErrorCode.QUERY_FAILED, 'Failed to set leave balance')
+
+    const otherLedgerSum = (otherLedgerRows ?? []).reduce((sum: number, r: { days: number }) => sum + Number(r.days), 0)
+    const openingBalanceDays = parsed.data.balance - otherLedgerSum
+
+    const { error: rpcErr } = await fastify.supabase.rpc('set_opening_balance', {
+      p_tenant_id:     req.tenantId,
+      p_employee_id:   parsed.data.employee_id,
+      p_leave_type_id: parsed.data.leave_type_id,
+      p_days:          openingBalanceDays,
+      p_year:          year,
+    })
+    if (rpcErr) return serverError(req, reply, rpcErr, ErrorCode.UPDATE_FAILED, 'Failed to set leave balance')
+
     const { data, error } = await fastify.supabase
       .from('employee_leave_balance')
-      .upsert({
-        tenant_id:     req.tenantId,
-        employee_id:   parsed.data.employee_id,
-        leave_type_id: parsed.data.leave_type_id,
-        balance:       parsed.data.balance,
-        year,
-        updated_at:    new Date().toISOString(),
-      }, { onConflict: 'tenant_id,employee_id,leave_type_id,year' })
       .select('id, balance, year')
+      .eq('tenant_id', req.tenantId)
+      .eq('employee_id', parsed.data.employee_id)
+      .eq('leave_type_id', parsed.data.leave_type_id)
+      .eq('year', year)
       .single()
 
-    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to set leave balance')
+    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to set leave balance')
 
     // Audit log — balance set/updated by HR admin on behalf of employee
     await logAction(fastify.supabase, {

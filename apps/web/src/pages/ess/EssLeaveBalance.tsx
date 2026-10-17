@@ -9,7 +9,7 @@
  * Tokens only — no raw hex / bg-gray-*.
  */
 
-import { useMemo, useState }                    from 'react'
+import { useMemo, useRef, useState }            from 'react'
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { toast }                                from 'sonner'
 import {
@@ -18,7 +18,7 @@ import {
   BookOpen, RefreshCw, CalendarPlus, CalendarRange,
   AlertCircle, Clock, Lock, Pause, Search,
   Calendar, Plane, Bookmark, ShieldCheck,
-  TrendingUp,
+  TrendingUp, Coins, Loader2,
 } from 'lucide-react'
 import { LeaveApply }        from '@/pages/attendance/LeaveApply'
 import { PageContainer }     from '@/components/layout/PageContainer'
@@ -26,6 +26,10 @@ import { PageHeader }        from '@/components/layout/PageHeader'
 import { SectionCard }       from '@/components/layout/SectionCard'
 import { Badge }             from '@/components/ui/badge'
 import { Button }            from '@/components/ui/button'
+import { Input }             from '@/components/ui/input'
+import { Label }             from '@/components/ui/label'
+import { Textarea }          from '@/components/ui/textarea'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import {
   IntelligenceLoadingSkeleton,
 } from '@/components/ui/intelligence/index.js'
@@ -206,9 +210,44 @@ const CO_REASON_LABEL: Record<WorkedReason, string> = {
   weekly_off: 'Worked on Weekly Off',
 }
 
+// G12 — standalone leave encashment request/status, employee-facing.
+interface EncashableType {
+  leave_type_id:            string
+  max_encashable_per_year:  number
+  leave_types:              { id: string; name: string } | null
+}
+
+type EncashmentStatus = 'pending' | 'approved' | 'rejected' | 'paid' | 'reversed'
+
+interface EncashmentRequest {
+  id:            string
+  days:          number
+  year:          number
+  status:        EncashmentStatus
+  notes:         string | null
+  rate_per_day:  number | null
+  gross_amount:  number | null
+  tds_amount:    number
+  net_amount:    number | null
+  created_at:    string
+  approved_at:   string | null
+  paid_at:       string | null
+  payroll_run_id: string | null
+  reversal_reason: string | null
+  leave_types:   { id: string; name: string } | null
+}
+
+const ENCASHMENT_STATUS_META: Record<EncashmentStatus, { label: string; variant: 'warning' | 'success' | 'destructive' | 'secondary' | 'outline' }> = {
+  pending:  { label: 'Pending',  variant: 'warning' },
+  approved: { label: 'Approved', variant: 'success' },
+  rejected: { label: 'Rejected', variant: 'destructive' },
+  paid:     { label: 'Paid',     variant: 'success' },
+  reversed: { label: 'Reversed', variant: 'outline' },
+}
+
 // ── Nav config ─────────────────────────────────────────────────────────────────
 
-type TabKey = 'overview' | 'ledger' | 'compoff' | 'apply'
+type TabKey = 'overview' | 'ledger' | 'compoff' | 'encashment' | 'apply'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -475,6 +514,49 @@ export function EssLeaveBalance() {
     staleTime: 60_000,
   })
 
+  // ── G12: standalone leave encashment ───────────────────────────────────────
+  const { data: encashableData } = useQuery<{ data: EncashableType[] }>({
+    queryKey:  ['ess-encashable-types'],
+    queryFn:   () => api.get('/leave/encashment/encashable-types'),
+    enabled:   !!employeeId && (tab === 'encashment' || tab === 'overview'),
+    staleTime: 300_000,
+  })
+
+  const { data: encashmentData, isLoading: encashmentLoading, isError: encashmentError } = useQuery<{ data: EncashmentRequest[] }>({
+    queryKey:  ['ess-encashment-my'],
+    queryFn:   () => api.get('/leave/encashment/my'),
+    enabled:   !!employeeId && tab === 'encashment',
+    staleTime: 30_000,
+  })
+
+  const [encashDialogOpen, setEncashDialogOpen] = useState(false)
+  const [encashLeaveTypeId, setEncashLeaveTypeId] = useState('')
+  const [encashDays, setEncashDays] = useState('')
+  const [encashNotes, setEncashNotes] = useState('')
+
+  // SYSTEM_AUDIT_2026-10-14 checkpoint 10+1 — a double-click or a client
+  // retry after a timeout could previously submit two encashment requests
+  // that each pass the annual-cap check (read-then-insert, no idempotency
+  // protection) and both later get approved, exceeding the configured
+  // cap. Mirrors LeaveApply.tsx's stable per-form-mount UUID pattern.
+  const encashmentIdempotencyKey = useRef(crypto.randomUUID())
+
+  const requestEncashmentMutation = useMutation({
+    mutationFn: () => api.post('/leave/encashment/request', {
+      leave_type_id: encashLeaveTypeId,
+      days:          Number(encashDays),
+      notes:         encashNotes.trim() || undefined,
+    }, { headers: { 'Idempotency-Key': encashmentIdempotencyKey.current } }),
+    onSuccess: () => {
+      encashmentIdempotencyKey.current = crypto.randomUUID()
+      toast.success('Encashment request submitted')
+      queryClient.invalidateQueries({ queryKey: ['ess-encashment-my'] })
+      setEncashDialogOpen(false)
+      setEncashLeaveTypeId(''); setEncashDays(''); setEncashNotes('')
+    },
+    onError: (e: unknown) => toast.error('Failed to submit request', { description: e instanceof Error ? e.message : undefined }),
+  })
+
   // ── Lifecycle: held credits (credits posted but not yet consumable) ────────
   const { data: heldCreditsData } = useQuery<{ data: HeldCreditRow[] }>({
     queryKey:  ['ess-held-credits', employeeId],
@@ -691,6 +773,7 @@ export function EssLeaveBalance() {
           { id: 'overview', label: 'Overview',       icon: CalendarDays },
           { id: 'ledger',   label: 'Accrual Ledger', icon: BookOpen     },
           { id: 'compoff',  label: 'Comp-Off',       icon: CalendarPlus },
+          { id: 'encashment', label: 'Encashment',   icon: Coins        },
         ]}
         value={tab}
         onChange={setTab}
@@ -1420,6 +1503,96 @@ export function EssLeaveBalance() {
           )}
 
           {/* ═══════════════════════════════════════════════════════════════ */}
+          {/* SECTION: ENCASHMENT (G12 — standalone leave encashment)         */}
+          {/* ═══════════════════════════════════════════════════════════════ */}
+          {tab === 'encashment' && (
+            <SectionCard
+              title="My Encashment Requests"
+              icon={<Coins className="h-4 w-4 text-muted-foreground" />}
+              action={
+                <Button
+                  size="sm"
+                  className="h-7 text-xs gap-1.5"
+                  disabled={(encashableData?.data ?? []).length === 0}
+                  onClick={() => setEncashDialogOpen(true)}
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Request Encashment
+                </Button>
+              }
+            >
+              {(encashableData?.data ?? []).length === 0 && (
+                <div className="mb-4 rounded-md border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                  None of your leave types are configured for encashment. Contact HR if you believe this is wrong.
+                </div>
+              )}
+
+              {encashmentError && (
+                <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+                  Failed to load data. Please refresh and try again.
+                </div>
+              )}
+              {encashmentLoading ? (
+                <IntelligenceLoadingSkeleton rows={3} cardHeight="h-16" />
+              ) : (encashmentData?.data ?? []).length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 gap-3 text-muted-foreground">
+                  <Coins className="h-10 w-10 opacity-30" />
+                  <p className="text-sm font-medium text-foreground">No encashment requests yet</p>
+                  <p className="text-xs text-center max-w-sm">
+                    Request a payout for unused encashable leave days — HR reviews the request, computes the
+                    payout and withholding, and posts it to an upcoming payroll run once approved.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {(encashmentData?.data ?? []).map(req => {
+                    const meta = ENCASHMENT_STATUS_META[req.status]
+                    const assignedNotYetPaid = req.status === 'approved' && !!req.payroll_run_id
+                    return (
+                      <div key={req.id} className="rounded-lg border border-border px-4 py-3 space-y-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-sm font-medium text-foreground">
+                              {req.leave_types?.name ?? 'Leave'} — {req.days} day{req.days !== 1 ? 's' : ''}
+                            </span>
+                            <Badge variant={assignedNotYetPaid ? 'secondary' : meta.variant} className="rounded-full text-[9px]">
+                              {assignedNotYetPaid ? 'Scheduled for payroll' : meta.label}
+                            </Badge>
+                          </div>
+                          <span className="text-[10px] text-muted-foreground">
+                            Requested {fmtDateShort(req.created_at)}
+                          </span>
+                        </div>
+                        {req.gross_amount != null && (
+                          <div className="flex items-center gap-4 text-[11px] text-muted-foreground">
+                            <span>Gross: <strong className="text-foreground tabular-nums">₹{req.gross_amount}</strong></span>
+                            <span>TDS: <strong className="text-foreground tabular-nums">₹{req.tds_amount}</strong></span>
+                            <span>Net: <strong className="text-success tabular-nums">₹{req.net_amount}</strong></span>
+                          </div>
+                        )}
+                        {assignedNotYetPaid && (
+                          <p className="text-[11px] text-muted-foreground">Assigned to an upcoming payroll run — not yet paid.</p>
+                        )}
+                        {req.notes && <p className="text-[11px] text-muted-foreground">{req.notes}</p>}
+                        {req.status === 'reversed' && req.reversal_reason && (
+                          <p className="text-[11px] text-warning">Reversed — {req.reversal_reason}</p>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+
+              <div className="mt-4 p-3 rounded-md bg-muted/40 border border-border text-xs text-muted-foreground">
+                <strong className="text-foreground">How encashment works:</strong> Once HR approves your request,
+                the payout (days × your current per-day rate) and an estimated TDS withholding are computed and
+                shown here. HR posts the payment into an upcoming payroll run, after which it appears in that
+                month's payslip alongside your regular salary.
+              </div>
+            </SectionCard>
+          )}
+
+          {/* ═══════════════════════════════════════════════════════════════ */}
           {/* SECTION: APPLY LEAVE (embedded full-width)                      */}
           {/* ═══════════════════════════════════════════════════════════════ */}
           {tab === 'apply' && (
@@ -1438,6 +1611,56 @@ export function EssLeaveBalance() {
           )}
 
       </div>{/* end tab content */}
+
+      {/* Request Encashment dialog */}
+      <Dialog open={encashDialogOpen} onOpenChange={setEncashDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader><DialogTitle>Request Leave Encashment</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label className="text-xs">Leave type</Label>
+              <select
+                value={encashLeaveTypeId}
+                onChange={e => setEncashLeaveTypeId(e.target.value)}
+                className="w-full h-9 text-xs rounded-md border border-input bg-background px-2 text-foreground outline-none focus:ring-1 ring-primary/50"
+              >
+                <option value="">Select a leave type…</option>
+                {(encashableData?.data ?? []).map(et => {
+                  const bal = balances.find(b => b.leave_type_id === et.leave_type_id)
+                  return (
+                    <option key={et.leave_type_id} value={et.leave_type_id}>
+                      {et.leave_types?.name ?? 'Leave'} — {bal?.balance ?? 0}d available
+                      {et.max_encashable_per_year > 0 ? ` (max ${et.max_encashable_per_year}d/yr)` : ''}
+                    </option>
+                  )
+                })}
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Days to encash</Label>
+              <Input type="number" min="0.5" step="0.5" value={encashDays} onChange={e => setEncashDays(e.target.value)} className="h-9 text-xs" />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Notes (optional)</Label>
+              <Textarea value={encashNotes} onChange={e => setEncashNotes(e.target.value)} rows={2} className="text-xs" />
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              HR will review this request and compute the actual payout and TDS withholding before approving.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" size="sm" onClick={() => setEncashDialogOpen(false)}>Cancel</Button>
+            <Button
+              size="sm"
+              disabled={requestEncashmentMutation.isPending || !encashLeaveTypeId || !encashDays || Number(encashDays) <= 0}
+              onClick={() => requestEncashmentMutation.mutate()}
+            >
+              {requestEncashmentMutation.isPending && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
+              Submit Request
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </PageContainer>
   )
 }

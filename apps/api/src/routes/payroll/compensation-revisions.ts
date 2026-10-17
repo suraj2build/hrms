@@ -186,32 +186,16 @@ export default async function compensationRevisionsRoutes(fastify: FastifyInstan
     }
 
     const rev = revision as any
+    // Friendly early check only — not the authoritative guard. The real CAS
+    // (lock + re-check status='pending') happens inside
+    // approve_compensation_revision_atomic below, so a second concurrent
+    // approve/reject for the same revision can't both pass this read and
+    // both proceed; only one caller can ever win the row lock and commit.
     if (rev.status !== 'pending') {
       return conflictError(reply, 'INVALID_STATUS', `Cannot approve revision with status '${rev.status}'`)
     }
 
     const now = new Date().toISOString()
-
-    // Update status to approved — re-assert the pending precondition in the
-    // WHERE clause itself (not just the earlier SELECT check) so a second
-    // concurrent approve/reject can't both pass the read and both proceed
-    // into the downstream compensation-creation logic below.
-    const { data: approvedRow, error: updateErr } = await fastify.supabase
-      .from('compensation_revisions')
-      .update({
-        status: 'approved',
-        approved_by: req.userId,
-        decided_at: now,
-        updated_at: now,
-      })
-      .eq('id', id)
-      .eq('tenant_id', req.tenantId)
-      .eq('status', 'pending')
-      .select('id')
-      .maybeSingle()
-
-    if (updateErr) return serverError(req, reply, updateErr, ErrorCode.UPDATE_FAILED, 'Failed to update revision status')
-    if (!approvedRow) return conflictError(reply, 'INVALID_STATUS', 'Revision is no longer pending')
 
     // ── Fetch current active compensation + components BEFORE creating snapshots ──
     // This allows accurate gross/net computation from real component breakdown
@@ -239,19 +223,21 @@ export default async function compensationRevisionsRoutes(fastify: FastifyInstan
     // Falls back to CTC/12 gross (null net) when no component data exists yet.
     const prevEarnings   = (prevComponents ?? []).filter((c: any) => c.salary_components?.component_type === 'earning')
     const prevDeductions = (prevComponents ?? []).filter((c: any) => c.salary_components?.component_type === 'deduction')
-    const prevGrossMonthly  = prevEarnings.reduce((s: number, c: any) => s + (c.computed_monthly ?? 0), 0)
-    const prevDeductMonthly = prevDeductions.reduce((s: number, c: any) => s + (c.computed_monthly ?? 0), 0)
+    // computed_monthly is NUMERIC — coerce or 2+ components corrupt these sums into
+    // NaN, writing a broken compensation_snapshots row on approval (G13 sweep).
+    const prevGrossMonthly  = prevEarnings.reduce((s: number, c: any) => s + Number(c.computed_monthly ?? 0), 0)
+    const prevDeductMonthly = prevDeductions.reduce((s: number, c: any) => s + Number(c.computed_monthly ?? 0), 0)
     const prevNetMonthly    = Math.max(0, prevGrossMonthly - prevDeductMonthly)
 
     // Scale components proportionally for the after-snapshot
     const previousCtcAnnual = Number((currentComp as any)?.ctc_annual ?? rev.before_ctc_annual ?? 0)
     const scale = previousCtcAnnual > 0 ? Number(rev.new_ctc_annual) / previousCtcAnnual : 1
     const newGrossMonthly  = prevEarnings.reduce((s: number, c: any) => {
-      const m = c.calculation_type === 'fixed' ? (c.computed_monthly ?? 0) : (c.computed_monthly ?? 0) * scale
+      const m = c.calculation_type === 'fixed' ? Number(c.computed_monthly ?? 0) : Number(c.computed_monthly ?? 0) * scale
       return s + m
     }, 0)
     const newDeductMonthly = prevDeductions.reduce((s: number, c: any) => {
-      const m = c.calculation_type === 'fixed' ? (c.computed_monthly ?? 0) : (c.computed_monthly ?? 0) * scale
+      const m = c.calculation_type === 'fixed' ? Number(c.computed_monthly ?? 0) : Number(c.computed_monthly ?? 0) * scale
       return s + m
     }, 0)
     const newNetMonthly = Math.max(0, newGrossMonthly - newDeductMonthly)
@@ -288,6 +274,7 @@ export default async function compensationRevisionsRoutes(fastify: FastifyInstan
     ]
 
     const { error: snapErr } = await fastify.supabase
+      // lint-tenant-ok: `snapshots` rows above already set tenant_id: req.tenantId per row (lines 269, 280)
       .from('compensation_snapshots')
       .insert(snapshots)
 
@@ -295,100 +282,85 @@ export default async function compensationRevisionsRoutes(fastify: FastifyInstan
       req.log.warn({ err: snapErr }, 'Failed to create compensation snapshots')
     }
 
-    // ── Supersede the prior active compensation ───────────────────────────────
-    // Only one active compensation per employee is allowed (uidx_comp_one_active,
-    // migration 014). Deactivate the current active record before inserting the
-    // new one — mirrors the established pattern in employees/compensation.ts.
-    // Without this, the insert below hits a 23505 unique-violation for any
-    // employee who already has active compensation (i.e. virtually every real
-    // revision), which was previously only req.log.warn'd and swallowed: HR saw
-    // "Revision approved" while the employee's pay never actually changed.
-    if (currentComp) {
-      const { error: supersedeErr } = await fastify.supabase
-        .from('employee_compensations')
-        .update({ is_active: false })
-        .eq('tenant_id', req.tenantId)
-        .eq('employee_id', rev.employee_id)
-        .eq('is_active', true)
-      if (supersedeErr) {
-        return serverError(req, reply, supersedeErr, ErrorCode.UPDATE_FAILED, 'Revision status set to approved, but failed to supersede prior compensation. Compensation was NOT changed — contact support before retrying.')
-      }
-    }
+    // ── Compute the scaled component rows to copy (pure computation — no writes yet) ──
+    // Copy and proportionally scale components from the previous active
+    // compensation. prevComponents already fetched above.
+    let newComponentRows: Array<{
+      salary_component_id: string
+      calculation_type:    string
+      value:                number
+      sequence:             number
+      computed_monthly:     number
+      computed_annual:      number
+    }> = []
+    if (prevComponents?.length) {
+      const newCTCMonthly = Number(rev.new_ctc_annual) / 12
 
-    // ── Create the payroll-effective employee_compensations record ────────────
-    const { data: newComp, error: compInsertErr } = await fastify.supabase
-      .from('employee_compensations')
-      .insert({
-        employee_id:         rev.employee_id,
-        tenant_id:           req.tenantId,
-        salary_structure_id: (currentComp as any)?.salary_structure_id ?? null,
-        ctc_annual:          rev.new_ctc_annual,
-        effective_from:      rev.effective_date,
-        is_active:           true,
-        notes:               `${rev.revision_type} revision approved`,
-        approved_by:         req.userId,
-        created_by:          req.userId,
-      })
-      .select('id')
-      .single()
-
-    if (compInsertErr) {
-      // Previously silently warned + returned success — HR would see "Revision
-      // approved" with the employee's compensation never actually updated.
-      // Surface it: the revision row is already 'approved', but the underlying
-      // compensation change did not happen and needs manual follow-up.
-      return serverError(req, reply, compInsertErr, ErrorCode.INSERT_FAILED, 'Revision status set to approved, but failed to create the new compensation record. Compensation was NOT changed — contact support before retrying.')
-    } else if (newComp) {
-      // Copy and proportionally scale components from the previous active compensation.
-      // prevComponents already fetched above — reuse to avoid duplicate DB round-trip.
-      if (prevComponents?.length) {
-        const newCTCMonthly = Number(rev.new_ctc_annual) / 12
-
-        const newComponentRows = (prevComponents as any[]).map((c: any) => {
-          if (c.calculation_type === 'fixed') {
-            return {
-              compensation_id:     (newComp as any).id,
-              salary_component_id: c.salary_component_id,
-              calculation_type:    c.calculation_type,
-              value:               c.value,
-              sequence:            c.sequence,
-              tenant_id:           req.tenantId,
-              computed_monthly:    c.computed_monthly ?? 0,
-              computed_annual:     c.computed_annual  ?? 0,
-            }
-          }
-
-          // For percentage-type components, scale from previous computed amount.
-          // If previous computed_monthly was 0 (e.g. newly created structure that
-          // was never run through the engine), derive from value * new CTC directly.
-          const prevMonthly = c.computed_monthly ?? 0
-          const derivedMonthly = prevMonthly > 0
-            ? Math.round(prevMonthly * scale * 100) / 100
-            : Math.round((Number(c.value) / 100) * newCTCMonthly * 100) / 100
-
+      newComponentRows = (prevComponents as any[]).map((c: any) => {
+        if (c.calculation_type === 'fixed') {
           return {
-            compensation_id:     (newComp as any).id,
             salary_component_id: c.salary_component_id,
             calculation_type:    c.calculation_type,
             value:               c.value,
             sequence:            c.sequence,
-            tenant_id:           req.tenantId,
-            computed_monthly:    derivedMonthly,
-            computed_annual:     Math.round(derivedMonthly * 12 * 100) / 100,
+            computed_monthly:    c.computed_monthly ?? 0,
+            computed_annual:     c.computed_annual  ?? 0,
           }
-        })
-        const { error: compCompErr } = await fastify.supabase
-          .from('employee_compensation_components')
-          .insert(newComponentRows)
-        if (compCompErr) req.log.warn({ err: compCompErr }, 'Failed to copy components on revision approval')
-      }
+        }
 
-      // Link revision to the resulting compensation record.
-      await fastify.supabase
-        .from('compensation_revisions')
-        .update({ resulting_compensation_id: (newComp as any).id })
-        .eq('id', id)
+        // For percentage-type components, scale from previous computed amount.
+        // If previous computed_monthly was 0 (e.g. newly created structure that
+        // was never run through the engine), derive from value * new CTC directly.
+        const prevMonthly = c.computed_monthly ?? 0
+        const derivedMonthly = prevMonthly > 0
+          ? Math.round(prevMonthly * scale * 100) / 100
+          : Math.round((Number(c.value) / 100) * newCTCMonthly * 100) / 100
+
+        return {
+          salary_component_id: c.salary_component_id,
+          calculation_type:    c.calculation_type,
+          value:               c.value,
+          sequence:            c.sequence,
+          computed_monthly:    derivedMonthly,
+          computed_annual:     Math.round(derivedMonthly * 12 * 100) / 100,
+        }
+      })
     }
+
+    // ── Approve + supersede + create + copy components, atomically ───────────
+    // approve_compensation_revision_atomic (migration 471) fuses what used to
+    // be four separate supabase-js calls (CAS the revision to 'approved',
+    // supersede the prior active compensation, insert the new compensation,
+    // insert its components, link the revision) into ONE transaction. A
+    // failure anywhere inside — including the components insert, the exact
+    // step that was previously left to silently swallow its error — rolls
+    // back the WHOLE thing: the revision stays 'pending', the prior
+    // compensation is still active and untouched, and no new compensation
+    // row exists at all. There is no reachable state where the revision
+    // reads 'approved' but the employee's actual compensation didn't change,
+    // and no state where a new compensation is active with zero components.
+    // The function's row lock on compensation_revisions also makes a retry
+    // (or a genuine concurrent double-click) safe: whichever caller commits
+    // first wins; the other sees status='approved' under the lock and fails
+    // cleanly with INVALID_STATUS, writing nothing.
+    const { data: approveResult, error: approveErr } = await fastify.supabase.rpc(
+      'approve_compensation_revision_atomic',
+      {
+        p_tenant_id:   req.tenantId,
+        p_revision_id: id,
+        p_actor_id:    req.userId,
+        p_components:  newComponentRows,
+      },
+    )
+
+    if (approveErr) {
+      const msg = approveErr.message ?? ''
+      if (msg.includes('NOT_FOUND:')) return notFound(reply, 'NOT_FOUND', 'Revision not found')
+      if (msg.includes('INVALID_STATUS:')) return conflictError(reply, 'INVALID_STATUS', 'Revision is no longer pending')
+      return serverError(req, reply, approveErr, ErrorCode.UPDATE_FAILED, 'Failed to approve compensation revision — no changes were made; the revision is still pending and the employee'+"'"+'s compensation was not altered. Retry is safe.')
+    }
+
+    const newCompensationId = (approveResult as any)?.new_compensation_id as string | undefined
 
     await logAction(fastify.supabase, {
       tenantId:    req.tenantId,
@@ -448,7 +420,7 @@ export default async function compensationRevisionsRoutes(fastify: FastifyInstan
       },
     })
 
-    return reply.send({ message: 'Revision approved', revision_id: id })
+    return reply.send({ message: 'Revision approved', revision_id: id, new_compensation_id: newCompensationId ?? null })
   })
 
   // ── POST /payroll/revisions/:id/reject ───────────────────────────────────────

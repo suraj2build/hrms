@@ -191,12 +191,14 @@ export default async function taxGovernanceRoute(fastify: FastifyInstance) {
     )
     const highRiskEmployeeIds = new Set(highRiskDecls.map((d: any) => d.employee_id))
 
-    // Aggregate total declared amount + top category per high-risk employee
+    // Aggregate total declared amount + top category per high-risk employee.
+    // declared_amount is DECIMAL — coerce or an employee with 2+ high-risk
+    // declarations gets a concatenated risk_items[].declared_amount (G13 sweep).
     const highRiskAmountMap = new Map<string, { amount: number; category: string }>()
     for (const d of highRiskDecls) {
       const prev = highRiskAmountMap.get(d.employee_id)
       highRiskAmountMap.set(d.employee_id, {
-        amount:   (prev?.amount ?? 0) + (d.declared_amount ?? 0),
+        amount:   (prev?.amount ?? 0) + Number(d.declared_amount ?? 0),
         category: prev?.category ?? (d.declaration_category ?? 'Various'),
       })
     }
@@ -231,11 +233,12 @@ export default async function taxGovernanceRoute(fastify: FastifyInstance) {
       statusCounts[d.status] = (statusCounts[d.status] ?? 0) + 1
     }
 
-    // Total declared vs approved amounts
-    const totalDeclared = declarations.reduce((s: number, d: any) => s + (d.declared_amount ?? 0), 0)
+    // Total declared vs approved amounts — a tenant-wide sum, so any tenant with 2+
+    // declarations needs these coerced or the totals corrupt into NaN (G13 sweep).
+    const totalDeclared = declarations.reduce((s: number, d: any) => s + Number(d.declared_amount ?? 0), 0)
     const totalApproved = declarations
       .filter((d: any) => ['approved','payroll_applied'].includes(d.status))
-      .reduce((s: number, d: any) => s + (d.approved_amount ?? d.declared_amount ?? 0), 0)
+      .reduce((s: number, d: any) => s + Number(d.approved_amount ?? d.declared_amount ?? 0), 0)
 
     // Return shape that matches the frontend ComplianceData interface
     return reply.send({

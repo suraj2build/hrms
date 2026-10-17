@@ -34,8 +34,9 @@ import { z }                    from 'zod'
 import { logAction }            from '../../lib/audit-service.js'
 import { generateCompOffRequests } from '../../lib/comp-off-service.js'
 import { resolveWoEmployees } from '../../lib/wo-credit-reconciler.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import {
-  isHrAdmin, resolveCallerEmployeeId, getDirectReportIds, isDirectReport,
+  isHrAdmin, resolveCallerEmployeeId, getImmediateReportIds, isDirectReport,
 } from '../../lib/manager-scope.js'
 import { assertRangeOpen, isMonthLocked, monthOf, PeriodLockedError } from '../../lib/period-lock.js'
 import { isSelfApproval } from '../../lib/approval-guards.js'
@@ -136,21 +137,28 @@ export default async function compOffRoute(fastify: FastifyInstance) {
       throw err
     }
 
-    // Fetch qualifying attendance_daily rows
-    let query = fastify.supabase
-      .from('attendance_daily')
-      .select('employee_id, date, worked_on_weekly_off, worked_on_holiday')
-      .eq('tenant_id', req.tenantId)
-      .gte('date', from_date)
-      .lte('date', to_date)
-      .or('worked_on_weekly_off.eq.true,worked_on_holiday.eq.true')
-
-    if (employee_id) {
-      query = query.eq('employee_id', employee_id)
-    }
-
-    const { data: qualifyingRaw, error: fetchErr } = await query
-    if (fetchErr) {
+    // Fetch qualifying attendance_daily rows. fetchAllRows(): when no
+    // employee_id is given this is a tenant-wide, date-range-only scan — a
+    // plain query would silently under-report qualifying days for a large
+    // tenant over a long range.
+    let qualifyingRaw: any[]
+    try {
+      qualifyingRaw = await fetchAllRows((from, to) => {
+        let query = fastify.supabase
+          .from('attendance_daily')
+          .select('employee_id, date, worked_on_weekly_off, worked_on_holiday')
+          .eq('tenant_id', req.tenantId)
+          .gte('date', from_date)
+          .lte('date', to_date)
+          .or('worked_on_weekly_off.eq.true,worked_on_holiday.eq.true')
+          .order('id')
+          .range(from, to)
+        if (employee_id) {
+          query = query.eq('employee_id', employee_id)
+        }
+        return query
+      })
+    } catch (fetchErr) {
       return serverError(req, reply, fetchErr, ErrorCode.QUERY_FAILED, 'Failed to fetch qualifying comp-off days')
     }
 
@@ -214,10 +222,17 @@ export default async function compOffRoute(fastify: FastifyInstance) {
     if (isHrAdmin(req.userRole)) {
       // HR admin sees the whole tenant
     } else if (req.userRole === 'manager') {
-      // P6.0c — managers see only their direct reports' requests
+      // SYSTEM_AUDIT_2026-10-14: this list feeds the manager approval queue
+      // (ManagerTeamCompOff.tsx, embedded in ApprovalInbox's Comp-off tab) —
+      // approve/reject goes through authorizeCompOffTarget below, which only
+      // authorizes the employee's IMMEDIATE manager (isDirectReport, one
+      // level). The full subordinate tree (getDirectReportIds) let a
+      // manager-of-managers see a grandchild's pending request with a
+      // clickable Approve button that always 403'd. Scope to immediate
+      // reports only, matching the action's real authority.
       const myEmpId = await resolveCallerEmployeeId(fastify.supabase, req.userId, req.tenantId)
       if (!myEmpId) return reply.send({ data: [] })
-      const reportIds = await getDirectReportIds(fastify.supabase, req.tenantId, myEmpId)
+      const reportIds = await getImmediateReportIds(fastify.supabase, req.tenantId, myEmpId)
       if (!reportIds.length) return reply.send({ data: [] })
       q = q.in('employee_id', reportIds)
     } else {
@@ -408,24 +423,39 @@ export default async function compOffRoute(fastify: FastifyInstance) {
     // first makes this request the single, unambiguous approver before any
     // balance side effect is attempted — the loser is rejected here with no
     // side effects at all, so there is nothing left to roll back.
-    const { data: claimedRows, error: claimErr } = await fastify.supabase
-      .from('comp_off_requests')
-      .update({
-        status:      'approved',
-        reviewed_by: req.userId,
-        reviewed_at: now,
-        notes:       parsed.data.notes ?? null,
-      })
-      .eq('id', id)
-      .eq('tenant_id', req.tenantId)
-      .eq('status', 'pending')
-      .select('id')
+    //
+    // SYSTEM_AUDIT_2026-10-14 (migration 461): the claim itself now goes
+    // through an RPC that re-checks the period lock inside the SAME
+    // transaction as the status UPDATE — the isMonthLocked call above is
+    // only a fast-fail pre-check; this RPC is the authoritative, race-safe
+    // one (see migration 461's header for why a separate earlier check
+    // cannot close this race on its own).
+    const { error: claimErr } = await fastify.supabase.rpc('approve_comp_off_claim_atomic', {
+      p_tenant_id:   req.tenantId,
+      p_co_id:       id,
+      p_reviewer_id: req.userId,
+      p_reviewed_at: now,
+      p_notes:       parsed.data.notes ?? null,
+    })
 
     if (claimErr) {
+      const msg = claimErr.message ?? ''
+      if (msg.includes('PERIOD_LOCKED:')) {
+        return reply.code(409).send({ error: 'PERIOD_LOCKED', message: msg.replace(/^.*PERIOD_LOCKED:\s*/, '') })
+      }
+      if (msg.includes('CONFLICT:')) {
+        return conflictError(reply, 'ALREADY_ACTIONED', 'This request was already actioned by another request')
+      }
+      if (msg.includes('NO_LEAVE_TYPE_CONFIGURED:')) {
+        return reply.code(409).send({
+          error:   'NO_LEAVE_TYPE_CONFIGURED',
+          message: 'This comp-off request has no leave type to credit — it cannot be approved as-is. Regenerate it via a leave-type-specific comp-off generation before approving.',
+        })
+      }
+      if (msg.includes('NOT_FOUND:')) {
+        return reply.code(404).send({ error: 'NOT_FOUND', message: 'Comp off request not found' })
+      }
       return serverError(req, reply, claimErr, ErrorCode.UPDATE_FAILED, 'Failed to approve comp-off request')
-    }
-    if (!claimedRows?.length) {
-      return conflictError(reply, 'ALREADY_ACTIONED', 'This request was already actioned by another request')
     }
 
     // ── Credit balance via leave_accrual_ledger ──────────────────────────

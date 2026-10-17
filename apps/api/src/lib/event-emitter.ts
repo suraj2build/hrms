@@ -26,6 +26,7 @@ export type HrEventType =
   | 'correction.submitted'
   | 'shift.changed'
   | 'anomaly.detected'
+  | 'queue.escalated'
   | 'payroll.locked'
   | 'payroll.unlocked'
   | 'payroll.finalized'

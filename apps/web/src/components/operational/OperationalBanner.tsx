@@ -2,8 +2,15 @@
  * OperationalBanner — persistent contextual awareness bar.
  *
  * Polls lightweight summary endpoints and surfaces high-priority
- * operational signals: stale attendance locks, open anomalies,
- * pending corrections, and payroll-freeze warnings.
+ * operational signals: stale attendance locks, pending corrections, and
+ * payroll-freeze warnings.
+ *
+ * Deliberately does NOT surface raw anomaly counts — anomalies are a
+ * detection signal (now auto-reconciled daily, see anomaly-reconciler.ts),
+ * not a second actionable queue on top of regularisation. Pushing "N open
+ * anomalies need review" onto every admin page duplicated the urgency of
+ * the regularisation signal below without adding an actual action: there
+ * is nothing to approve/reject on the anomalies page itself.
  *
  * Mount once inside AppShell (above <main>) so it is visible
  * on every admin page.
@@ -16,7 +23,7 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
-  AlertTriangle, Lock, ClipboardCheck, Zap, ChevronRight, X,
+  Lock, ClipboardCheck, Zap, ChevronRight, X,
 } from 'lucide-react'
 import { useAuthStore }  from '@/stores/authStore'
 import { useBasePath }   from '@/lib/routing'
@@ -73,10 +80,6 @@ interface ProcessStatus {
   lock_ttl_seconds: number | null
 }
 
-interface AnomalySummary {
-  open_count: number
-}
-
 interface CorrectionSummary {
   pending_count: number
 }
@@ -93,13 +96,6 @@ function useOperationalSignals(basePath: string): Signal[] {
     queryFn:   () => api.get('/attendance/process/status'),
     staleTime: 60_000,          // ← was 30_000 (misaligned — caused mount-refetch every navigation)
     refetchInterval: 60_000,
-  })
-
-  const { data: anomaly } = useQuery<AnomalySummary>({
-    queryKey:  ['op-banner-anomaly-summary'],
-    queryFn:   () => api.get('/attendance/anomalies/summary'),
-    staleTime: 120_000,         // ← was 60_000 (misaligned)
-    refetchInterval: 120_000,
   })
 
   const { data: correction } = useQuery<CorrectionSummary>({
@@ -135,20 +131,9 @@ function useOperationalSignals(basePath: string): Signal[] {
     }
   }
 
-  // 2. Open anomalies
-  const anomalyCount = anomaly?.open_count ?? 0
-  if (anomalyCount > 0) {
-    signals.push({
-      id:      'anomalies',
-      variant: anomalyCount >= 10 ? 'warning' : 'muted',
-      icon:    AlertTriangle,
-      message: `${anomalyCount} open attendance anomal${anomalyCount === 1 ? 'y' : 'ies'} need review.`,
-      href:    `${basePath}/attendance/anomalies`,
-      cta:     'Review',
-    })
-  }
-
-  // 3. Pending regularisation requests (was: corrections)
+  // 2. Pending regularisation requests (was: corrections) — the one real
+  // actionable queue; anomalies are deliberately not surfaced here (see
+  // the file header comment).
   const correctionCount = correction?.pending_count ?? 0
   if (correctionCount > 0) {
     signals.push({

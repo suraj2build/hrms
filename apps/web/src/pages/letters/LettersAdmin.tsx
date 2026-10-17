@@ -291,8 +291,15 @@ function TemplateEditorDialog({
                         >
                           <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                           <SelectContent>
+                            {/* 'manager' is intentionally not offered: every endpoint under
+                                /letters/issued/:letterId/{approve,reject} (and the detail GET
+                                they depend on) is gated to hr_admin/super_admin only, with no
+                                manager-facing approval queue page. A chain level saved with
+                                approver_role='manager' can never be approved by an actual
+                                manager (403 before the handler even runs) and can only ever be
+                                force-approved by a super_admin — i.e. a permanently stuck
+                                letter for any ordinary hr_admin. See SYSTEM_AUDIT_2026-10-14. */}
                             <SelectItem value="hr_admin"    className="text-xs">HR Admin</SelectItem>
-                            <SelectItem value="manager"     className="text-xs">Manager</SelectItem>
                             <SelectItem value="super_admin" className="text-xs">Super Admin</SelectItem>
                           </SelectContent>
                         </Select>

@@ -173,6 +173,7 @@ export class WebhookService {
           last_error:   null,
         })
         .eq('id', deliveryId)
+        .eq('tenant_id', tenantId)
 
       // Update webhook aggregate counters — shared with _deliverToWebhook's
       // success branch so a manual retry's stats stay consistent with a
@@ -195,6 +196,7 @@ export class WebhookService {
           next_retry_at: nextState.next_retry_at,
         })
         .eq('id', deliveryId)
+        .eq('tenant_id', tenantId)
 
       // Update webhook aggregate counters — previously only _deliverToWebhook's
       // failure branch did this, so a webhook that only ever failed via manual
@@ -321,6 +323,7 @@ export class WebhookService {
           last_error:   null,
         })
         .eq('id', deliveryId)
+        .eq('tenant_id', tenantId)
 
       await this._updateWebhookStats(webhook.id, tenantId, true)
     } else {
@@ -338,6 +341,7 @@ export class WebhookService {
           next_retry_at: nextState.next_retry_at,
         })
         .eq('id', deliveryId)
+        .eq('tenant_id', tenantId)
 
       await this._updateWebhookStats(webhook.id, tenantId, false)
     }

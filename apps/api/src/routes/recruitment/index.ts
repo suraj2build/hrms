@@ -307,6 +307,15 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
       status:        z.string().optional(),
       department_id: z.string().uuid().optional(),
       search:        z.string().optional(),
+      // Fresh audit finding: ManagerRequisition.tsx's "My Requisitions" table
+      // called this endpoint with no filter at all — a manager who raises a
+      // requisition saw every OTHER manager's/department's requisitions too
+      // (including salary_min/salary_max via the unfiltered `*` select),
+      // under a heading that promised only their own. There was no server-side
+      // way to scope to the caller even if the frontend had tried. `mine=true`
+      // scopes to `raised_by = req.userId` so that page can actually show
+      // what it claims to.
+      mine:          z.coerce.boolean().optional(),
       limit:         z.coerce.number().int().min(1).max(200).default(50),
       offset:        z.coerce.number().int().min(0).default(0),
     })
@@ -327,6 +336,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     if (parsed.data.status)        q = q.eq('status', parsed.data.status)
     if (parsed.data.department_id) q = q.eq('department_id', parsed.data.department_id)
     if (parsed.data.search)        q = q.ilike('title', `%${parsed.data.search}%`)
+    if (parsed.data.mine)           q = q.eq('raised_by', req.userId)
 
     q = q.range(parsed.data.offset, parsed.data.offset + parsed.data.limit - 1)
 
@@ -357,8 +367,15 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
       }
     }
 
+    // SYSTEM_AUDIT_2026-10-14 escalation, decided by the user: this route is
+    // deliberately open to any authenticated role (so any employee can see
+    // what roles are open), but budgeted salary bands are not meant to be
+    // tenant-wide public — strip them for callers who aren't a manager or
+    // HR admin. MANAGER_ROLES already includes HR_ADMIN_ROLES.
+    const isPrivileged = (MANAGER_ROLES as readonly string[]).includes(req.userRole)
     const enriched = (data ?? []).map((r: any) => ({
       ...r,
+      ...(isPrivileged ? {} : { salary_min: null, salary_max: null }),
       applicant_count: appCounts[r.id] ?? 0,
     }))
 
@@ -389,7 +406,16 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
     if (countErr) return serverError(req, reply, countErr, ErrorCode.QUERY_FAILED, 'Failed to fetch applicant count')
 
-    return reply.send({ data: { ...(data as any), applicant_count: appCount ?? 0 } })
+    // Same salary-band stripping as the list endpoint above, for the
+    // same reason (user decision, SYSTEM_AUDIT_2026-10-14).
+    const isPrivileged = (MANAGER_ROLES as readonly string[]).includes(req.userRole)
+    return reply.send({
+      data: {
+        ...(data as any),
+        ...(isPrivileged ? {} : { salary_min: null, salary_max: null }),
+        applicant_count: appCount ?? 0,
+      },
+    })
   })
 
   fastify.post('/requisitions', managerOrHrAuth, async (req: any, reply) => {
@@ -528,6 +554,35 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     })
 
     return reply.send({ message: 'Requisition updated' })
+  })
+
+  // Deliberately a separate endpoint from PUT /requisitions/:id above — that
+  // one only allows edits while status is draft/on_hold, but public-listing
+  // visibility is exactly the kind of thing HR wants to flip right after a
+  // requisition moves to 'open' (the only status careers.ts will ever list).
+  fastify.patch('/requisitions/:id/public', hrAdminAuth, async (req: any, reply) => {
+    const { id } = req.params as { id: string }
+    const schema = z.object({ is_public: z.boolean() })
+    const parsed = schema.safeParse(req.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
+
+    const { data, error } = await fastify.supabase
+      .from('job_requisitions')
+      .update({ is_public: parsed.data.is_public })
+      .eq('id', id)
+      .eq('tenant_id', req.tenantId)
+      .select('id')
+      .maybeSingle()
+
+    if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to update public listing status')
+    if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Requisition not found' })
+
+    await logAction(fastify.supabase, {
+      tenantId: req.tenantId, tableName: 'job_requisitions', recordId: id,
+      action: 'UPDATE', performedBy: req.userId, newData: { is_public: parsed.data.is_public },
+    })
+
+    return reply.send({ message: parsed.data.is_public ? 'Listed on careers page' : 'Removed from careers page' })
   })
 
   // Workflow transitions

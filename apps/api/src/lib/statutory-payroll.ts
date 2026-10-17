@@ -128,8 +128,20 @@ export function applyStatutoryToSlip(
   // instead of the correct earned Basic 9,000 → PF ₹1,080, and earned gross
   // 15,000 → correctly ESI-eligible). Apply the same proportional reduction
   // LOP applies to gross_pay to the PF-applicable earnings subtotal.
+  // Clamped at 0 — an impossible attendance state (lop_days exceeding
+  // total_working_days, audit finding G02) can make lop_amount exceed
+  // gross_pay, which without this clamp drives payableFraction negative and
+  // then grossWages/pfWages negative. A negative wage base previously fed
+  // straight into computeEPF/computeESI/computePTax/computeLWF — e.g. a
+  // negative grossWages trivially satisfies an eligibility check like
+  // "<= 21000", producing a genuinely negative ESI employer contribution
+  // (reproduced via a real payroll run: gross=30000, 30/30 days marked
+  // absent including weekends → lop_days=30 > total_working_days ≈22 →
+  // employer_contributions = -354). finalizeDeductionsAndNet's floor on the
+  // FINAL net_pay/total_deductions does not protect this earlier,
+  // intermediate wage base.
   const payableFraction = slip.gross_pay > 0
-    ? (slip.gross_pay - slip.lop_amount) / slip.gross_pay
+    ? Math.max(0, slip.gross_pay - slip.lop_amount) / slip.gross_pay
     : 1
   const pfWages = round2(
     earnings.filter(c => c.is_pf_applicable || c.affects_pf)
@@ -137,7 +149,7 @@ export function applyStatutoryToSlip(
   )
   // ESI / PT / LWF are computed on earned gross (gross_pay less LOP), not the
   // full un-prorated monthly gross.
-  const grossWages = round2(slip.gross_pay - slip.lop_amount)
+  const grossWages = round2(Math.max(0, slip.gross_pay - slip.lop_amount))
 
   // ── EPF ───────────────────────────────────────────────────────────────────
   // Fold the per-employee PF wage basis into the config so the SLIP matches the

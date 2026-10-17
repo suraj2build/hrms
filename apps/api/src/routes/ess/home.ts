@@ -22,7 +22,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import { ensureTodaysCelebrations } from '../../lib/community-celebrations.js'
-import { getDirectReportIds } from '../../lib/manager-scope.js'
+import { getImmediateReportIds } from '../../lib/manager-scope.js'
 import { MANAGER_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
@@ -257,10 +257,19 @@ export default async function essHomeRoutes(fastify: FastifyInstance) {
     const openActions = (pendingLeaveCnt.count ?? 0) + (pendingRegCnt.count ?? 0)
 
     // ── Team approvals count (managers only, fast — second fan-out) ───────────
+    // SYSTEM_AUDIT_2026-10-14: every approve/reject action behind this badge
+    // (validateApprover for leave/regularisation, same pattern already fixed
+    // for /approvals/pending-count and the overtime/comp-off queues — see
+    // manager-scope.ts's getImmediateReportIds doc comment) authorizes only the
+    // employee's IMMEDIATE manager, never the full subordinate tree. Counting
+    // via getDirectReportIds (the deep tree) inflated this badge for a
+    // manager-of-managers with items several levels down that FlowDesk's own
+    // /approvals/pending list (immediate-only, via getPendingApprovalsForManager)
+    // doesn't even show and that would always 403 if acted on.
     let pendingApprovalsCount = 0
     if (isManager) {
       if (role === 'manager' && employeeId) {
-        const reportIds = await getDirectReportIds(fastify.supabase, tenantId, employeeId)
+        const reportIds = await getImmediateReportIds(fastify.supabase, tenantId, employeeId)
         if (reportIds.length > 0) {
           const [la, ra] = await Promise.all([
             fastify.supabase.from('leave_requests').select('id', { count: 'exact', head: true })

@@ -1,0 +1,207 @@
+/**
+ * accrual-engine — runMonthlyAccrual NUMERIC-as-string coercion regressions (G13 sweep)
+ *
+ * leave_accrual_rules.days_per_period is DECIMAL(5,2); PostgREST/Supabase serialize
+ * NUMERIC/DECIMAL columns as JSON strings, not numbers. Before the fix, any employee
+ * who joined on/before the accrual period's start (i.e. almost every employee, every
+ * month) took proratedDays()'s "full month" branch, which returned `daysPerPeriod`
+ * UNCHANGED — still a string. `currentBalance + days` then string-concatenated, and
+ * calling `.toFixed()` on the resulting string threw a TypeError, crashing the whole
+ * rule's loop before any employee's credit was written. Confirmed by direct
+ * reproduction against this table's real seed values (`node -e`):
+ *   parseFloat((0 + "1.00").toFixed(2))  ->  TypeError: (...).toFixed is not a function
+ */
+
+import { describe, it, expect } from 'vitest'
+import { runMonthlyAccrual } from '../accrual-engine.js'
+
+const TENANT = 'tenant-001'
+
+/** Builds a mock Supabase client covering every table runMonthlyAccrual touches. */
+function mockSupabase(opts: {
+  rules: Array<{
+    id: string
+    leave_type_id: string
+    accrual_frequency: string
+    days_per_period: string | number
+    prorate_on_joining: boolean
+    effective_from: string
+    effective_to: string | null
+  }>
+  employees: Array<{ id: string; joining_date: string }>
+  existingBalances?: Array<{ employee_id: string; balance: string | number }>
+  existingRuns?: Array<{ leave_type_id: string }>
+}) {
+  const { rules, employees, existingBalances = [], existingRuns = [] } = opts
+  const upserts: Record<string, any[]> = {}
+  // fetchAllRows() calls the mock employees table accessor fresh once per page —
+  // this flag must live outside the table-dispatch closure to actually terminate
+  // pagination.
+  let employeesPageServed = false
+
+  return {
+    from(table: string) {
+      const record = (rows: any[]) => { (upserts[table] ??= []).push(...rows) }
+
+      if (table === 'leave_accrual_rules') {
+        const chain: any = {
+          select: () => chain, eq: () => chain, lte: () => chain, or: () => Promise.resolve({ data: rules, error: null }),
+        }
+        return chain
+      }
+      // lint-tenant-ok: mock query builder for a test double, not a real Supabase
+      // query — there is no tenant_id to filter on here.
+      if (table === 'employees') {
+        // fetchAllRows: paginates via .range(from, to) until an empty page.
+        const chain: any = {
+          select: () => chain, eq: () => chain, order: () => chain,
+          range: () => {
+            if (employeesPageServed) return Promise.resolve({ data: [], error: null })
+            employeesPageServed = true
+            return Promise.resolve({ data: employees, error: null })
+          },
+        }
+        return chain
+      }
+      if (table === 'leave_accrual_runs') {
+        // DEFECT-02 fix: the idempotency check is now an atomic claim —
+        // INSERT (status='running'), succeeding unless a prior run already
+        // exists for this (tenant, run_period, leave_type) slot. None of
+        // these tests seed `existingRuns`, so the insert always succeeds —
+        // a real pre-existing row would make this mock's insert fail and
+        // fall through to the reclaim UPDATE below, matching the real
+        // 23505-then-reclaim flow.
+        const hasExisting = (ltId: string) => existingRuns.some((r) => r.leave_type_id === ltId)
+        const chain: any = {
+          select: () => chain, eq: () => chain, update: () => chain, in: () => chain,
+          insert: (row: any) => {
+            if (hasExisting(row.leave_type_id)) {
+              return Promise.resolve({ data: null, error: { code: '23505', message: 'duplicate' } })
+            }
+            record([row])
+            return { select: () => Promise.resolve({ data: [{ id: `claim-${row.leave_type_id}` }], error: null }) }
+          },
+        }
+        return chain
+      }
+      if (table === 'employee_leave_balance') {
+        const chain: any = {
+          select: () => chain, eq: () => chain,
+          then: (resolve: any) => resolve({ data: existingBalances, error: null }),
+          upsert: (rows: any[]) => { record(rows); return Promise.resolve({ data: null, error: null }) },
+        }
+        return chain
+      }
+      if (table === 'leave_accrual_ledger') {
+        const chain: any = {
+          select: () => chain, eq: () => chain,
+          in: () => Promise.resolve({ data: [], error: null }),
+          insert: (rows: any[]) => { record(rows); return Promise.resolve({ data: null, error: null }) },
+        }
+        return chain
+      }
+      // leave_balance_ledger (insert)
+      const chain: any = {
+        insert: (rows: any[]) => { record(rows); return Promise.resolve({ data: null, error: null }) },
+      }
+      return chain
+    },
+    // Simulates credit_monthly_accrual_batch (migration 459) — the atomic
+    // SQL function that now does the per-employee crediting in one
+    // statement per chunk, replacing the old client-side read-balances /
+    // compute-in-memory / write-balance-and-two-ledgers sequence these
+    // tests originally exercised directly against employee_leave_balance.
+    rpc(fnName: string, params: any) {
+      if (fnName !== 'credit_monthly_accrual_batch') {
+        return Promise.resolve({ data: null, error: { message: `mockSupabase: unexpected rpc "${fnName}"` } })
+      }
+      const chunk = (params.p_employee_days ?? []) as Array<{ employee_id: string; days: number }>
+      let total = 0
+      for (const { employee_id, days } of chunk) {
+        const current = Number(existingBalances.find((b) => b.employee_id === employee_id)?.balance ?? 0)
+        const newBalance = parseFloat((current + days).toFixed(2))
+        ;(upserts['employee_leave_balance'] ??= []).push({
+          tenant_id: TENANT, employee_id, leave_type_id: params.p_leave_type_id,
+          year: params.p_year, balance: newBalance, updated_at: new Date().toISOString(),
+        })
+        total = parseFloat((total + days).toFixed(2))
+      }
+      return Promise.resolve({ data: [{ employees_credited: chunk.length, total_days: total }], error: null })
+    },
+    __upserts: upserts,
+  } as any
+}
+
+describe('runMonthlyAccrual — DB-string days_per_period (G13 sweep)', () => {
+  it('does not throw for a full-month employee when days_per_period is a string (the confirmed crash)', async () => {
+    const supabase = mockSupabase({
+      rules: [{
+        id: 'rule-1', leave_type_id: 'lt-earned', accrual_frequency: 'monthly',
+        days_per_period: '1.50', prorate_on_joining: true,
+        effective_from: '2026-01-01', effective_to: null,
+      }],
+      employees: [{ id: 'emp-1', joining_date: '2025-01-01' }],  // joined well before the period -> "full month" branch
+    })
+
+    const result = await runMonthlyAccrual(supabase, TENANT, 2026, 10)
+
+    expect(result.errors).toEqual([])
+    expect(result.employees_credited).toBe(1)
+    expect(result.total_days_credited).toBe(1.5)
+    expect(Number.isNaN(result.total_days_credited)).toBe(false)
+  })
+
+  it('credits correctly on top of an existing string balance', async () => {
+    const supabase = mockSupabase({
+      rules: [{
+        id: 'rule-1', leave_type_id: 'lt-earned', accrual_frequency: 'monthly',
+        days_per_period: '1.00', prorate_on_joining: true,
+        effective_from: '2026-01-01', effective_to: null,
+      }],
+      employees: [{ id: 'emp-1', joining_date: '2025-01-01' }],
+      existingBalances: [{ employee_id: 'emp-1', balance: '19.50' }],
+    })
+
+    const result = await runMonthlyAccrual(supabase, TENANT, 2026, 10)
+
+    expect(result.errors).toEqual([])
+    const balanceUpsert = supabase.__upserts['employee_leave_balance']?.[0]
+    expect(balanceUpsert?.balance).toBe(20.5)   // 19.5 + 1.0, not "19.501.00" / NaN
+  })
+
+  it('non-prorated rule (prorate_on_joining=false) with string days_per_period does not crash', async () => {
+    const supabase = mockSupabase({
+      rules: [{
+        id: 'rule-1', leave_type_id: 'lt-fixed', accrual_frequency: 'monthly',
+        days_per_period: '0.75', prorate_on_joining: false,
+        effective_from: '2026-01-01', effective_to: null,
+      }],
+      employees: [{ id: 'emp-1', joining_date: '2020-01-01' }],
+    })
+
+    const result = await runMonthlyAccrual(supabase, TENANT, 2026, 10)
+
+    expect(result.errors).toEqual([])
+    expect(result.total_days_credited).toBe(0.75)
+  })
+
+  it('multiple employees with a string days_per_period sum total_days_credited correctly', async () => {
+    const supabase = mockSupabase({
+      rules: [{
+        id: 'rule-1', leave_type_id: 'lt-earned', accrual_frequency: 'monthly',
+        days_per_period: '1.50', prorate_on_joining: true,
+        effective_from: '2026-01-01', effective_to: null,
+      }],
+      employees: [
+        { id: 'emp-1', joining_date: '2025-01-01' },
+        { id: 'emp-2', joining_date: '2025-01-01' },
+        { id: 'emp-3', joining_date: '2025-01-01' },
+      ],
+    })
+
+    const result = await runMonthlyAccrual(supabase, TENANT, 2026, 10)
+
+    expect(result.employees_credited).toBe(3)
+    expect(result.total_days_credited).toBe(4.5)   // 3 x 1.5, not "1.51.51.5" / NaN
+  })
+})

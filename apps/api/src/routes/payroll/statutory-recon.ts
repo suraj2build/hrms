@@ -11,7 +11,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { requireRole, HR_ADMIN_ROLES } from '../../lib/rbac.js'
-import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { fetchAllRows, fetchAllRowsByKeyset } from '../../lib/supabase-paginate.js'
 import { logAction } from '../../lib/audit-service.js'
 import { serverError, notFound, validationError, conflictError, ErrorCode } from '../../lib/api-errors.js'
 
@@ -71,34 +71,67 @@ export default async function payrollStatutoryReconRoutes(fastify: FastifyInstan
       }
     }
 
-    // PAYABLE (from actual filing tables for this month)
+    // PAYABLE (from actual filing tables for this month) — fetchAllRowsByKeyset()
+    // on all four: a plain query would silently truncate at ≥1,001
+    // contribution rows for the month, corrupting this variance check's
+    // "payable" side for a large tenant with no error signal. Keyset, not
+    // offset: this feeds the actual persisted "payable" total compared
+    // against the computed side for a real variance flag, and a concurrent
+    // finalize inserting a contribution row anywhere in the random-UUID key
+    // space mid-page would silently skip or duplicate a row under
+    // offset/.range() pagination even with a deterministic .order('id') —
+    // see supabase-paginate.test.ts.
+    const keysetPage = (table: string, monthCol: string, select: string) =>
+      (afterId: string | null, limit: number) => {
+        let q = fastify.supabase.from(table)
+          .select(`id, ${select}`)
+          .eq('tenant_id', tenantId).eq(monthCol, reconMonth)
+          .order('id', { ascending: true })
+          .limit(limit)
+        if (afterId) q = q.gt('id', afterId)
+        return q
+      }
     const [epfRows, esiRows, ptaxRows, tdsRows] = await Promise.all([
-      fastify.supabase.from('epf_contributions')
-        .select('employee_contribution, total_employer_contribution, voluntary_pf')
-        .eq('tenant_id', tenantId).eq('contribution_month', reconMonth),
-      fastify.supabase.from('esi_contributions')
-        .select('total_contribution')
-        .eq('tenant_id', tenantId).eq('contribution_month', reconMonth),
-      fastify.supabase.from('ptax_contributions')
-        .select('ptax_amount')
-        .eq('tenant_id', tenantId).eq('contribution_month', reconMonth),
-      fastify.supabase.from('tds_monthly_projections')
-        .select('tds_this_month')
-        .eq('tenant_id', tenantId).eq('projection_month', reconMonth),
+      fetchAllRowsByKeyset<any>(keysetPage('epf_contributions', 'contribution_month', 'employee_contribution, total_employer_contribution, voluntary_pf')),
+      fetchAllRowsByKeyset<any>(keysetPage('esi_contributions', 'contribution_month', 'total_contribution')),
+      fetchAllRowsByKeyset<any>(keysetPage('ptax_contributions', 'contribution_month', 'ptax_amount')),
+      fetchAllRowsByKeyset<any>(keysetPage('tds_monthly_projections', 'projection_month', 'tds_this_month')),
     ])
 
     const sum = (rows: any[] | null | undefined, fn: (r: any) => number) =>
       Math.round((rows ?? []).reduce((s, r) => s + fn(r), 0) * 100) / 100
 
-    recon.pf.payable  = sum(epfRows.data, r => Number(r.employee_contribution ?? 0) + Number(r.total_employer_contribution ?? 0) + Number(r.voluntary_pf ?? 0))
-    recon.esi.payable = sum(esiRows.data, r => Number(r.total_contribution ?? 0))
-    recon.pt.payable  = sum(ptaxRows.data, r => Number(r.ptax_amount ?? 0))
-    recon.tds.payable = sum(tdsRows.data, r => Number(r.tds_this_month ?? 0))
+    recon.pf.payable  = sum(epfRows, r => Number(r.employee_contribution ?? 0) + Number(r.total_employer_contribution ?? 0) + Number(r.voluntary_pf ?? 0))
+    recon.esi.payable = sum(esiRows, r => Number(r.total_contribution ?? 0))
+    recon.pt.payable  = sum(ptaxRows, r => Number(r.ptax_amount ?? 0))
 
-    recon.pf.filed  = (epfRows.data?.length  ?? 0) > 0
-    recon.esi.filed = (esiRows.data?.length  ?? 0) > 0
-    recon.pt.filed  = (ptaxRows.data?.length ?? 0) > 0
-    recon.tds.filed = (tdsRows.data?.length  ?? 0) > 0
+    // A standalone leave-encashment payout finalized into this run has its
+    // own one-time TDS withholding folded into the slip's TDS-coded
+    // deduction line (so recon.tds.computed below already includes it, via
+    // payroll-engine.ts's applyEncashmentPayout, migration 447), but
+    // tds_monthly_projections only ever models RECURRING monthly salary —
+    // it has no forward projection for a one-time payout. Without adding
+    // it here too, every month containing an encashment payout would show
+    // a spurious variance against this screen's ₹1 reconciled threshold,
+    // blocking /close for a reason that isn't a real discrepancy. The
+    // amount is independently confirmed already — it's exactly what HR
+    // reviewed and approved on the standalone request itself (migration
+    // 446/447) — so it needs acknowledging on the payable side, not a
+    // projection to true up against.
+    const { data: encashmentRows } = await fastify.supabase
+      .from('leave_encashment_requests')
+      .select('tds_amount')
+      .eq('tenant_id', tenantId)
+      .eq('payroll_run_id', run.id)
+      .eq('status', 'paid')
+    const encashmentTds = sum(encashmentRows, r => Number(r.tds_amount ?? 0))
+
+    recon.tds.payable = sum(tdsRows, r => Number(r.tds_this_month ?? 0)) + encashmentTds
+
+    recon.pf.filed  = epfRows.length  > 0
+    recon.esi.filed = esiRows.length  > 0
+    recon.pt.filed  = ptaxRows.length > 0
+    recon.tds.filed = tdsRows.length  > 0
 
     // NOTE: a head with NO filing rows must stay filed:false / payable:0 here —
     // do NOT fall back to treating the slip-aggregated amount as "payable", even
@@ -264,11 +297,32 @@ export default async function payrollStatutoryReconRoutes(fastify: FastifyInstan
       filed.push(key)
     }
 
+    let actuallyFiled = filed
     if (rowsToInsert.length > 0) {
-      const { error } = await fastify.supabase
-        .from('statutory_filing_closures')
-        .insert(rowsToInsert)
-      if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to record statutory filing')
+      // close_statutory_filing_atomic (migration 452) locks the SAME
+      // payroll_runs row (same order: run row first) rollback_payroll_run_
+      // atomic and mark_ledger_posted_atomic lock, and re-does BOTH the
+      // "is this run still finalized" check and the "already filed"
+      // idempotency check fresh, under that lock — not just the unlocked
+      // reads above. Without this, a concurrent rollback could land
+      // between this route's own checks and the INSERT that used to follow
+      // them, filing a statute against a run that's already been rolled
+      // back (or the reverse: filing here could land just after rollback's
+      // own check passed, defeating it).
+      const { data: rpcResult, error } = await fastify.supabase.rpc('close_statutory_filing_atomic', {
+        p_tenant_id: tenantId, p_run_id: result.run.id, p_rows: rowsToInsert,
+      })
+      if (error) {
+        const msg = error.message ?? ''
+        if (msg.includes('NOT_FOUND:')) return notFound(reply, 'NO_RUN', msg.replace(/^.*NOT_FOUND:\s*/, ''))
+        if (msg.includes('RUN_NOT_FINALIZED:')) return conflictError(reply, 'RUN_NOT_FINALIZED', msg.replace(/^.*RUN_NOT_FINALIZED:\s*/, ''))
+        return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to record statutory filing')
+      }
+
+      actuallyFiled = ((rpcResult as any)?.filed ?? []) as string[]
+      for (const racedStatute of ((rpcResult as any)?.skipped_already_filed ?? []) as string[]) {
+        skipped.push({ statute: racedStatute, reason: 'already_filed' })
+      }
 
       await logAction(fastify.supabase, {
         tenantId,
@@ -276,11 +330,11 @@ export default async function payrollStatutoryReconRoutes(fastify: FastifyInstan
         recordId:    result.run.id,
         action:      'INSERT',
         performedBy: req.userId ?? null,
-        newData:     { month, filed, challan_number: challan_number ?? null },
+        newData:     { month, filed: actuallyFiled, challan_number: challan_number ?? null },
       }).catch(() => {})
     }
 
-    return reply.send({ month, filed, skipped })
+    return reply.send({ month, filed: actuallyFiled, skipped })
   })
 
   // ── POST /payroll/statutory-reconciliation/confirm ─────────────────────────────

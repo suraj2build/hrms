@@ -32,6 +32,7 @@ import {
   getLocalTimeMinutes,
   getLocalDate,
   localDayBoundsUtc,
+  withHolidayGroupIds,
   type EmployeeOrgContext,
 } from './org-context.js'
 import { resolveShiftBatch, toShiftMeta, type ResolvedShift } from './shift-resolution-engine.js'
@@ -85,10 +86,11 @@ interface ShiftMeta {
 }
 
 interface HolidayRow {
-  name:        string
-  is_optional: boolean
-  location_id: string | null
-  site_id:     string | null
+  name:              string
+  is_optional:       boolean
+  location_id:       string | null
+  site_id:           string | null
+  holiday_group_ids: string[]
 }
 
 interface DailyRow {
@@ -513,7 +515,7 @@ export async function processAttendanceForDate(
   // so this legacy engine converges with payroll / attendance-engine.
   const { data: holidayRows, error: holidayError } = await supabase
     .from('holiday_calendar')
-    .select('name, is_optional, location_id, site_id, holiday_group_id')
+    .select('name, is_optional, location_id, site_id, holiday_group_assignments(group_id)')
     .eq('tenant_id', tenantId)
     .eq('date', date)
     .eq('is_optional', false)
@@ -523,7 +525,10 @@ export async function processAttendanceForDate(
     log?.warn({ err: holidayError }, 'holiday_calendar query failed — proceeding without holiday check')
   }
 
-  const holidays: HolidayRow[]     = (!holidayError && holidayRows) ? holidayRows : []
+  // SYSTEM_AUDIT_2026-10-14 checkpoint 28: flatten the holiday_group_assignments
+  // embed into holiday_group_ids — a holiday can be assigned to MULTIPLE groups,
+  // not just the legacy single holiday_group_id column this used to read.
+  const holidays: HolidayRow[]     = (!holidayError && holidayRows) ? holidayRows.map(withHolidayGroupIds) : []
   // Global holidays: site_id IS NULL AND location_id IS NULL → apply to all.
   // Site-specific: site_id IS NOT NULL → apply to employees at that site.
   // Location-specific (legacy): location_id IS NOT NULL → apply to employees at that work_location.
@@ -728,6 +733,11 @@ export async function processAttendanceForDate(
     } satisfies EmployeeOrgContext
     const dayOfWeek = getLocalDayOfWeek(date, empCtx.site_timezone)
     const daily     = computeDaily(sessions, empId, tenantId, date, shiftMeta, empCtx.site_timezone)
+    // Comp-off/muster half-vs-full basis, captured BEFORE the holiday/WO
+    // override below replaces `status` (DEFECT-04, PR #30 UAT 2026-10-12) —
+    // same pre-override snapshot pattern as attendance-engine.ts's
+    // `workedFraction`.
+    const workedFraction = daily.status === 'half_day' ? 0.5 : 1.0
 
     // ── Rule priority: Holiday (1) > Weekly Off (2) > Attendance (3) ────────
     // attendance_logs / raw_logs are never modified here — only the daily summary.
@@ -768,6 +778,7 @@ export async function processAttendanceForDate(
       daily.status,
       daily.worked_on_holiday,
       daily.worked_on_weekly_off,
+      workedFraction,
     )
 
     incompleteSessions += sessions.filter((s) => !s.is_complete).length

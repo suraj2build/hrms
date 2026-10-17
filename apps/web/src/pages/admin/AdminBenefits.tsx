@@ -69,13 +69,21 @@ interface Enrollment {
  benefit_plans?: { name: string; plan_type: PlanType } | null
 }
 
-type PlanForm = Omit<Plan,'id'|'enrolled_count'|'total_count'|'window_status'>
+// is_esic / is_nps are NOT real columns on benefit_plans (see migration
+// 243_benefits_enrolment.sql) — the GET /benefits/admin/plans and
+// /benefits/plans routes derive them read-only (is_esic: plan_type==='health'
+// && name contains "esic"; is_nps: plan_type==='nps'), and POST/PUT
+// /benefits/admin/plans' zod schema has no such fields, so they're silently
+// dropped if sent. They're excluded from the editable form below — a
+// checkbox for them used to exist and had no effect, misleading HR admins
+// into thinking it controlled something.
+type PlanForm = Omit<Plan,'id'|'enrolled_count'|'total_count'|'window_status'|'is_esic'|'is_nps'>
 
 const BLANK: PlanForm = {
  name:'', plan_type:'health', provider:'', description:'',
  coverage_amount: 0, employee_cost: 0, employer_cost: 0,
  allows_dependents: false, enrollment_opens_at: null, enrollment_closes_at: null, is_active: true,
- is_esic: false, is_nps: false, eligible_bands: [],
+ eligible_bands: [],
 }
 
 const inr = (n: number) => formatCurrency(n || 0)
@@ -131,8 +139,6 @@ export function AdminBenefits() {
  ...p,
  provider: p.provider ??'',
  description: p.description ??'',
- is_esic: p.is_esic ?? false,
- is_nps: p.is_nps ?? false,
  eligible_bands: p.eligible_bands ?? [],
  })
  setShowForm(true)
@@ -314,6 +320,9 @@ export function AdminBenefits() {
  <select value={form.plan_type} onChange={e => setForm(f => ({ ...f, plan_type: e.target.value as PlanType }))} className={inputCls}>
  {PLAN_TYPES.map(t => <option key={t} value={t}>{TYPE_LABEL[t]}</option>)}
  </select>
+ {/* ESIC/NPS badges on the list below are derived automatically, not a
+ separate setting: NPS from Type = NPS, ESIC from Type = Group Health
+ plus "ESIC" in the plan name. */}
  </Field>
  <Field label="Provider">
  <input value={form.provider ??''} onChange={e => setForm(f => ({ ...f, provider: e.target.value }))} className={inputCls} placeholder="Insurer / vendor" />
@@ -334,18 +343,6 @@ export function AdminBenefits() {
  <label className="flex items-center gap-2 text-xs h-[34px]">
  <input type="checkbox" checked={form.allows_dependents} onChange={e => setForm(f => ({ ...f, allows_dependents: e.target.checked }))} />
  Cover family members
- </label>
- </Field>
- <Field label="ESIC Plan">
- <label className="flex items-center gap-2 text-xs h-[34px]">
- <input type="checkbox" checked={!!form.is_esic} onChange={e => setForm(f => ({ ...f, is_esic: e.target.checked }))} />
- Link to ESIC (eligible: gross ≤ ₹21,000)
- </label>
- </Field>
- <Field label="NPS Plan">
- <label className="flex items-center gap-2 text-xs h-[34px]">
- <input type="checkbox" checked={!!form.is_nps} onChange={e => setForm(f => ({ ...f, is_nps: e.target.checked }))} />
- National Pension Scheme
  </label>
  </Field>
  <Field label="Eligible Bands" className="col-span-2">

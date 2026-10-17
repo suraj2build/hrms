@@ -41,6 +41,7 @@ export async function runWebhookRetryTick(supabase: SupabaseClient): Promise<voi
   try {
     due = await fetchAllRows<DueDelivery>((from, to) =>
       supabase
+        // lint-tenant-ok: deliberate cross-tenant background scan (polls every tenant's due retries on a schedule) — each row's own tenant_id is passed into service.retryDelivery(d.id, d.tenant_id) below, scoping the actual retry correctly
         .from('webhook_deliveries')
         .select('id, tenant_id')
         .eq('status', 'retrying')

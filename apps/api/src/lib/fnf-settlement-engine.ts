@@ -16,7 +16,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { round2 } from './payroll-engine.js'
+import { round2, computeCleanGrossPay } from './payroll-engine.js'
 import { getLeaveYear } from './leave-entitlement-service.js'
 
 export interface FnfBreakdown {
@@ -26,10 +26,22 @@ export interface FnfBreakdown {
   leave_encashment_amount: number
   leave_encashment_days:   number
   leave_encashment_rate:   number
+  /** Exact (leave_type_id, year) rows this computation read `employee_leave_balance`
+   *  for — stored verbatim on `separation_ff_summary.leave_encashment_basis` so
+   *  `mark_fnf_paid_atomic` (migration 448) can re-sum precisely those rows at
+   *  mark-paid time and detect drift from a concurrent standalone-encashment
+   *  approval, without duplicating the encashable-type/leave-year resolution
+   *  logic in SQL. Empty array (not null) means "no encashable leave types for
+   *  this employee" — a real, verified zero, not "not computed yet". */
+  leave_encashment_basis:  Array<{ leave_type_id: string; year: number }>
   notice_period_deduction: number
   notice_shortfall_days:   number
   salary_basis_basic:      number
   salary_basis_gross:      number
+  asset_recovery_amount:    number
+  asset_recovery_count:     number
+  loan_recovery_amount:     number
+  advance_recovery_amount:  number
   // preserved/passed-through (manual)
   last_payroll_amount:     number
   other_additions:         number
@@ -119,11 +131,15 @@ export async function computeFnfSettlement(
   }
 
   // 4. Salary basis — last finalized payroll slip (gross + BASIC component)
+  // G03: this previously had no status filter, so a draft slip (unreviewed,
+  // possibly mid-correction) could outrank an older finalized slip by month
+  // and get used as the gratuity/notice-pay basis instead.
   const { data: lastSlip, error: slipErr } = await supabase
     .from('payroll_slips')
     .select('gross_pay, component_breakdown')
     .eq('tenant_id', tenantId)
     .eq('employee_id', employeeId)
+    .eq('status', 'finalized')
     .order('month', { ascending: false })
     .limit(1)
     .maybeSingle()
@@ -131,8 +147,14 @@ export async function computeFnfSettlement(
   // — that would zero out gratuity and notice-shortfall entirely instead of
   // surfacing the failure, silently understating the settlement.
   if (slipErr) return { error: `Failed to fetch salary basis: ${slipErr.message}` }
-  const gross = Number((lastSlip as any)?.gross_pay ?? 0)
   const components = ((lastSlip as any)?.component_breakdown ?? []) as Array<{ code?: string; monthly_amount?: number }>
+  // Clean gross: excludes any one-time payout (e.g. a prior standalone leave
+  // encashment, payroll-engine.ts's applyEncashmentPayout) folded into this
+  // slip's gross_pay — using the raw figure here would let a past one-time
+  // payment inflate gratuity, notice-shortfall, and the leave-encashment
+  // rate this settlement computes, none of which are meant to reflect a
+  // one-off lump sum.
+  const gross = computeCleanGrossPay(Number((lastSlip as any)?.gross_pay ?? 0), components)
   const basic = round2(
     components
       .filter(c => (c.code ?? '').toUpperCase() === 'BASIC')
@@ -160,6 +182,7 @@ export async function computeFnfSettlement(
   if (rulesErr) return { error: `Failed to fetch encashable leave types: ${rulesErr.message}` }
   const encashableTypeIds = ((rules ?? []) as any[]).map(r => r.leave_type_id)
   let encashDays = 0
+  let leaveEncashmentBasis: Array<{ leave_type_id: string; year: number }> = []
   if (encashableTypeIds.length > 0) {
     // employee_leave_balance.year is keyed per the employee's assigned
     // policy year_type: for 'financial' (Apr–Mar) policies it stores the FY
@@ -191,6 +214,7 @@ export async function computeFnfSettlement(
     }
 
     const year = getLeaveYear(new Date(lastWorking), yearType)
+    leaveEncashmentBasis = encashableTypeIds.map((id: string) => ({ leave_type_id: id, year }))
     const { data: balances, error: balancesErr } = await supabase
       .from('employee_leave_balance')
       .select('balance, leave_type_id')
@@ -219,6 +243,64 @@ export async function computeFnfSettlement(
   if ((sep as any).notice_waived) shortfallDays = 0
   const noticeDeduction = round2(shortfallDays * (gross / 30))
 
+  // 8. Outstanding asset recovery — unreturned assets still assigned to this
+  // employee, at purchase cost. Mirrors the same check the clearance flow's
+  // IT-department block already runs, but surfaces the amount here too.
+  const { data: assets, error: assetsErr } = await supabase
+    .from('assets')
+    .select('purchase_cost')
+    .eq('tenant_id', tenantId)
+    .eq('assigned_to', employeeId)
+    .eq('status', 'assigned')
+  // A query error must not fall through as "no outstanding assets" — that
+  // would silently drop a real recovery amount from the settlement.
+  if (assetsErr) return { error: `Failed to fetch outstanding assets: ${assetsErr.message}` }
+  const assetRecoveryCount = ((assets ?? []) as any[]).length
+  const assetRecovery = round2(
+    ((assets ?? []) as any[]).reduce((s, a) => s + Number(a.purchase_cost ?? 0), 0),
+  )
+
+  // 9. Outstanding loan recovery — active/disbursed employee loans' remaining
+  // balance.
+  const { data: loans, error: loansErr } = await supabase
+    .from('employee_loans')
+    .select('outstanding_balance')
+    .eq('tenant_id', tenantId)
+    .eq('employee_id', employeeId)
+    .in('status', ['disbursed', 'active'])
+  // Same reasoning as above: a query error here must not silently read as
+  // "no outstanding loans" for a departing employee.
+  if (loansErr) return { error: `Failed to fetch outstanding loans: ${loansErr.message}` }
+  const loanRecovery = round2(
+    ((loans ?? []) as any[]).reduce((s, l) => s + Number(l.outstanding_balance ?? 0), 0),
+  )
+
+  // 10. Advance salary recovery — scheduled-but-not-yet-recovered instalments
+  // against advances still being recovered.
+  const { data: advances, error: advancesErr } = await supabase
+    .from('advance_salary_requests')
+    .select('id')
+    .eq('tenant_id', tenantId)
+    .eq('employee_id', employeeId)
+    .in('status', ['disbursed', 'recovering'])
+  if (advancesErr) return { error: `Failed to fetch advance salary requests: ${advancesErr.message}` }
+  const advanceIds = ((advances ?? []) as any[]).map(a => a.id)
+  let advanceRecovery = 0
+  if (advanceIds.length > 0) {
+    const { data: schedules, error: schedulesErr } = await supabase
+      .from('advance_recovery_schedules')
+      .select('scheduled_amount')
+      .eq('tenant_id', tenantId)
+      .in('advance_id', advanceIds)
+      .eq('status', 'pending')
+    // Same reasoning as above: a query error here must not silently read as
+    // "fully recovered" for a departing employee's pending advance.
+    if (schedulesErr) return { error: `Failed to fetch advance recovery schedules: ${schedulesErr.message}` }
+    advanceRecovery = round2(
+      ((schedules ?? []) as any[]).reduce((s, r) => s + Number(r.scheduled_amount ?? 0), 0),
+    )
+  }
+
   return {
     gratuity_amount:         gratuity,
     gratuity_eligible:       gratuityEligible,
@@ -226,10 +308,15 @@ export async function computeFnfSettlement(
     leave_encashment_amount: leaveEncashment,
     leave_encashment_days:   round2(encashDays),
     leave_encashment_rate:   encashRate,
+    leave_encashment_basis:  leaveEncashmentBasis,
     notice_period_deduction: noticeDeduction,
     notice_shortfall_days:   shortfallDays,
     salary_basis_basic:      basic,
     salary_basis_gross:      gross,
+    asset_recovery_amount:   assetRecovery,
+    asset_recovery_count:    assetRecoveryCount,
+    loan_recovery_amount:    loanRecovery,
+    advance_recovery_amount: advanceRecovery,
     last_payroll_amount:     0,
     other_additions:         0,
     other_deductions:        0,

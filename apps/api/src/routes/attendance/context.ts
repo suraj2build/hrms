@@ -65,16 +65,32 @@ export default async function attendanceContextRoutes(fastify: FastifyInstance) 
     const tz = await fetchTenantTz(fastify.supabase, req.tenantId)
     const today = getLocalDate(new Date().toISOString(), tz)
     try {
-      // Employees who have a check_in today but no check_out
-      const { data: logs, error } = await fastify.supabase
-        .from('attendance_logs')
-        .select('employee_id, check_in, employees(first_name, last_name)')
-        .eq('tenant_id', req.tenantId)
-        .gte('check_in', `${today}T00:00:00.000Z`)
-        .lt('check_in', `${today}T23:59:59.999Z`)
-        .is('check_out', null)
-        .limit(50)
+      // Employees who have a check_in today but no check_out.
+      // .limit(50) bounds the DISPLAY list (an intentional top-N widget —
+      // see CLAUDE.md's pagination rule). The true total is fetched
+      // separately via count:'exact', head:true so a tenant with >50
+      // qualifying employees never shows a truncated number labeled as the
+      // total — the bug CLAUDE.md's rule explicitly warns against: a
+      // bounded query is fine, a count DERIVED from the truncated rows is not.
+      const [{ data: logs, error }, { count: totalCount, error: countError }] = await Promise.all([
+        fastify.supabase
+          .from('attendance_logs')
+          .select('employee_id, check_in, employees(first_name, last_name)')
+          .eq('tenant_id', req.tenantId)
+          .gte('check_in', `${today}T00:00:00.000Z`)
+          .lt('check_in', `${today}T23:59:59.999Z`)
+          .is('check_out', null)
+          .limit(50),
+        fastify.supabase
+          .from('attendance_logs')
+          .select('employee_id', { count: 'exact', head: true })
+          .eq('tenant_id', req.tenantId)
+          .gte('check_in', `${today}T00:00:00.000Z`)
+          .lt('check_in', `${today}T23:59:59.999Z`)
+          .is('check_out', null),
+      ])
       if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch missing punches')
+      if (countError) return serverError(req, reply, countError, ErrorCode.QUERY_FAILED, 'Failed to count missing punches')
 
       const employees = ((logs ?? []) as any[]).map((l: any) => {
         const emp = Array.isArray(l.employees) ? l.employees[0] : l.employees
@@ -85,7 +101,7 @@ export default async function attendanceContextRoutes(fastify: FastifyInstance) 
         }
       })
 
-      return reply.send({ data: { count: employees.length, employees } })
+      return reply.send({ data: { count: totalCount ?? employees.length, employees, truncated: (totalCount ?? 0) > employees.length } })
     } catch {
       return reply.send({ data: { count: 0, employees: [] } })
     }

@@ -237,27 +237,27 @@ export default async function regularisationPolicyRoutes(fastify: FastifyInstanc
     let autoRejectedCount = 0
 
     if (autoReject) {
-      // Same fold: status='pending' in the WHERE means a request a manager
-      // just approved/rejected in the race window can't be silently
-      // overwritten back to 'rejected' by this scan.
-      const { data: rejected, error: rejectErr } = await fastify.supabase
-        .from('attendance_regularisation')
-        .update({
-          status:           'rejected',
-          rejection_reason: `Auto-rejected: SLA of ${slaHours} hours exceeded`,
-          approved_by:      null,
-          approved_at:      now.toISOString(),
-        })
-        .in('id', ids)
-        .eq('tenant_id', req.tenantId)
-        .eq('status', 'pending')
-        .select('id')
+      // SYSTEM_AUDIT_2026-10-14 checkpoint 14 — a raw UPDATE here bypasses
+      // gateReject entirely, the same bug class already fixed for period-
+      // locks.ts's auto-LOP path (migration 467): if any of these requests
+      // had an OPEN multi-level approval_instances row (advanced to level 2,
+      // awaiting HR), leaving it orphaned (final_approved still NULL) keeps
+      // surfacing a dead request in an approver's pending-approvals view.
+      // auto_lop_reject_regularisations_atomic (migration 468 added the
+      // p_rejection_reason parameter so this SLA-breach path can reuse it
+      // with its own message) does the reject and the instance close inside
+      // one transaction, same as every other atomic RPC in this codebase.
+      const { data: rpcData, error: rejectErr } = await fastify.supabase.rpc('auto_lop_reject_regularisations_atomic', {
+        p_tenant_id:        req.tenantId,
+        p_reg_ids:          ids,
+        p_rejection_reason: `Auto-rejected: SLA of ${slaHours} hours exceeded`,
+      })
 
       if (rejectErr) {
         return serverError(req, reply, rejectErr, ErrorCode.UPDATE_FAILED, 'Failed to auto-reject breached requests')
       }
 
-      autoRejectedCount = rejected?.length ?? 0
+      autoRejectedCount = ((rpcData as { rejected_ids?: string[] } | null)?.rejected_ids ?? []).length
     }
 
     return reply.send({

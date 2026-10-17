@@ -17,6 +17,7 @@ import {
   resolveEmployeeOrgContext,
   getHolidayDates,
   getLocalDate,
+  withHolidayGroupIds,
   type HolidayRowWithDate,
 } from '../../lib/org-context.js'
 import { fetchTenantTz }  from '../../lib/attendance-engine.js'
@@ -123,13 +124,17 @@ export default async function employeeOrgContextRoutes(fastify: FastifyInstance)
     const futureEnd = addMonths(today, 3)
     const { data: rawHolidays } = await fastify.supabase
       .from('holiday_calendar')
-      .select('date, name, is_optional, site_id, location_id')
+      .select('date, name, is_optional, site_id, location_id, holiday_group_assignments(group_id)')
       .eq('tenant_id', req.tenantId)
       .gte('date', today)
       .lte('date', futureEnd)
       .order('date')
 
-    const holidaySet  = getHolidayDates((rawHolidays ?? []) as HolidayRowWithDate[], orgCtx)
+    // SYSTEM_AUDIT_2026-10-14 checkpoint 28: flatten the multi-group embed —
+    // a holiday can be assigned to more than one group, not just the legacy
+    // single holiday_group_id column this query never even selected (which
+    // would otherwise throw at runtime now that holiday_group_ids is required).
+    const holidaySet  = getHolidayDates(((rawHolidays ?? []) as any[]).map(withHolidayGroupIds) as HolidayRowWithDate[], orgCtx)
     const upcomingHols = (rawHolidays ?? [])
       .filter((h: any) => holidaySet.has(h.date))
       .map((h: any) => ({ date: h.date, name: h.name, is_optional: h.is_optional }))

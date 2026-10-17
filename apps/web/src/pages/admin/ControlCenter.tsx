@@ -915,7 +915,9 @@ export function ControlCenter() {
               runFailed ? 'bg-destructive hover:bg-destructive/90 text-white' :
               isStale   ? 'bg-warning hover:bg-warning/90 text-warning-foreground' :
                           'bg-success hover:bg-success/90 text-white')}
-            onClick={() => nav('/admin/attendance/center')}
+            // /admin/attendance/center has no trigger button — see the
+            // Quick Actions comment below for the real destination.
+            onClick={() => nav('/manager/team/attendance')}
           >
             Process now →
           </Button>
@@ -1136,7 +1138,11 @@ export function ControlCenter() {
           </div>
           <div className="flex-1">
             {[
-              { icon: Play,          label: 'Process Attendance',    href: '/admin/attendance/center',         badge: null },
+              // /admin/attendance/center (AttendanceOperationsCenter) has no
+              // trigger button at all — the real one only exists on
+              // Attendance.tsx, reachable by admins at this manager-console
+              // path via RoleSwitcher (SYSTEM_AUDIT_2026-10-14).
+              { icon: Play,          label: 'Process Attendance',    href: '/manager/team/attendance',         badge: null },
               { icon: CheckSquare,   label: 'Review Regularisation', href: '/admin/attendance/regularisation', badge: regList.length > 0 ? `${regList.length}` : null },
               { icon: Wallet,        label: 'Payroll Center',        href: '/admin/payroll/center',            badge: null },
               { icon: CalendarDays,  label: 'Leave Management',      href: '/admin/leave/balances',            badge: null },

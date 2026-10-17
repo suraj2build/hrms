@@ -228,6 +228,7 @@ export default async function payrollSlipsRoutes(fastify: FastifyInstance) {
     // Only finalized slips are returned to employees — the RLS policy ps_emp_read
     // already enforces status='finalized', but we filter here too for defence-in-depth.
     const { data, error } = await fastify.supabase
+      // lint-query-ok: one employee's own finalized slips — one row per month of tenure, nowhere near the 1,000-row cap in practice
       .from('payroll_slips')
       .select(`
         id, employee_id, run_id, month, status, held_reason, warning,
@@ -316,6 +317,7 @@ export default async function payrollSlipsRoutes(fastify: FastifyInstance) {
     const cutoff   = `${cutoffDt.getFullYear()}-${String(cutoffDt.getMonth() + 1).padStart(2, '0')}`
 
     const { data, error } = await fastify.supabase
+      // lint-query-ok: one employee, bounded to `months` (1–24) via the cutoff filter below
       .from('payroll_slips')
       .select('month, net_pay, gross_pay, lop_days, lop_amount, payable_days, ctc_monthly, status')
       .eq('employee_id', profile.employee_id)

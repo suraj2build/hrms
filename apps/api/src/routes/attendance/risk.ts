@@ -116,6 +116,13 @@ export default async function attendanceRiskRoute(fastify: FastifyInstance) {
       .lte('period_end', effectivePeriodEnd)
       .order('risk_score', { ascending: false })
       .order('computed_at', { ascending: false })
+      // `id` tie-breaker: risk_score and computed_at can both tie across
+      // many rows (a single POST /compute batch stamps every row with the
+      // same computed_at — see the /summary route above), which makes
+      // OFFSET-based .range() paging across successive requests unstable
+      // without a unique final sort key — a caller paging through results
+      // page by page could see a row skipped or duplicated across pages.
+      .order('id', { ascending: true })
       .range(offset, offset + limit - 1)
 
     if (risk_level) q = q.eq('risk_level', risk_level)
@@ -173,15 +180,35 @@ export default async function attendanceRiskRoute(fastify: FastifyInstance) {
     const rawEnd = parsed.data.period_end
     const effectivePeriodEnd = (rawEnd && DATE_RE.test(rawEnd)) ? rawEnd : todayIso()
 
-    // Fetch all latest profiles per employee (latest computed_at for each employee_id)
-    const { data, error } = await fastify.supabase
-      .from('attendance_risk_profiles')
-      .select('employee_id, risk_score, risk_level, computed_at')
-      .eq('tenant_id', req.tenantId)
-      .lte('period_end', effectivePeriodEnd)
-      .order('computed_at', { ascending: false })
-
-    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch risk summary')
+    // Fetch all latest profiles per employee (latest computed_at for each
+    // employee_id). fetchAllRows(): this can return many historical rows per
+    // employee (every past period_end <= effectivePeriodEnd, not just the
+    // latest), so for a tenant with a large headcount and/or long compute
+    // history, a plain .select() here silently truncated at PostgREST's
+    // 1,000-row ceiling — the by_level/avg/elevated summary would then
+    // reflect an arbitrary partial slice instead of the whole tenant.
+    // Secondary tie-breaker on `id` (a unique UUID): POST /attendance/risk/
+    // compute stamps every row in a batch with the SAME computed_at (one
+    // `now` reused across the whole upsert), so computed_at alone is not a
+    // stable sort key — OFFSET-based .range() pagination over a non-unique
+    // ORDER BY can skip or duplicate rows across ties when the underlying
+    // table is scanned in a different physical order each page (the exact
+    // instability this module's own supabase-paginate.ts docs this risk for).
+    let data: Array<{ id: string; employee_id: string; risk_score: number; risk_level: string; computed_at: string }>
+    try {
+      data = await fetchAllRows((from, to) =>
+        fastify.supabase
+          .from('attendance_risk_profiles')
+          .select('id, employee_id, risk_score, risk_level, computed_at')
+          .eq('tenant_id', req.tenantId)
+          .lte('period_end', effectivePeriodEnd)
+          .order('computed_at', { ascending: false })
+          .order('id', { ascending: true })
+          .range(from, to),
+      ) as Array<{ id: string; employee_id: string; risk_score: number; risk_level: string; computed_at: string }>
+    } catch (error) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch risk summary')
+    }
 
     // Deduplicate — keep only the most recent profile per employee
     const seen = new Set<string>()
@@ -199,7 +226,11 @@ export default async function attendanceRiskRoute(fastify: FastifyInstance) {
     for (const row of latest) {
       const lvl = (row.risk_level ?? 'low') as RiskLevel
       if (lvl in byLevel) byLevel[lvl]++
-      scoreSum += row.risk_score ?? 0
+      // Number(): risk_score is a DECIMAL(5,2) column, which can come back
+      // as a string depending on the PostgREST client — the same coercion
+      // this codebase already applies elsewhere before arithmetic on a
+      // DECIMAL column (e.g. Number(row.days) in leave.ts).
+      scoreSum += Number(row.risk_score ?? 0)
     }
 
     const totalEmployees = latest.length
@@ -327,6 +358,23 @@ export default async function attendanceRiskRoute(fastify: FastifyInstance) {
         return serverError(req, reply, empErr, ErrorCode.QUERY_FAILED, 'Failed to fetch active employees')
       }
       targetIds = activeEmps.map((e) => e.id)
+    } else {
+      // FK cross-tenant check — employee_ids is caller-supplied and only
+      // referenced via `.eq('tenant_id', ...)` filters on OTHER tables below,
+      // never verified against this tenant's own employees. attendance_risk_
+      // profiles.employee_id's FK only requires the row to exist in
+      // `employees` *somewhere*, not that it belongs to this tenant, so an
+      // unverified id from another tenant would still upsert a
+      // tenant_id=<this tenant>, employee_id=<foreign employee> row (all
+      // metrics zeroed out, since every metric query is itself tenant-scoped)
+      // — a tenant-isolation leak, and an id-existence oracle across tenants.
+      const { data: ownedEmps, error: ownedErr } = await fastify.supabase
+        .from('employees')
+        .select('id')
+        .eq('tenant_id', req.tenantId)
+        .in('id', targetIds)
+      if (ownedErr) return serverError(req, reply, ownedErr, ErrorCode.QUERY_FAILED, 'Failed to verify employee_ids')
+      targetIds = (ownedEmps ?? []).map((e: { id: string }) => e.id)
     }
 
     if (targetIds.length === 0) {

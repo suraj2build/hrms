@@ -380,8 +380,10 @@ export default async function lwfRoutes(fastify: FastifyInstance) {
     } catch (fetchErr) {
       return serverError(req, reply, fetchErr, ErrorCode.QUERY_FAILED, 'Failed to fetch payroll slips/fallback compensation')
     }
+    // gross_pay is NUMERIC — coerce here so the wage-ceiling check downstream compares
+    // numerically instead of silently doing a string comparison (G13 sweep).
     const slipGrossMap = new Map<string, number>(
-      (slipRows as any[]).map(r => [r.employee_id, r.gross_pay ?? 0]),
+      (slipRows as any[]).map(r => [r.employee_id, Number(r.gross_pay ?? 0)]),
     )
     // Actual LWF lines from slip if already computed on the run
     const slipLwfEmpMap = new Map<string, number>()
@@ -396,10 +398,13 @@ export default async function lwfRoutes(fastify: FastifyInstance) {
       }
     }
 
+    // computed_monthly is NUMERIC — coerce or an employee with 2+ earning components
+    // corrupts their fallback gross into NaN, failing lwf_contributions.gross_salary's
+    // NOT NULL constraint and wrongly passing the wage-ceiling check (G13 sweep).
     const fallbackGrossMap = new Map<string, number>()
     for (const r of fallbackRows as any[]) {
       const empId = r.employee_compensations?.employee_id
-      if (empId) fallbackGrossMap.set(empId, (fallbackGrossMap.get(empId) ?? 0) + (r.computed_monthly ?? 0))
+      if (empId) fallbackGrossMap.set(empId, (fallbackGrossMap.get(empId) ?? 0) + Number(r.computed_monthly ?? 0))
     }
 
     const contributions: any[] = []
@@ -446,16 +451,41 @@ export default async function lwfRoutes(fastify: FastifyInstance) {
     // Remove stale rows for employees no longer in this month's deductible set
     // (e.g. became exempt / state disabled / no longer configured since the last
     // compute), so a re-finalize cannot leave a phantom LWF liability on the filing.
+    //
+    // SYSTEM_AUDIT_2026-10-14: the previous version encoded every kept
+    // employee id into one `.not('employee_id','in', '(...)')` filter value —
+    // the same shape already found and fixed in esi.ts/ptax.ts, where it's
+    // documented as breaking the request outright (~44,000-char filter) past
+    // roughly 1,200 employees. Fixed the same way: find the actual stale ids
+    // (existing rows minus the kept set, both read via fetchAllRows to avoid
+    // the 1,000-row PostgREST cap) and delete them in bounded .in() chunks.
     {
-      const keepIds = contributions.map((c: any) => c.employee_id)
-      let delQ = fastify.supabase
-        .from('lwf_contributions')
-        .delete()
-        .eq('tenant_id', req.tenantId)
-        .eq('contribution_month', month)
-      if (keepIds.length > 0) delQ = delQ.not('employee_id', 'in', `(${keepIds.join(',')})`)
-      const { error: delErr } = await delQ
-      if (delErr) return serverError(req, reply, delErr, ErrorCode.DELETE_FAILED, 'Failed to clean up stale LWF contributions')
+      const keepSet = new Set(contributions.map((c: any) => c.employee_id))
+      let existingRows: Array<{ employee_id: string }>
+      try {
+        existingRows = await fetchAllRows((from, to) =>
+          fastify.supabase
+            .from('lwf_contributions')
+            .select('employee_id')
+            .eq('tenant_id', req.tenantId)
+            .eq('contribution_month', month)
+            .order('id')
+            .range(from, to),
+        )
+      } catch (existErr) {
+        return serverError(req, reply, existErr, ErrorCode.QUERY_FAILED, 'Failed to read existing LWF contributions for cleanup')
+      }
+      const staleIds = existingRows.map(r => r.employee_id).filter(id => !keepSet.has(id))
+      for (let i = 0; i < staleIds.length; i += 100) {
+        const chunk = staleIds.slice(i, i + 100)
+        const { error: delErr } = await fastify.supabase
+          .from('lwf_contributions')
+          .delete()
+          .eq('tenant_id', req.tenantId)
+          .eq('contribution_month', month)
+          .in('employee_id', chunk)
+        if (delErr) return serverError(req, reply, delErr, ErrorCode.DELETE_FAILED, 'Failed to clean up stale LWF contributions')
+      }
     }
 
     if (contributions.length > 0) {

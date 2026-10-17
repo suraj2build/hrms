@@ -38,7 +38,32 @@ import {
   ENTITY_WORKFLOW_MAP,
   type WorkflowType,
   type EntityType,
+  type WorkflowInstance,
 } from './workflow-service.js'
+
+// SYSTEM_AUDIT_2026-10-14 checkpoint 10+1 — "no active config rows" and
+// "actor" legacy fallback below used to be unconditional: if an instance
+// was already mid-chain (e.g. current_level=2, awaiting hr_admin) and an
+// admin then deleted/deactivated every level for that workflow_type (or
+// edited min_amount so no level applies any more), the NEXT gateApprove
+// call never even looked at that open instance — it short-circuited
+// straight to `{kind:'finalize', authorized:false}` before the instance
+// was ever fetched, letting the ORIGINAL (lower-level) approver finalize
+// the entity through the legacy single-step path, silently skipping the
+// still-pending higher level. The instance itself was left open forever
+// (current_level=2, final_approved=null), an orphaned record of the
+// approval that was supposed to still be required. Fail CLOSED instead,
+// consistent with the existing out-of-range `cfg` guard a few lines
+// below this helper's call sites.
+async function openInstanceExists(
+  supabase:   SupabaseClient,
+  tenantId:   string,
+  entityType: EntityType,
+  entityId:   string,
+): Promise<boolean> {
+  const existing = await getWorkflowInstance(supabase, tenantId, entityType, entityId)
+  return !!existing && existing.final_approved === null
+}
 
 // entity_type → workflow_type (deterministic; avoids a schema column). Shared with
 // the read surface via ENTITY_WORKFLOW_MAP in workflow-service.
@@ -59,6 +84,17 @@ export interface GateInput {
   targetEmployeeId: string        // employees.id the request belongs to
   comments?:        string | null
   amount?:          number        // entity amount (₹) — drives min_amount level filtering
+  // SYSTEM_AUDIT_2026-10-14 checkpoint 13 — the authorized-path identity
+  // for a NEW instance's required submitted_by (NOT NULL, FK profiles).
+  // Callers that already loaded the entity row should pass its own
+  // recorded submitter column here (e.g. leave_requests.requested_by,
+  // attendance_regularisation.submitted_by) rather than making
+  // getOrCreateInstance re-derive it from targetEmployeeId's CURRENT
+  // profiles link, which can be absent even for a request that was
+  // validly submitted under a profile that was since unlinked/changed.
+  // Optional: callers that don't pass it fall back to the employee-id
+  // lookup, same as before.
+  submittedByHint?: string | null
 }
 
 interface ConfigLevel {
@@ -224,6 +260,28 @@ async function actorSatisfiesLevel(
   return { ok: false, message: msg }
 }
 
+// SYSTEM_AUDIT_2026-10-14 checkpoint 13 — getOrCreateInstance used to
+// collapse every "couldn't make/find an instance" outcome to a bare
+// `null`, which BOTH of gateApprove/gateReject's call sites then treated
+// as "no configured workflow → legacy" — but by the time this function is
+// called, config.length>0 and applicable.length>0 have ALREADY been
+// confirmed by the caller (see the two early returns above), so a
+// configured, applicable workflow genuinely exists. The one realistic way
+// this used to return null in practice — the target employee has no
+// profiles row linked by employee_id, so submitted_by (NOT NULL, FK
+// profiles) can't be resolved — silently fell all the way through to the
+// LEGACY single-step path, which only runs the much weaker
+// validateApprover check and completely skips the configured multi-level
+// chain. A workflow with a real identity gap must fail CLOSED, not
+// silently downgrade to a single approval. Distinguishing WHY instance
+// creation failed (so the caller can give a precise, actionable error
+// instead of a generic one) is also why this returns a discriminated
+// result now instead of a bare nullable.
+type InstanceLookupResult =
+  | { kind: 'found';              instance: WorkflowInstance }
+  | { kind: 'identity_unresolved' }
+  | { kind: 'db_error';           message: string }
+
 // ── Lazy get-or-create of the instance ───────────────────────────────────────────
 async function getOrCreateInstance(
   supabase:    SupabaseClient,
@@ -233,33 +291,42 @@ async function getOrCreateInstance(
   entityId:    string,
   targetEmployeeId: string,
   totalLevels: number,
-) {
+  submittedByHint?: string | null,
+): Promise<InstanceLookupResult> {
   const existing = await getWorkflowInstance(supabase, tenantId, entityType, entityId)
-  if (existing) return existing
+  if (existing) return { kind: 'found', instance: existing }
 
-  // submitted_by is NOT NULL (FK profiles). The request belongs to the target
-  // employee, so resolve their login profile. Fall back to any tenant profile is
-  // unsafe — instead, if the employee has no profile we still create with the
-  // employee's profile when present; otherwise the create is skipped by returning null.
-  const { data: subProfile } = await supabase
-    .from('profiles')
-    .select('id')
-    .eq('tenant_id', tenantId)
-    .eq('employee_id', targetEmployeeId)
-    .maybeSingle()
-  const submittedBy = (subProfile as { id: string } | null)?.id ?? null
-  if (!submittedBy) return null  // can't satisfy NOT NULL — treat as no-instance (legacy)
+  // submitted_by is NOT NULL (FK profiles). Prefer the AUTHORIZED PATH a
+  // caller that already loaded the entity row can supply directly — the
+  // entity's own recorded submitter (e.g. leave_requests.requested_by,
+  // attendance_regularisation.submitted_by), which was already valid at
+  // submission time and doesn't depend on the employee's CURRENT
+  // profiles link still existing. Only fall back to re-deriving it from
+  // targetEmployeeId's live profile when the caller didn't supply a hint.
+  let submittedBy: string | null = submittedByHint ?? null
+  if (!submittedBy) {
+    const { data: subProfile } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('tenant_id', tenantId)
+      .eq('employee_id', targetEmployeeId)
+      .maybeSingle()
+    submittedBy = (subProfile as { id: string } | null)?.id ?? null
+  }
+  if (!submittedBy) return { kind: 'identity_unresolved' }
 
   const created = await createWorkflowInstance(
     supabase, tenantId, workflowType, entityType, entityId, submittedBy, totalLevels,
   )
-  if (created.ok) return created.value
+  if (created.ok) return { kind: 'found', instance: created.value }
 
   // Lost a create race → re-fetch the winner.
   if (created.error.type === 'CONFLICT') {
-    return await getWorkflowInstance(supabase, tenantId, entityType, entityId)
+    const winner = await getWorkflowInstance(supabase, tenantId, entityType, entityId)
+    if (winner) return { kind: 'found', instance: winner }
+    return { kind: 'db_error', message: 'Lost a concurrent instance-create race but could not re-fetch the winner' }
   }
-  return null
+  return { kind: 'db_error', message: created.error.message }
 }
 
 // ── Record an action + advance/close the instance ────────────────────────────────
@@ -331,17 +398,33 @@ export async function gateApprove(supabase: SupabaseClient, input: GateInput): P
     .filter((c: any) => c.is_active) as ConfigLevel[]
 
   // No chain configured → legacy single-step (caller runs its own validateApprover).
-  if (config.length === 0) return { kind: 'finalize', authorized: false }
+  // BUT first check whether this entity already has an open instance from when
+  // a chain WAS configured — config can be deleted/deactivated out from under a
+  // mid-chain instance (see the comment on openInstanceExists above). Silently
+  // falling to legacy there would let the instance's own original approver
+  // finalize through the single-step path, skipping the still-pending level.
+  if (config.length === 0) {
+    if (await openInstanceExists(supabase, input.tenantId, input.entityType, input.entityId)) {
+      return { kind: 'error', error: { type: 'CONFLICT', message: 'This request has an approval chain in progress, but its workflow configuration was changed or removed. Restore the configuration or ask an administrator to resolve the pending approval before retrying.' } }
+    }
+    return { kind: 'finalize', authorized: false }
+  }
 
   // Only the levels that apply to this amount form the chain (threshold routing).
   const applicable = applicableLevels(config, input.amount)
-  if (applicable.length === 0) return { kind: 'finalize', authorized: false }  // amount below every level → legacy
+  if (applicable.length === 0) {
+    if (await openInstanceExists(supabase, input.tenantId, input.entityType, input.entityId)) {
+      return { kind: 'error', error: { type: 'CONFLICT', message: 'This request has an approval chain in progress, but no configured level now applies to it. Restore the configuration or ask an administrator to resolve the pending approval before retrying.' } }
+    }
+    return { kind: 'finalize', authorized: false }  // amount below every level → legacy
+  }
 
-  const instance = await getOrCreateInstance(
+  const lookup = await getOrCreateInstance(
     supabase, input.tenantId, workflowType, input.entityType, input.entityId, input.targetEmployeeId,
-    applicable.length,
+    applicable.length, input.submittedByHint,
   )
-  if (!instance) return { kind: 'finalize', authorized: false }  // couldn't engage engine → legacy
+  if (lookup.kind !== 'found') return instanceFailureDecision(lookup)
+  const instance = lookup.instance
 
   if (instance.final_approved !== null) {
     return { kind: 'error', error: { type: 'CONFLICT', message: 'This request is already closed' } }
@@ -385,6 +468,28 @@ export async function gateApprove(supabase: SupabaseClient, input: GateInput): P
   return { kind: 'advanced', level: instance.current_level, nextLevel, totalLevels: applicable.length }
 }
 
+// SYSTEM_AUDIT_2026-10-14 checkpoint 13 — by the point this is called,
+// config.length>0 and applicable.length>0 are ALREADY confirmed (the
+// caller's two early returns above handle the genuinely-unconfigured
+// case and correctly stay on the legacy path) — so a workflow DOES apply
+// here, and getOrCreateInstance failing to produce one must fail the
+// action closed, never silently fall through to the weaker legacy
+// single-step approval. `identity_unresolved` gets an actionable message
+// naming the fix; `db_error` surfaces as a generic but still-closed
+// failure rather than a silent bypass.
+function instanceFailureDecision(lookup: Exclude<InstanceLookupResult, { kind: 'found' }>): GateDecision {
+  if (lookup.kind === 'identity_unresolved') {
+    return {
+      kind: 'error',
+      error: {
+        type: 'CONFLICT',
+        message: 'This request requires multi-level approval, but no login profile is linked to the requesting employee, so the approval chain cannot be started. Link a profile to this employee (or correct the one on file) before approving.',
+      },
+    }
+  }
+  return { kind: 'error', error: { type: 'DB_ERROR', message: lookup.message } }
+}
+
 // ── gateReject ───────────────────────────────────────────────────────────────────
 /**
  * Reject always finalizes the entity (any level may reject). When a chain exists,
@@ -396,16 +501,33 @@ export async function gateReject(supabase: SupabaseClient, input: GateInput): Pr
 
   const config = (await getWorkflowConfig(supabase, input.tenantId, workflowType))
     .filter((c: any) => c.is_active) as ConfigLevel[]
-  if (config.length === 0) return { kind: 'finalize', authorized: false }
+  // Same fail-closed guard as gateApprove above — see openInstanceExists'
+  // comment. For reject this isn't a bypass-a-required-approval risk (reject
+  // always finalizes as rejected either way), but legacy-finalizing it here
+  // would leave the open instance row orphaned forever (current_level set,
+  // final_approved still null) instead of being recorded/closed, which would
+  // collide confusingly with a later resubmission once config is restored.
+  if (config.length === 0) {
+    if (await openInstanceExists(supabase, input.tenantId, input.entityType, input.entityId)) {
+      return { kind: 'error', error: { type: 'CONFLICT', message: 'This request has an approval chain in progress, but its workflow configuration was changed or removed. Restore the configuration or ask an administrator to resolve the pending approval before retrying.' } }
+    }
+    return { kind: 'finalize', authorized: false }
+  }
 
   const applicable = applicableLevels(config, input.amount)
-  if (applicable.length === 0) return { kind: 'finalize', authorized: false }
+  if (applicable.length === 0) {
+    if (await openInstanceExists(supabase, input.tenantId, input.entityType, input.entityId)) {
+      return { kind: 'error', error: { type: 'CONFLICT', message: 'This request has an approval chain in progress, but no configured level now applies to it. Restore the configuration or ask an administrator to resolve the pending approval before retrying.' } }
+    }
+    return { kind: 'finalize', authorized: false }
+  }
 
-  const instance = await getOrCreateInstance(
+  const rejectLookup = await getOrCreateInstance(
     supabase, input.tenantId, workflowType, input.entityType, input.entityId, input.targetEmployeeId,
-    applicable.length,
+    applicable.length, input.submittedByHint,
   )
-  if (!instance) return { kind: 'finalize', authorized: false }
+  if (rejectLookup.kind !== 'found') return instanceFailureDecision(rejectLookup)
+  const instance = rejectLookup.instance
 
   if (instance.final_approved !== null) {
     return { kind: 'error', error: { type: 'CONFLICT', message: 'This request is already closed' } }

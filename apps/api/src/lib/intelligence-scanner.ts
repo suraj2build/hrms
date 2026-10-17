@@ -620,14 +620,20 @@ async function scanExitIntentSurveys(supabase: SupabaseClient, tenantId: string)
   }
   const fromDate = `${months[0]}-01`
 
-  // Fetch all mood check-ins in the 3-month window for this tenant
-  const { data: checkins } = await supabase
-    .from('mood_checkins')
-    .select('employee_id, mood, checkin_date')
-    .eq('tenant_id', tenantId)
-    .gte('checkin_date', fromDate)
+  // Fetch all mood check-ins in the 3-month window for this tenant.
+  // fetchAllRows(): tenant-wide, no employee filter — a plain query would
+  // silently under-report for a tenant with >1,000 check-ins in the window.
+  const checkins = await fetchAllRows((from, to) =>
+    supabase
+      .from('mood_checkins')
+      .select('employee_id, mood, checkin_date')
+      .eq('tenant_id', tenantId)
+      .gte('checkin_date', fromDate)
+      .order('id')
+      .range(from, to),
+  )
 
-  if (!checkins?.length) return
+  if (!checkins.length) return
 
   // Aggregate per employee per month: { empId → { 'YYYY-MM' → { sum, count } } }
   const byEmpMonth = new Map<string, Map<string, { sum: number; count: number }>>()
@@ -895,13 +901,19 @@ async function scanMoodThemeAlerts(supabase: SupabaseClient, tenantId: string): 
   const [yStr, , dStr] = today.split('-')
   const week = `${yStr}-W${String(Math.ceil(Number(dStr) / 7)).padStart(2, '0')}`
 
-  const { data: checkins } = await supabase
-    .from('mood_checkins').select('employee_id, sentiment_category, employees!inner(work_location_id, tenant_id)')
-    .eq('tenant_id', tenantId).eq('sentiment_label', 'negative')
-    .gte('checkin_date', sevenDaysAgo)
-    .not('sentiment_category', 'is', null)
+  // fetchAllRows(): tenant-wide, no employee filter — a plain query would
+  // silently under-report for a tenant with >1,000 qualifying check-ins.
+  const checkins = await fetchAllRows((from, to) =>
+    supabase
+      .from('mood_checkins').select('employee_id, sentiment_category, employees!inner(work_location_id, tenant_id)')
+      .eq('tenant_id', tenantId).eq('sentiment_label', 'negative')
+      .gte('checkin_date', sevenDaysAgo)
+      .not('sentiment_category', 'is', null)
+      .order('id')
+      .range(from, to),
+  )
 
-  if (!checkins?.length) return
+  if (!checkins.length) return
 
   // Group by location + category
   const groups = new Map<string, { locationId: string; category: string; employees: Set<string> }>()

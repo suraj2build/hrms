@@ -141,7 +141,12 @@ function useQuickActions(basePath: string, role: string): CommandItem[] {
     {
       id: 'qa-process-att', label: 'Process Attendance',
       sublabel: 'Trigger batch attendance processing',
-      icon: RefreshCw, href: `${basePath}/attendance`,
+      // `${basePath}/attendance` redirects to /admin/attendance/center
+      // (AttendanceOperationsCenter), which has no trigger button at all —
+      // the real one only exists on Attendance.tsx, reachable by admins at
+      // this fixed manager-console path (see AttendanceOperationsCenter.tsx
+      // audit, SYSTEM_AUDIT_2026-10-14).
+      icon: RefreshCw, href: '/manager/team/attendance',
       group: 'Quick Actions', role: 'admin', badge: 'Admin',
       tags: ['process', 'run', 'attendance', 'compute', 'batch'],
     },

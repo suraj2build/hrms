@@ -11,8 +11,15 @@
  * POST /attendance/workforce-optimization/hints/:id/resolve   — mark a hint resolved (admin)
  * POST /attendance/workforce-optimization/compute             — compute & persist shift balance (admin)
  *
- * Auth: fastify.authenticate on every route.
- *       Write routes require hr_admin or super_admin.
+ * Auth: hr_admin / super_admin on every route — this exposes tenant-wide,
+ *       per-employee fairness/OT/rest-gap/shift-overload data, the same
+ *       sensitivity level the sibling intelligence-cluster files (anomalies.ts,
+ *       confidence.ts, health-index.ts, inference.ts) gate behind HR_ADMIN_ROLES.
+ *       SYSTEM_AUDIT_2026-10-14 checkpoint 15 found and fixed 7 GET routes
+ *       that had fastify.authenticate only, with no role check — any
+ *       authenticated employee could read every coworker's name alongside
+ *       their fairness scores, OT hours, rest-gap and consecutive-shift
+ *       violations, and shift-overload status tenant-wide.
  */
 
 import type { FastifyInstance } from 'fastify'
@@ -128,6 +135,8 @@ export default async function workforceOptimizationRoute(fastify: FastifyInstanc
   })
 
   fastify.get('/attendance/workforce-optimization/fairness-balance', auth, async (req: any, reply) => {
+    if (!requireAdmin(req, reply)) return
+
     const parsed = fairnessQuerySchema.safeParse(req.query)
     if (!parsed.success) {
       return reply.code(400).send({
@@ -202,9 +211,14 @@ export default async function workforceOptimizationRoute(fastify: FastifyInstanc
     // Build per-employee list with frontend-expected field names
     const employees = rows.map((r) => {
       const emp = Array.isArray(r.employees) ? r.employees[0] : r.employees
-      const otF = r.ot_fairness_score      ?? 0
-      const weF = r.weekend_fairness_score ?? 0
-      const niF = r.night_fairness_score   ?? 0
+      // Number(): these are DECIMAL(5,2) columns, which can come back as
+      // strings depending on the PostgREST client — the same coercion this
+      // codebase already applies elsewhere before arithmetic on a DECIMAL
+      // column (e.g. Number(row.days) in leave.ts). Without it, `+` below
+      // concatenates instead of summing.
+      const otF = Number(r.ot_fairness_score      ?? 0)
+      const weF = Number(r.weekend_fairness_score ?? 0)
+      const niF = Number(r.night_fairness_score   ?? 0)
       return {
         employee_id:      r.employee_id,
         name:             emp ? `${emp.first_name} ${emp.last_name}` : '',
@@ -247,6 +261,8 @@ export default async function workforceOptimizationRoute(fastify: FastifyInstanc
   // Find employees who have worked many consecutive days (present / late).
 
   fastify.get('/attendance/workforce-optimization/consecutive-shifts', auth, async (req: any, reply) => {
+    if (!requireAdmin(req, reply)) return
+
     const parsed = dateRangeSchema.safeParse(req.query)
     if (!parsed.success) {
       return reply.code(400).send({
@@ -335,6 +351,8 @@ export default async function workforceOptimizationRoute(fastify: FastifyInstanc
   // Find employees whose back-to-back shift end→next-shift start gap is < 8 h.
 
   fastify.get('/attendance/workforce-optimization/rest-gaps', auth, async (req: any, reply) => {
+    if (!requireAdmin(req, reply)) return
+
     const parsed = dateRangeSchema.safeParse(req.query)
     if (!parsed.success) {
       return reply.code(400).send({
@@ -448,6 +466,8 @@ export default async function workforceOptimizationRoute(fastify: FastifyInstanc
   // Overtime concentration analysis across all employees in the period.
 
   fastify.get('/attendance/workforce-optimization/ot-distribution', auth, async (req: any, reply) => {
+    if (!requireAdmin(req, reply)) return
+
     const parsed = dateRangeSchema.safeParse(req.query)
     if (!parsed.success) {
       return reply.code(400).send({
@@ -555,6 +575,8 @@ export default async function workforceOptimizationRoute(fastify: FastifyInstanc
   })
 
   fastify.get('/attendance/workforce-optimization/staffing-hints', auth, async (req: any, reply) => {
+    if (!requireAdmin(req, reply)) return
+
     const parsed = staffingQuerySchema.safeParse(req.query)
     if (!parsed.success) {
       return reply.code(400).send({
@@ -610,6 +632,8 @@ export default async function workforceOptimizationRoute(fastify: FastifyInstanc
   // Employees who exceeded OVERLOAD_THRESHOLD_HOURS (10 h) on one or more days.
 
   fastify.get('/attendance/workforce-optimization/shift-overload', auth, async (req: any, reply) => {
+    if (!requireAdmin(req, reply)) return
+
     const parsed = dateRangeSchema.safeParse(req.query)
     if (!parsed.success) {
       return reply.code(400).send({
@@ -692,6 +716,8 @@ export default async function workforceOptimizationRoute(fastify: FastifyInstanc
   })
 
   fastify.get('/attendance/workforce-optimization/hints', auth, async (req: any, reply) => {
+    if (!requireAdmin(req, reply)) return
+
     const parsed = hintsListSchema.safeParse(req.query)
     if (!parsed.success) {
       return reply.code(400).send({
@@ -1072,6 +1098,7 @@ export default async function workforceOptimizationRoute(fastify: FastifyInstanc
     for (let i = 0; i < balanceUpserts.length; i += BATCH) {
       const batch = balanceUpserts.slice(i, i + BATCH)
       const { error: upsertErr } = await fastify.supabase
+        // lint-tenant-ok: batch rows already carry tenant_id (balanceUpserts.push includes tenant_id: req.tenantId above) — upsert payload is tenant-scoped even though the literal isn't inline in this query chain
         .from('workforce_shift_balance')
         .upsert(batch, {
           onConflict: 'tenant_id,employee_id,period_start,period_end',

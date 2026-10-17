@@ -27,6 +27,7 @@ import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
 import { toCSV } from '../../lib/csv-utils.js'
+import { blockIfPilotTenant } from '../../lib/pilot-guard.js'
 
 function setCsvHeaders(reply: any, filename: string) {
   reply.header('Content-Type', 'text/csv; charset=utf-8')
@@ -51,6 +52,8 @@ export default async function payrollExportsRoutes(fastify: FastifyInstance) {
 
   // ── GET /payroll/exports/epf ──────────────────────────────────────────────────
   fastify.get('/epf', adminAuth, async (req: any, reply) => {
+    if (await blockIfPilotTenant(fastify.supabase, req.tenantId, reply, 'Exporting the EPF file')) return
+
     const parsed = monthSchema.safeParse(req.query)
     if (!parsed.success) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
@@ -120,7 +123,9 @@ export default async function payrollExportsRoutes(fastify: FastifyInstance) {
       employer_pf:           r.employer_pf,
       employer_eps:          r.employer_eps,
       edli_contribution:     r.edli_contribution,
-      total_employer:        ((r.employer_pf ?? 0) + (r.employer_eps ?? 0) + (r.edli_contribution ?? 0)),
+      // employer_pf/employer_eps/edli_contribution are DECIMAL — coerce before summing
+      // or the export prints a concatenated string instead of the total (G13 sweep).
+      total_employer:        (Number(r.employer_pf ?? 0) + Number(r.employer_eps ?? 0) + Number(r.edli_contribution ?? 0)),
       is_capped:             r.is_capped ? 'Y' : 'N',
     }))
     // Admin charges (0.5% of aggregate PF wages, EPFO standard rate) is a
@@ -143,6 +148,8 @@ export default async function payrollExportsRoutes(fastify: FastifyInstance) {
 
   // ── GET /payroll/exports/esi ──────────────────────────────────────────────────
   fastify.get('/esi', adminAuth, async (req: any, reply) => {
+    if (await blockIfPilotTenant(fastify.supabase, req.tenantId, reply, 'Exporting the ESI file')) return
+
     const parsed = monthSchema.safeParse(req.query)
     if (!parsed.success) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
@@ -210,6 +217,8 @@ export default async function payrollExportsRoutes(fastify: FastifyInstance) {
 
   // ── GET /payroll/exports/ptax ─────────────────────────────────────────────────
   fastify.get('/ptax', adminAuth, async (req: any, reply) => {
+    if (await blockIfPilotTenant(fastify.supabase, req.tenantId, reply, 'Exporting the Professional Tax file')) return
+
     const querySchema = z.object({
       month:        z.string().regex(/^\d{4}-\d{2}$/, 'month must be YYYY-MM'),
       state_code:   z.string().optional(),
@@ -288,6 +297,8 @@ export default async function payrollExportsRoutes(fastify: FastifyInstance) {
   // P2.3 — Labour Welfare Fund monthly register. Mirrors the ptax export;
   // registration number is resolved from lwf_state_settings (per-state).
   fastify.get('/lwf', adminAuth, async (req: any, reply) => {
+    if (await blockIfPilotTenant(fastify.supabase, req.tenantId, reply, 'Exporting the LWF file')) return
+
     const querySchema = z.object({
       month:        z.string().regex(/^\d{4}-\d{2}$/, 'month must be YYYY-MM'),
       state_code:   z.string().optional(),
@@ -364,6 +375,8 @@ export default async function payrollExportsRoutes(fastify: FastifyInstance) {
 
   // ── GET /payroll/exports/tds ──────────────────────────────────────────────────
   fastify.get('/tds', adminAuth, async (req: any, reply) => {
+    if (await blockIfPilotTenant(fastify.supabase, req.tenantId, reply, 'Exporting the TDS file')) return
+
     const querySchema = z.object({
       financial_year: z.string().min(4),
       employee_id:    z.string().uuid().optional(),
@@ -440,6 +453,8 @@ export default async function payrollExportsRoutes(fastify: FastifyInstance) {
   // ── GET /payroll/exports/challan ──────────────────────────────────────────────
   // Challan summary: consolidated statutory totals for the month (all types)
   fastify.get('/challan', adminAuth, async (req: any, reply) => {
+    if (await blockIfPilotTenant(fastify.supabase, req.tenantId, reply, 'Exporting a statutory challan')) return
+
     const parsed = monthSchema.safeParse(req.query)
     if (!parsed.success) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message })
@@ -484,11 +499,14 @@ export default async function payrollExportsRoutes(fastify: FastifyInstance) {
 
     const r2 = (n: number) => Math.round(n * 100) / 100
 
-    const sum = (arr: any[], key: string) => r2(arr.reduce((s, r) => s + (r[key] ?? 0), 0))
+    // All summed columns here (pf_wages, employee/employer_contribution, edli_contribution,
+    // ptax_amount, etc.) are DECIMAL — PostgREST serializes them as strings; coerce or 2+
+    // rows corrupt every challan total into NaN/garbage (G13 sweep).
+    const sum = (arr: any[], key: string) => r2(arr.reduce((s, r) => s + Number(r[key] ?? 0), 0))
 
     const ptaxByState: Record<string, number> = {}
     for (const r of ptaxRows) {
-      ptaxByState[r.state_code] = r2((ptaxByState[r.state_code] ?? 0) + (r.ptax_amount ?? 0))
+      ptaxByState[r.state_code] = r2((ptaxByState[r.state_code] ?? 0) + Number(r.ptax_amount ?? 0))
     }
 
     // Admin charges = 0.50% of aggregate PF wages (EPFO standard rate),
@@ -523,7 +541,7 @@ export default async function payrollExportsRoutes(fastify: FastifyInstance) {
         employee_count:        esiRows.length,
       },
       ptax: {
-        total_remittance: r2(ptaxRows.reduce((s, r) => s + (r.ptax_amount ?? 0), 0)),
+        total_remittance: r2(ptaxRows.reduce((s, r) => s + Number(r.ptax_amount ?? 0), 0)),
         by_state:         ptaxByState,
         employee_count:   ptaxRows.length,
       },
@@ -532,7 +550,7 @@ export default async function payrollExportsRoutes(fastify: FastifyInstance) {
         sum(epfRows, 'employer_pf')          + sum(epfRows, 'employer_eps') +
         sum(epfRows, 'edli_contribution')    + epfAdminCharges +
         sum(esiRows, 'total_contribution')   +
-        ptaxRows.reduce((s: number, r: any) => s + (r.ptax_amount ?? 0), 0)
+        ptaxRows.reduce((s: number, r: any) => s + Number(r.ptax_amount ?? 0), 0)
       ),
     }
 

@@ -194,3 +194,132 @@ Rules to avoid breaking this:
   resolves anywhere, should only ever show a landing page that links here,
   never a live app with its own DB credentials.
 
+---
+
+## Market-readiness build priorities (2026-10-11) — DONE
+
+Source: `citykart-vs-cognixhr-comparison.md` and
+`citykart-vs-cognixhr-deep-gap-analysis.md` (both on this branch, root of
+repo) — a code-grounded gap analysis against a competitor retail-chain HRMS.
+All 4 build-order items below are implemented, each with a migration
+verified against a real Postgres 16 instance running the full migration
+history and a focused test file:
+
+1. **F&F auto-pull asset/loan recovery** — DONE. `fnf-settlement-engine.ts`
+   now queries `assets` (unreturned, assigned), `employee_loans`
+   (outstanding_balance), and `advance_recovery_schedules` (pending) and
+   feeds the amounts into `separation_ff_summary.asset_recovery_amount` /
+   `loan_recovery_amount` / `advance_recovery_amount` (migration 442); HR can
+   still override any of the three.
+2. **Raise leave on behalf** — DONE. `POST /leave-requests` accepts an
+   optional `employee_id` override: HR admins may target any employee in
+   the tenant, managers only their own direct reports
+   (`isDirectReport()`); every other role has it silently ignored.
+   `ApprovalInbox.tsx` has a "Raise Leave" entry point. The leave's actual
+   owner can also cancel their own pending request now, not only whoever
+   filed it.
+3. **Probation Confirmation workflow** — DONE. New `probation_confirmations`
+   table (migration 443): manager recommends confirm/extend with feedback
+   (`POST /manager/team/lifecycle/confirmation-recommend`) → HR decides
+   (`PATCH /probation-confirmations/:id/decide`), which sets
+   `job_history.confirmation_date` on confirm or records a new due date on
+   extend. New HR screen at `/admin/employees/probation-confirmations`.
+4. **Public recruitment intake** — DONE. `job_requisitions.is_public`
+   (migration 444, HR opt-in, separate from `status='open'`) plus
+   unauthenticated `GET/POST /careers/:tenantSlug/*` routes
+   (`public-careers.ts`) — tenant resolved fresh from `tenants.slug` on
+   every request, same `isTenantBlocked()` check the authenticated
+   write-gate uses. Public pages at `/careers/:tenantSlug` and
+   `/careers/:tenantSlug/:openingId`. `AdminRecruitment.tsx` has the
+   "List on careers page" toggle.
+
+**Admin-load philosophy, stated explicitly so it isn't re-litigated per
+feature:** don't add another manual queue for something that should mostly
+resolve itself. Concretely: `AttendanceAnomalies.tsx` has been de-emphasized
+— DONE (2026-10-11). It stays (not removed — read-only department-level
+monitoring, not a per-row triage queue) but moved out of Attendance ›
+Operations into Attendance › Analytics & Audit in `nav-config.ts`;
+regularisation is the real correction flow and keeps its own "Approvals"
+spot in Operations. The `OperationalBanner` no longer surfaces a raw
+"N open anomalies" signal on every admin page — that duplicated the
+regularisation signal's urgency without an actual action to take on the
+anomalies page itself. The reconciliation logic (auto-resolves anomalies
+the current `attendance_daily` truth already contradicts) is extracted into
+`apps/api/src/lib/anomaly-reconciler.ts` and now runs on its own daily
+scheduled job (`reconcile-anomalies`, registered in `index.ts` alongside
+`detect-absconding`/`notice-overdue-scan`) in addition to the manual
+"Reconcile Now" button — fewer anomalies ever require a human to notice
+them at all, let alone triage them.
+
+Apply the same lens to any new admin screen going forward: if a queue
+exists, it should default to "only what actually needs a human," not
+"everything, unfiltered" — the same principle already flagged for the HR
+Admin approval-queue scope gap in `citykart-vs-cognixhr-comparison.md`
+§2.7/§3.1.
+
+Deferred, needs an explicit product scope decision before building: PMS
+(performance management) and Travel Desk have zero implementation — not
+started pending a decision on whether they're in scope for initial launch.
+
+**G12 (standalone leave encashment) — decided and built (2026-10-12),
+payment-status defect found and fixed in round 2, F&F-concurrency fixed and
+an accounting-ledger defect found and fixed in round 3 (all 2026-10-12).**
+Was in the same "deferred pending decision" bucket as PMS/Travel Desk above;
+the user authorized completion. Employee-initiated request UI
+(`apps/web/src/pages/ess/EssLeaveBalance.tsx`'s Encashment tab), a real
+payout + TDS computation at approval time (`computeEncashmentPayout` in
+`apps/api/src/lib/accrual-engine.ts` — a flat marginal-slab-rate
+withholding, explicitly NOT a Section 10(10AA) exemption computation; that
+needs tax/compliance sign-off before go-live).
+
+Round 1 (migration 446) shipped `mark_leave_encashment_paid_atomic`, which
+posted the payout directly into an already-persisted `payroll_slips` row
+and flipped status to `'paid'` immediately. Round 2 found this was a real
+defect, not just a semantic nitpick: `POST /payroll/runs` explicitly
+permits deleting and recomputing every slip in a non-finalized ("draft")
+run on re-run, which would silently wipe that posting while the request
+kept claiming `'paid'`. Migration 447 replaces it:
+`assign_leave_encashment_to_payroll_run_atomic` only records intent
+(`payroll_run_id`; status stays `'approved'`) — every (re)generation of
+that run's slip derives the payout fresh from `leave_encashment_requests`
+(`fetchEncashmentPayout` + `applyEncashmentPayout`, `apps/api/src/routes/
+payroll/runs.ts` / `lib/payroll-engine.ts`), so regeneration can no longer
+lose it. Status only becomes `'paid'` once the run is actually finalized
+(`fn_finalize_leave_encashments_for_run`), with a symmetric revert on
+rollback (`fn_revert_leave_encashments_for_rollback`). Proven against a
+real local Postgres 16 instance with the full migration history (000→447)
+applying cleanly — see `scripts/db/verify-g12-encashment-atomic.mjs`.
+
+Duplicate-payment prevention: payroll via the above; F&F via
+`lib/fnf-settlement-engine.ts`'s leave-encashment calculation reading the
+same `employee_leave_balance` table standalone encashment already
+decrements, **plus, as of round 3, a real concurrency check** — migration
+448's extension to `mark_fnf_paid_atomic`: `computeFnfSettlement` now
+returns the exact `(leave_type_id, year)` pairs it read balances for
+(`separation_ff_summary.leave_encashment_basis`), and `mark_fnf_paid_atomic`
+re-sums exactly those rows and raises `SOURCE_DRIFT` if a standalone
+encashment approval changed the balance since F&F approval — the same
+pattern already proven for loan/advance/asset drift, closing the
+approve→mark-paid race round 2 had identified but deliberately deferred.
+
+Round 3 also found and fixed a real, previously-unnoticed defect in a
+subsystem neither round 1 nor round 2 had examined: the accounting ledger
+(`lib/payroll-accounting-engine.ts`) built every journal entry from the
+employee's *standing* compensation catalog, never from the slip's actual
+computed components — so `LEAVE_ENCASHMENT`/its `TDS` line (and,
+pre-existing, advance/loan-EMI deductions) were silently absent from every
+GL posting, and the LOP contra formula misclassified their rupee value as
+"LOP recovery" instead. Fixed generally via a new `payroll_employee_
+snapshots.adhoc_components` column (migration 449) and a named,
+tested `computeLopAmount` helper — closing the pre-existing advance/loan-EMI
+gap too, as a side effect.
+
+Two further gaps were found this round and honestly disclosed as NOT
+fixed (lower severity, operational rather than money-safety): the
+statutory TDS reconciliation screen doesn't know about one-time
+encashment payouts (shows a spurious variance, doesn't mispay or misfile);
+and `computeEncashmentPayout`'s rate-per-day could be overstated for a
+second encashment request if the first one inflated the slip it reads from.
+See `docs/production-readiness/STATUS.md`'s 2026-10-12 addenda (all three
+rounds) for the full writeup and what's still open.
+

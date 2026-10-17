@@ -204,10 +204,21 @@ export default async function woCreditRoutes(fastify: FastifyInstance) {
     const empIds = [...new Set(rows.map(r => r.employee_id))]
     const nameMap = new Map<string, string>()
     if (empIds.length) {
-      const { data: emps } = await fastify.supabase
-        .from('employees').select('id, first_name, last_name, employee_code')
-        .eq('tenant_id', req.tenantId).in('id', empIds)
-      for (const e of (emps ?? []) as any[]) {
+      // Chunked: empIds is every employee in this WO-credit review batch,
+      // tenant-wide — can exceed a single .in() URL's safe size.
+      const emps: any[] = []
+      for (let i = 0; i < empIds.length; i += 100) {
+        const chunkIds = empIds.slice(i, i + 100)
+        const { data: empChunk, error: empsErr } = await fastify.supabase
+          // lint-query-ok: chunkIds is a slice of 100 ids (loop above) — result is bounded to <=100 rows, well under the 1,000-row cap
+          .from('employees').select('id, first_name, last_name, employee_code')
+          .eq('tenant_id', req.tenantId).in('id', chunkIds)
+        // Surface rather than silently drop this chunk's employees from the
+        // WO-credit review name enrichment.
+        if (empsErr) return serverError(req, reply, empsErr, ErrorCode.QUERY_FAILED, 'Failed to resolve employee names for WO credit review')
+        if (empChunk) emps.push(...empChunk)
+      }
+      for (const e of emps as any[]) {
         nameMap.set(e.id, `${e.first_name ?? ''} ${e.last_name ?? ''}`.trim() || e.employee_code)
       }
     }

@@ -68,19 +68,19 @@ export function OrgGovernancePanel({ compact = false, className }: OrgGovernance
   if (compact) {
     return (
       <div className={cn('flex items-center gap-3 text-xs text-muted-foreground', className)}>
-        <button onClick={() => navigate('/masters/sites')}
+        <button onClick={() => navigate('/admin/masters/sites')}
           className="flex items-center gap-1 hover:text-foreground transition-colors">
           <Globe className="h-3 w-3" />
           <span>{sites.length} site{sites.length !== 1 ? 's' : ''}</span>
         </button>
         <span className="text-border">·</span>
-        <button onClick={() => navigate('/masters/work-locations')}
+        <button onClick={() => navigate('/admin/masters/work-locations')}
           className="flex items-center gap-1 hover:text-foreground transition-colors">
           <MapPin className="h-3 w-3" />
           <span>{locs.length} location{locs.length !== 1 ? 's' : ''}</span>
         </button>
         <span className="text-border">·</span>
-        <button onClick={() => navigate('/masters/cost-centers')}
+        <button onClick={() => navigate('/admin/masters/cost-centers')}
           className="flex items-center gap-1 hover:text-foreground transition-colors">
           <DollarSign className="h-3 w-3" />
           <span>{ccs.length} cost center{ccs.length !== 1 ? 's' : ''}</span>
@@ -102,7 +102,7 @@ export function OrgGovernancePanel({ compact = false, className }: OrgGovernance
         label="Sites"
         count={sites.length}
         isLast={false}
-        onClick={() => navigate('/masters/sites')}
+        onClick={() => navigate('/admin/masters/sites')}
       />
 
       {/* Work Locations */}
@@ -111,7 +111,7 @@ export function OrgGovernancePanel({ compact = false, className }: OrgGovernance
         label="Work Locations"
         count={locs.length}
         isLast={false}
-        onClick={() => navigate('/masters/work-locations')}
+        onClick={() => navigate('/admin/masters/work-locations')}
         suffix={unassigned > 0 ? (
           <span className="ml-1 flex items-center gap-0.5 text-warning text-[10px]">
             <AlertTriangle className="h-2.5 w-2.5" />
@@ -126,7 +126,7 @@ export function OrgGovernancePanel({ compact = false, className }: OrgGovernance
         label="Cost Centers"
         count={ccs.length}
         isLast
-        onClick={() => navigate('/masters/cost-centers')}
+        onClick={() => navigate('/admin/masters/cost-centers')}
       />
     </div>
   )

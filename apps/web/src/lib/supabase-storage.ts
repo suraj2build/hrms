@@ -23,6 +23,7 @@ export type StorageFolder =
   | 'contracts'
   | 'identity'
   | 'passport-visa'
+  | 'feedback'
 
 /**
  * Upload a file to the employee-files bucket.
@@ -63,6 +64,27 @@ export async function uploadCompanyLogo(
     .upload(path, file, { contentType: file.type, upsert: true })
 
   if (error) throw new Error(`Logo upload failed: ${error.message}`)
+  return path
+}
+
+/**
+ * Upload a screenshot attached to an in-product issue report
+ * (POST /support/error-reports). Not tied to an employee record — the
+ * reporter may be a super_admin/hr_admin with no linked employee_id.
+ * Returns the storage path — store this in error_reports.screenshot_path.
+ */
+export async function uploadFeedbackScreenshot(
+  tenantId: string,
+  file:     File,
+): Promise<string> {
+  const ext  = file.name.split('.').pop() ?? 'png'
+  const path = `${tenantId}/feedback/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`
+
+  const { error } = await storageClient.storage
+    .from(BUCKET)
+    .upload(path, file, { contentType: file.type, upsert: false })
+
+  if (error) throw new Error(`Screenshot upload failed: ${error.message}`)
   return path
 }
 

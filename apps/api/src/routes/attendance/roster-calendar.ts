@@ -389,16 +389,28 @@ export default async function rosterCalendarRoutes(fastify: FastifyInstance) {
     const { groupId } = req.query as { groupId?: string }
     const tenantId    = req.tenantId as string
 
-    let q = supabase
-      .from('roster_rotation_members')
-      .select('*, employee:employees(id, employee_code, first_name, last_name)')
-      .eq('tenant_id', tenantId)
-
-    if (groupId) q = q.eq('rotation_group_id', groupId)
-    q = q.order('cohort_index').order('effective_from')
-
-    const { data, error } = await q
-    if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch rotation members')
+    // SYSTEM_AUDIT_2026-10-14 checkpoint 14 — like employee_shifts/job_history
+    // in roster-api.ts, this table is sized ~1:1 with the number of employees
+    // placed on a rotation (one membership row per employee per rotation
+    // group), not with the number of groups/shifts themselves — unlike the
+    // sibling CRUD endpoints in this file (weekly-off rules, shift segments,
+    // rotation groups, holiday groups), which are admin-configured policy
+    // objects bounded by design and can't realistically reach PostgREST's
+    // 1,000-row ceiling. An unfiltered call (no groupId) on a tenant with
+    // >1,000 rotation-assigned employees would silently truncate here.
+    let data: any[]
+    try {
+      data = await fetchAllRows((from, to) => {
+        let q = supabase
+          .from('roster_rotation_members')
+          .select('*, employee:employees(id, employee_code, first_name, last_name)')
+          .eq('tenant_id', tenantId)
+        if (groupId) q = q.eq('rotation_group_id', groupId)
+        return q.order('cohort_index').order('effective_from').range(from, to)
+      })
+    } catch (error) {
+      return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch rotation members')
+    }
     return reply.send({ data })
   })
 

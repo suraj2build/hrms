@@ -9,6 +9,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { fetchTenantTz, utcToLocalDate } from '../../lib/attendance-engine.js'
+import { fetchAllRows } from '../../lib/supabase-paginate.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
@@ -124,18 +125,28 @@ export default async function attendanceInferenceRoute(fastify: FastifyInstance)
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
     }
 
-    const { data, error } = await fastify.supabase
-      .from('attendance_inference_log')
-      .select(
-        'id, date, inference_type, confidence_penalty:inference_confidence_penalty, reason:inference_reason, inference_explanation, approved_by, approved_at, created_at',
+    // fetchAllRows(): from/to are caller-supplied with no maximum-span
+    // validation — a long enough custom range (this endpoint's own default
+    // is already 60 days, and a caller can pass any from/to) can return more
+    // than 1,000 rows for a single employee, which a plain .select() would
+    // silently truncate at PostgREST's cap, same bug class already fixed for
+    // the sibling confidence.ts employee-history route.
+    let data: unknown[]
+    try {
+      data = await fetchAllRows((rangeFrom, rangeTo) =>
+        fastify.supabase
+          .from('attendance_inference_log')
+          .select(
+            'id, date, inference_type, confidence_penalty:inference_confidence_penalty, reason:inference_reason, inference_explanation, approved_by, approved_at, created_at',
+          )
+          .eq('tenant_id', req.tenantId)
+          .eq('employee_id', employeeId)
+          .gte('date', from)
+          .lte('date', to)
+          .order('created_at', { ascending: false })
+          .range(rangeFrom, rangeTo),
       )
-      .eq('tenant_id', req.tenantId)
-      .eq('employee_id', employeeId)
-      .gte('date', from)
-      .lte('date', to)
-      .order('created_at', { ascending: false })
-
-    if (error) {
+    } catch (error) {
       return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch inference history')
     }
 
@@ -153,7 +164,12 @@ export default async function attendanceInferenceRoute(fastify: FastifyInstance)
 
     const total_inferences = rows.length
 
-    const penalties = rows.filter((r) => r.confidence_penalty != null).map((r) => r.confidence_penalty as number)
+    // Number(): confidence_penalty aliases a DECIMAL(5,2) column, which can
+    // come back as a string depending on the PostgREST client — the same
+    // coercion this codebase already applies to every other DECIMAL column
+    // read before arithmetic (e.g. Number(row.days) in leave.ts). Without
+    // it, `+` on string values concatenates instead of summing.
+    const penalties = rows.filter((r) => r.confidence_penalty != null).map((r) => Number(r.confidence_penalty))
     const avg_confidence_penalty = penalties.length > 0
       ? Math.round((penalties.reduce((s, v) => s + v, 0) / penalties.length) * 1000) / 1000
       : null

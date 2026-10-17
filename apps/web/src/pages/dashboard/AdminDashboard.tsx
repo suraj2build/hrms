@@ -280,7 +280,7 @@ export function AdminDashboard() {
               ? `· ${fmtDateTime(lastRun.started_at)}${lastRun.duration_ms ? ` · ${Math.round(lastRun.duration_ms / 1000)}s` : ''}`
               : '· No runs recorded'
           }
-          action={{ label: 'Process now', onClick: () => navigate('/admin/attendance/process') }}
+          action={{ label: 'Process now', onClick: () => navigate('/manager/team/attendance') }}
         />
       )}
 
@@ -431,7 +431,7 @@ export function AdminDashboard() {
             <QuickActionRow
               icon={Play}
               label="Process Attendance"
-              onClick={() => navigate('/admin/attendance/process')}
+              onClick={() => navigate('/manager/team/attendance')}
             />
             <QuickActionRow
               icon={CheckSquare}
@@ -457,7 +457,7 @@ export function AdminDashboard() {
             <QuickActionRow
               icon={FileSearch}
               label="Leave Types & Balances"
-              onClick={() => navigate('/admin/leave/types')}
+              onClick={() => navigate('/admin/leave-types')}
             />
             <QuickActionRow
               icon={Zap}
@@ -467,7 +467,7 @@ export function AdminDashboard() {
             <QuickActionRow
               icon={Shield}
               label="Compliance"
-              onClick={() => navigate('/admin/compliance')}
+              onClick={() => navigate('/admin/payroll/statutory-dashboard')}
             />
           </div>
         </OperationalSurface>

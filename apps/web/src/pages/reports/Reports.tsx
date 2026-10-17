@@ -1092,6 +1092,13 @@ function SalaryRegister({ departments, basePath }: { departments: Department[]; 
 // ─────────────────────────────────────────────────────────────────────────────
 
 function StatutoryReport({ departments, basePath }: { departments: Department[]; basePath: string }) {
+  // G06: /reports/statutory now requires `month` and reports the real,
+  // already-computed EPF/ESI contributions for that exact month (not a CTC
+  // formula estimate) — so this must default to the same "latest finalized
+  // payroll period" anchor every other month-scoped report tab on this page
+  // uses, not an arbitrary/current calendar month that may have no
+  // finalized payroll behind it at all.
+  const [month,   setMonth]   = usePayrollMonthState()
   const [scheme,  setScheme]  = useState('')
   const [empType, setEmpType] = useState('')
   const [deptId,  setDeptId]  = useState('')
@@ -1099,13 +1106,14 @@ function StatutoryReport({ departments, basePath }: { departments: Department[];
   const [genAt,   setGenAt]   = useState<Date | null>(null)
 
   const params = new URLSearchParams({
+    month,
     ...(scheme  ? { scheme }                   : {}),
     ...(empType ? { employment_type: empType } : {}),
     ...(deptId  ? { department_id:   deptId }  : {}),
   })
 
   const { data, isLoading, refetch, isFetching } = useQuery<StatutoryData>({
-    queryKey: ['report-statutory', scheme, empType, deptId],
+    queryKey: ['report-statutory', month, scheme, empType, deptId],
     queryFn:  async () => {
       const r = await api.get<StatutoryData>(`/reports/statutory?${params}`)
       setGenAt(new Date())
@@ -1122,7 +1130,7 @@ function StatutoryReport({ departments, basePath }: { departments: Department[];
 
   const doExport = useCallback(() => {
     exportCSV(
-      `statutory_register${scheme ? `_${scheme}` : ''}.csv`,
+      `statutory_register_${month}${scheme ? `_${scheme}` : ''}.csv`,
       filtered.map(r => ({
         'Employee Code':     r.employee_code,
         'Name':              r.name,
@@ -1144,7 +1152,7 @@ function StatutoryReport({ departments, basePath }: { departments: Department[];
       })),
       `Statutory ${scheme ? scheme.toUpperCase() : ''} register`,
     )
-  }, [filtered, scheme])
+  }, [filtered, scheme, month])
 
   const check = (v: boolean) =>
     v ? <span className="text-success font-semibold">✓</span>
@@ -1168,6 +1176,9 @@ function StatutoryReport({ departments, basePath }: { departments: Department[];
           />
         }
       >
+        <FilterField label="Contribution month">
+          <Input type="month" value={month} onChange={e => setMonth(e.target.value)} className="h-8 text-xs w-36" />
+        </FilterField>
         <FilterField label="Scheme">
           <select value={scheme} onChange={e => setScheme(e.target.value)}
             className="h-8 text-xs rounded-md border border-input bg-background px-2 w-36 text-foreground">

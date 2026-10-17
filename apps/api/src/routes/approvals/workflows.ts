@@ -23,6 +23,7 @@ import {
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { isHrAdmin, resolveCallerEmployeeId, isDirectReport } from '../../lib/manager-scope.js'
 import { serverError, notFound, ErrorCode } from '../../lib/api-errors.js'
+import { logAction } from '../../lib/audit-service.js'
 
 // Workflow types the engine drives (must match the 053 enum + migrations 313/314).
 const WORKFLOW_TYPES = ['leave', 'correction', 'regularisation', 'overtime', 'comp_off', 'reimbursement', 'loan', 'advance'] as const
@@ -100,6 +101,16 @@ export default async function workflowsRoute(fastify: FastifyInstance) {
       .single()
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to save workflow config')
+
+    // Fresh audit finding: changing who approves what, and in how many
+    // levels, for a live approval chain had no audit trail at all — the
+    // single most sensitive kind of change this namespace makes. Non-
+    // blocking: the write already succeeded.
+    await logAction(fastify.supabase, {
+      tenantId: req.tenantId, tableName: 'approval_workflow_config', recordId: data.id,
+      action: 'UPDATE', performedBy: req.userId, newData: data,
+    })
+
     return reply.code(201).send({ data })
   })
 
@@ -120,6 +131,12 @@ export default async function workflowsRoute(fastify: FastifyInstance) {
 
     if (error) return serverError(req, reply, error, ErrorCode.DELETE_FAILED, 'Failed to delete workflow config')
     if (!data) return notFound(reply, 'NOT_FOUND', 'Workflow config not found')
+
+    await logAction(fastify.supabase, {
+      tenantId: req.tenantId, tableName: 'approval_workflow_config', recordId: id,
+      action: 'DELETE', performedBy: req.userId,
+    })
+
     return reply.code(204).send()
   })
 

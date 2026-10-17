@@ -12,6 +12,7 @@ import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { checkIdempotency, storeIdempotency } from '../../lib/idempotency.js'
 import { serverError, validationError, ErrorCode } from '../../lib/api-errors.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { blockIfPilotTenant } from '../../lib/pilot-guard.js'
 
 const CATEGORY_TYPES = ['medical', 'travel', 'food', 'telephone', 'internet', 'books', 'uniform', 'other'] as const
 
@@ -1240,6 +1241,7 @@ export default async function reimbursementsRoutes(fastify: FastifyInstance) {
    */
   fastify.post('/:id/pay', { preHandler: [fastify.authenticate, requireHrAdmin] }, async (req: any, reply) => {
     const { id } = req.params as { id: string }
+    if (await blockIfPilotTenant(fastify.supabase, req.tenantId, reply, 'Marking a reimbursement claim as paid')) return
 
     // Idempotency: the .eq('status','approved') guard below already blocks a
     // genuine double-pay, but a network-retried request would see the first

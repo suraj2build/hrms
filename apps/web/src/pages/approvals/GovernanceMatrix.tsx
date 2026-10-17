@@ -37,9 +37,16 @@ type OverrideType  =
   | 'bypass_approval' | 'extend_sla' | 'unlock_period'
   | 'force_process'   | 'grant_balance' | 'roster_freeze_lift' | 'policy_exception'
 
+// Must match the backend's ENTITY_TYPES enum (governance-evolution.ts), which
+// is itself bound by migration 089's CHECK constraint on approval_matrices
+// .entity_type. Fresh audit finding: this list previously had 'roster_change'
+// and 'shift_swap', neither a valid value — selecting either in the New
+// Matrix / Simulate forms 400'd on submit ("Failed to create matrix.") — and
+// was missing three values the backend does accept ('separation',
+// 'policy_change', 'general').
 type EntityType =
-  | 'leave_request' | 'correction' | 'overtime' | 'comp_off'
-  | 'payroll_run'   | 'roster_change' | 'shift_swap' | 'expense'
+  | 'leave_request' | 'correction' | 'overtime' | 'comp_off' | 'separation'
+  | 'payroll_run'   | 'policy_change' | 'roster_override' | 'expense' | 'general'
 
 interface MatrixStage {
   stage_number:  number
@@ -100,8 +107,8 @@ interface SimulateResult {
 // ── Constants ──────────────────────────────────────────────────────────────────
 
 const ENTITY_TYPES: EntityType[] = [
-  'leave_request', 'correction', 'overtime', 'comp_off',
-  'payroll_run',   'roster_change', 'shift_swap', 'expense',
+  'leave_request', 'correction', 'overtime', 'comp_off', 'separation',
+  'payroll_run',   'policy_change', 'roster_override', 'expense', 'general',
 ]
 
 const OVERRIDE_TYPES: OverrideType[] = [

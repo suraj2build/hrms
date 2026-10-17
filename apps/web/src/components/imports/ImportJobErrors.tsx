@@ -7,7 +7,9 @@
 
 import { useState }    from 'react'
 import { useQuery, keepPreviousData } from '@tanstack/react-query'
+import { toast }       from 'sonner'
 import { Button }      from '@/components/ui/button'
+import { api }          from '@/lib/api/client'
 import { importsApi }  from '@/lib/api/imports'
 
 interface Props {
@@ -19,6 +21,7 @@ const PAGE_SIZE = 100
 
 export function ImportJobErrors({ jobId }: Props) {
   const [offset, setOffset] = useState(0)
+  const [isDownloading, setIsDownloading] = useState(false)
 
   const { data, isLoading } = useQuery({
     queryKey: ['import-job-errors', jobId, offset],
@@ -31,6 +34,37 @@ export function ImportJobErrors({ jobId }: Props) {
   const pages  = Math.ceil(total / PAGE_SIZE)
   const page   = Math.floor(offset / PAGE_SIZE) + 1
 
+  // Fresh audit finding: this was a plain `<a href={...} download>` pointing
+  // straight at the protected /imports/:jobId/errors/export endpoint. This
+  // app authenticates via a Bearer token attached by the api client's fetch
+  // wrapper (apps/web/src/lib/api/client.ts), never a cookie — a native
+  // anchor navigation carries no such header, so the request always 401s
+  // (and in production, where VITE_API_URL points at a separate API origin,
+  // a bare relative href also resolves against the wrong origin entirely).
+  // ImportWorkspace.tsx's template download already established the correct
+  // pattern for a protected file download: api.getRaw + blob + object URL.
+  async function handleDownloadCsv() {
+    setIsDownloading(true)
+    try {
+      const response = await api.getRaw(importsApi.exportErrorsCsvUrl(jobId))
+      const blob = await response.blob()
+      const url  = URL.createObjectURL(blob)
+      const a    = document.createElement('a')
+      a.href     = url
+      a.download = `import_job_${jobId}_errors.csv`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      toast.error('Failed to download error CSV', {
+        description: err instanceof Error ? err.message : undefined,
+      })
+    } finally {
+      setIsDownloading(false)
+    }
+  }
+
   return (
     <div className="space-y-3">
       {/* Header */}
@@ -39,13 +73,15 @@ export function ImportJobErrors({ jobId }: Props) {
           Row errors{total > 0 ? ` (${total.toLocaleString()})` : ''}
         </p>
         {total > 0 && (
-          <a
-            href={importsApi.exportErrorsCsvUrl(jobId)}
-            download
-            className="inline-flex items-center gap-1 rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-muted transition-colors"
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={isDownloading}
+            onClick={handleDownloadCsv}
+            className="h-auto px-3 py-1.5 text-xs font-medium"
           >
-            Download CSV
-          </a>
+            {isDownloading ? 'Downloading…' : 'Download CSV'}
+          </Button>
         )}
       </div>
 

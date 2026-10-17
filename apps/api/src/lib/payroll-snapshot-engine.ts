@@ -143,6 +143,18 @@ export interface EmployeeSnapshotBlob {
   attendance_snapshot:   AttendanceSnapshot
   compensation_snapshot: CompensationSnapshot
   component_snapshot:    { components: CompensationSnapshot['components']; hash: string }
+  /** Ad-hoc payroll_slips.component_breakdown lines that have NO corresponding
+   *  `employee_compensations` catalog row — e.g. a one-time standalone leave
+   *  encashment payout + its withholding (LEAVE_ENCASHMENT/TDS,
+   *  apps/api/src/lib/payroll-engine.ts's applyEncashmentPayout), or advance/
+   *  loan-EMI recovery deductions (ADVANCE_RECOVERY/LOAN_EMI,
+   *  applyAdvanceLoanRecovery). `compensation_snapshot.components` only
+   *  reflects the employee's STANDING compensation structure, so these
+   *  synthesized-at-compute-time lines never appear there — without this
+   *  field they were silently absent from the accounting ledger (migration
+   *  449's fix). Minimal shape: just what generateLedgerEntries needs to
+   *  post a Dr/Cr pair for each line via its existing GL-mapping fallback. */
+  adhoc_components:      Array<{ code: string; name: string; component_type: string; monthly_amount: number }>
   statutory_snapshot:    StatutorySnapshot
   formula_snapshot:      FormulaSnapshot
   validation_snapshot:   ValidationSnapshot
@@ -231,8 +243,10 @@ async function buildAttendanceSnapshot(
 
   const daily = (rows ?? []) as AttendanceSnapshotRow[]
 
-  const payable_days   = round2(daily.reduce((s, r) => s + (r.day_fraction ?? 1.0), 0))
-  const lop_days       = round2(daily.reduce((s, r) => s + Math.max(0, 1.0 - (r.day_fraction ?? 1.0)), 0))
+  // day_fraction is DECIMAL(3,1) — PostgREST serializes it as a string; Number()-coerce
+  // before summing or the 2nd+ row string-concatenates instead of adding (G13 sweep).
+  const payable_days   = round2(daily.reduce((s, r) => s + Number(r.day_fraction ?? 1.0), 0))
+  const lop_days       = round2(daily.reduce((s, r) => s + Math.max(0, 1.0 - Number(r.day_fraction ?? 1.0)), 0))
   const present_days   = daily.filter(r => r.status === 'present' || r.status === 'late').length
   const late_days      = daily.filter(r => r.status === 'late').length
   const overtime_hours = round2(daily.reduce((s, r) => s + (r.overtime_minutes ?? 0), 0) / 60)
@@ -276,17 +290,21 @@ async function buildCompensationSnapshot(
     name:                c.salary_components?.name ?? '',
     component_type:      c.salary_components?.component_type ?? 'earning',
     calc_type:           c.salary_components?.calc_type ?? 'fixed',
-    value:               c.value ?? 0,
-    monthly_amount:      c.monthly_amount ?? 0,
-    annual_amount:       c.annual_amount ?? 0,
+    // value/monthly_amount/annual_amount are NUMERIC — PostgREST serializes them as
+    // strings. This snapshot is immutable JSONB, and its own type declares `number`,
+    // so convert at write time or every future reader inherits corrupted arithmetic
+    // (G13 sweep).
+    value:               Number(c.value ?? 0),
+    monthly_amount:      Number(c.monthly_amount ?? 0),
+    annual_amount:       Number(c.annual_amount ?? 0),
     sequence:            c.sequence ?? 0,
   })).sort((a: any, b: any) => a.sequence - b.sequence)
 
   const blob = {
     compensation_id:  (comp as any).id,
     effective_from:   (comp as any).effective_from,
-    ctc_annual:       (comp as any).ctc_annual,
-    ctc_monthly:      (comp as any).ctc_monthly,
+    ctc_annual:       Number((comp as any).ctc_annual),
+    ctc_monthly:      Number((comp as any).ctc_monthly),
     salary_structure: (comp as any).salary_structure_id ?? null,
     components,
   }
@@ -399,10 +417,12 @@ async function buildStatutorySnapshot(
 
       if (slabErr) throw new Error(`buildStatutorySnapshot: failed to fetch PTax slabs: ${slabErr.message}`)
 
+      // monthly_income_from/to/ptax are DECIMAL — coerce before they reach the immutable
+      // snapshot, same reasoning as the compensation snapshot above (G13 sweep).
       ptaxSlabs = ((slabRows ?? []) as any[]).map(r => ({
-        from:   r.monthly_income_from,
-        to:     r.monthly_income_to ?? null,
-        amount: r.monthly_ptax,
+        from:   Number(r.monthly_income_from),
+        to:     r.monthly_income_to != null ? Number(r.monthly_income_to) : null,
+        amount: Number(r.monthly_ptax),
       }))
     }
   }
@@ -438,9 +458,9 @@ async function buildStatutorySnapshot(
         declaration_category: d.declaration_category,
         section:              d.section,
         description:          d.description,
-        approved_amount:      d.approved_amount ?? 0,
+        approved_amount:      Number(d.approved_amount ?? 0),
       }))
-      totalApproved = (latestSnap as any).total_approved ?? 0
+      totalApproved = Number((latestSnap as any).total_approved ?? 0)
     } else {
       // Fallback: live approved declarations (not recommended for finalized payroll)
       const { data: liveDels, error: liveDelsErr } = await supabase
@@ -458,25 +478,28 @@ async function buildStatutorySnapshot(
         declaration_category: d.declaration_category,
         section:              d.section,
         description:          d.description,
-        approved_amount:      d.approved_amount ?? 0,
+        approved_amount:      Number(d.approved_amount ?? 0),
       }))
       totalApproved = approvedDecls.reduce((s, d) => s + d.approved_amount, 0)
     }
   }
 
+  // All *_pct/wage_ceiling/default_rate fields below are DECIMAL — coerce before they
+  // enter this immutable snapshot; employer_rate_pct additionally sums two of them,
+  // which string-concatenates if left uncoerced (G13 sweep).
   const blob = {
     pf: {
       enabled:            settings?.pf_enabled             ?? false,
-      employee_rate_pct:  epfConfig?.employee_contribution_pct ?? 12,
-      employer_rate_pct:  (epfConfig?.employer_pf_pct ?? 3.67) + (epfConfig?.employer_eps_pct ?? 8.33),
-      wage_ceiling:       epfConfig?.wage_ceiling              ?? 15000,
+      employee_rate_pct:  Number(epfConfig?.employee_contribution_pct ?? 12),
+      employer_rate_pct:  Number(epfConfig?.employer_pf_pct ?? 3.67) + Number(epfConfig?.employer_eps_pct ?? 8.33),
+      wage_ceiling:       Number(epfConfig?.wage_ceiling              ?? 15000),
       contribution_basis: epfConfig?.is_wage_ceiling_applicable ? 'capped' : 'actual',
     },
     esi: {
       enabled:            settings?.esi_enabled             ?? false,
-      employee_rate_pct:  esiConfig?.employee_contribution_pct  ?? 0.75,
-      employer_rate_pct:  esiConfig?.employer_contribution_pct  ?? 3.25,
-      wage_ceiling:       esiConfig?.wage_ceiling               ?? 21000,
+      employee_rate_pct:  Number(esiConfig?.employee_contribution_pct  ?? 0.75),
+      employer_rate_pct:  Number(esiConfig?.employer_contribution_pct  ?? 3.25),
+      wage_ceiling:       Number(esiConfig?.wage_ceiling               ?? 21000),
     },
     pt: {
       enabled: settings?.pt_enabled ?? false,
@@ -485,7 +508,7 @@ async function buildStatutorySnapshot(
     },
     tds: {
       enabled:                     settings?.tds_enabled        ?? false,
-      default_rate:                settings?.tds_default_rate   ?? 0,
+      default_rate:                Number(settings?.tds_default_rate ?? 0),
       regime:                      settings?.tds_default_regime ?? 'new',
       total_approved_declarations:  totalApproved,
       approved_declarations:        approvedDecls,
@@ -574,6 +597,17 @@ export async function buildEmployeePayrollSnapshot(
     const compBlob   = buildComponentSnapshot(compSnap.components)
     const formulaBlob = buildFormulaSnapshot(compSnap.components)
 
+    // Ad-hoc component_breakdown lines with no catalog backing (see
+    // EmployeeSnapshotBlob.adhoc_components doc comment) — identified by
+    // code, since these are synthesized directly in TS with no real
+    // salary_component_id (applyEncashmentPayout/applyAdvanceLoanRecovery
+    // both set salary_component_id to a request/schedule id, never a real
+    // salary_components.id).
+    const catalogCodes = new Set(compSnap.components.map(c => c.code))
+    const adhocComponents = (slipResult?.component_breakdown ?? [])
+      .filter(c => !catalogCodes.has(c.code))
+      .map(c => ({ code: c.code, name: c.name, component_type: c.component_type, monthly_amount: c.monthly_amount }))
+
     // Fetch employee meta for the blob
     const { data: emp } = await supabase
       .from('employees')
@@ -588,6 +622,7 @@ export async function buildEmployeePayrollSnapshot(
       attendance_snapshot:   attSnap,
       compensation_snapshot: compSnap,
       component_snapshot:    compBlob,
+      adhoc_components:      adhocComponents,
       statutory_snapshot:    statSnap,
       formula_snapshot:      formulaBlob,
       validation_snapshot:   validSnap,
@@ -628,7 +663,7 @@ export async function buildPayrollRunSnapshot(
         .from('payroll_slips')
         .select(`
           employee_id, month, gross_pay, total_deductions, net_pay,
-          payable_days, lop_days, overtime_hours, total_working_days,
+          payable_days, lop_days, overtime_hours, total_working_days, component_breakdown,
           employees ( employee_code, profiles!profile_id ( full_name ) )
         `)
         .eq('run_id', runId)
@@ -666,7 +701,11 @@ export async function buildPayrollRunSnapshot(
           total_deductions:       s.total_deductions ?? 0,
           net_pay:                s.net_pay ?? 0,
           employer_contributions: 0,
-          component_breakdown:    [],
+          // Real component lines from the finalized slip, including any ad-hoc
+          // ones (leave encashment, advance/loan EMI) with no compensation-
+          // catalog row — buildEmployeePayrollSnapshot below diffs these
+          // against the catalog to populate adhoc_components for the ledger.
+          component_breakdown:    s.component_breakdown ?? [],
           recovered_recovery_ids: [],
           deferred_recovery_ids:  [],
         }
@@ -686,6 +725,42 @@ export async function buildPayrollRunSnapshot(
   // Compute combined integrity hash over all employee blobs
   const sortedBlobs = [...successful].sort((a, b) => a.employeeId.localeCompare(b.employeeId))
   const combinedHash = generateSnapshotIntegrityHash(sortedBlobs.map(e => e.blob))
+
+  // payroll_run_snapshots has UNIQUE(run_id) — only one snapshot can exist per
+  // run. This function is called twice in the normal G12 workflow (once right
+  // after the initial draft computation, "so replay/audit trace is available
+  // immediately", and again at finalize time, "the genuinely immutable
+  // artifact") and additionally on every manual re-run of a draft (e.g. after
+  // POST /leave/encashment/:id/assign-payroll-run folds an encashment payout
+  // into an existing slip). Every call after the first used to hit the unique
+  // constraint, fail non-fatally (caught by both call sites' try/catch, logged
+  // as a WARN only), and leave the FIRST — stale, pre-correction — snapshot in
+  // place forever, including at finalize time. A snapshot taken before a
+  // recompute cannot be the correct replay/audit record, so superseding it is
+  // required, not merely tidy.
+  //
+  // payroll_runs.snapshot_id -> payroll_run_snapshots(id) ON DELETE CASCADE,
+  // and the end of this function (below) always points it at whichever
+  // snapshot was just built — including from the draft-time auto-snapshot,
+  // not only at finalize. So the run row ITSELF already references the stale
+  // manifest by the time we get here; deleting that manifest first would
+  // cascade-delete the run. Null out the run's reference before deleting the
+  // stale manifest, then delete the stale manifest's child employee rows
+  // (payroll_employee_snapshots.snapshot_id has ON DELETE RESTRICT) and
+  // finally the manifest itself, so the insert below always succeeds with the
+  // latest data and the final attach-to-run step has a live run row to attach to.
+  const { data: existingSnapshot } = await supabase
+    .from('payroll_run_snapshots')
+    .select('id')
+    .eq('run_id', runId)
+    .eq('tenant_id', tenantId)
+    .maybeSingle()
+
+  if (existingSnapshot?.id) {
+    await supabase.from('payroll_runs').update({ snapshot_id: null }).eq('id', runId).eq('tenant_id', tenantId)
+    await supabase.from('payroll_employee_snapshots').delete().eq('snapshot_id', existingSnapshot.id)
+    await supabase.from('payroll_run_snapshots').delete().eq('id', existingSnapshot.id)
+  }
 
   // Insert snapshot manifest
   const { data: manifest, error: manifestErr } = await supabase
@@ -718,6 +793,7 @@ export async function buildPayrollRunSnapshot(
     attendance_snapshot:   e.blob.attendance_snapshot,
     compensation_snapshot: e.blob.compensation_snapshot,
     component_snapshot:    e.blob.component_snapshot,
+    adhoc_components:      e.blob.adhoc_components,
     statutory_snapshot:    e.blob.statutory_snapshot,
     formula_snapshot:      e.blob.formula_snapshot,
     validation_snapshot:   e.blob.validation_snapshot,
@@ -890,19 +966,22 @@ export async function replayPayrollRun(
       tenantId,
       employeeId: empSnap.employee_id,
       month:      (manifest as any).month,
+      // Number()-coerce defensively here too: this snapshot may have been PERSISTED
+      // before the G13 sweep fixed buildCompensationSnapshot's writer, so a historical
+      // row's JSONB can still hold string values forever (immutable, never rewritten).
       compensation: {
         id:          compSnap.compensation_id,
-        ctc_monthly: compSnap.ctc_monthly,
-        ctc_annual:  compSnap.ctc_annual,
+        ctc_monthly: Number(compSnap.ctc_monthly),
+        ctc_annual:  Number(compSnap.ctc_annual),
         components:  compSnap.components.map((c: any) => ({
           salary_component_id: c.salary_component_id,
           name:                c.name,
           code:                c.code,
           component_type:      c.component_type as 'earning' | 'deduction' | 'employer_contribution',
           calc_type:           c.calc_type,
-          value:               c.value,
-          monthly_amount:      c.monthly_amount,
-          annual_amount:       c.annual_amount,
+          value:               Number(c.value ?? 0),
+          monthly_amount:      Number(c.monthly_amount ?? 0),
+          annual_amount:       Number(c.annual_amount ?? 0),
           sequence:            c.sequence,
         })),
       },
@@ -920,7 +999,7 @@ export async function replayPayrollRun(
       // created before migration 170 added the total_working_days column.
       total_working_days: empSnap.total_working_days > 0
         ? empSnap.total_working_days
-        : (empSnap.payable_days + empSnap.lop_days) || 26,
+        : (Number(empSnap.payable_days ?? 0) + Number(empSnap.lop_days ?? 0)) || 26,
     }
 
     const replayed   = computePayrollSlip(slipInput)

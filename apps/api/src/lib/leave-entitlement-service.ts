@@ -70,6 +70,17 @@ export interface BatchResult {
   errors:               string[]
   /** Employee UUIDs that were credited in this batch run (used to avoid double-accrual in Phase 2). */
   processed_employee_ids: string[]
+  /**
+   * Count of employee+leave-type combinations for which crediting was
+   * BLOCKED this run because both leave_accrual_rules (System A) and
+   * leave_policy_rules (System B, this function) have an active applicable
+   * rule — recorded in leave_accrual_conflicts rather than credited by
+   * either system (SYSTEM_AUDIT_2026-10-14 checkpoint 14). Only populated
+   * by runEngineMonthlyAccrual/runEngineYearlyCredit; absent (undefined)
+   * from callers that predate this field, which is why it is optional
+   * rather than defaulted to 0 everywhere.
+   */
+  conflicted?: number
 }
 
 // ── Year boundary helpers ──────────────────────────────────────────────────────
@@ -440,6 +451,7 @@ export async function runMonthlyAccrual(
     // success; the original per-employee call never checked its own upsert's
     // error at all, which this fixes as part of the batching rewrite).
     const { error: balErr } = await supabase
+      // lint-tenant-ok: balUpserts rows already carry tenant_id (built with tenant_id: tenantId above) — upsert payload is tenant-scoped even though the literal isn't inline in this query chain
       .from('employee_leave_balance')
       .upsert(balUpserts, { onConflict: 'tenant_id,employee_id,leave_type_id,year' })
     if (balErr) {
@@ -693,6 +705,7 @@ export async function runCarryForward(
     if (!upserts.length) continue
 
     const { error: upErr } = await supabase
+      // lint-tenant-ok: upserts rows already carry tenant_id (pushed with tenant_id: tenantId above) — upsert payload is tenant-scoped even though the literal isn't inline in this query chain
       .from('employee_leave_balance')
       .upsert(upserts, { onConflict: 'tenant_id,employee_id,leave_type_id,year' })
 
@@ -757,77 +770,6 @@ interface EnginePolicy {
 }
 
 /**
- * Write a ledger entry to leave_accrual_ledger.  Non-fatal on error.
- *
- * Uses upsert with ignoreDuplicates so that re-running the same job for the
- * same period never creates a second entry (idempotency at the DB level via
- * uidx_accrual_ledger_idempotency on accrual types that support it).
- */
-async function writeLedgerEntry(
-  supabase:    SupabaseClient,
-  tenantId:    string,
-  employeeId:  string,
-  leaveTypeId: string,
-  accrualType: string,
-  days:        number,
-  year:        number,
-  accrualDate: string,  // YYYY-MM-DD; stored in `accrued_on` (was incorrectly `run_date`)
-  expiresOn:   string | null,
-  note?:       string,
-): Promise<{ skipped: boolean }> {
-  try {
-    // Pre-check the composite idempotency key so callers can gate the
-    // (non-idempotent) balance-cache credit on whether this row already existed —
-    // re-running an accrual must not double-credit the cache.
-    const { data: existing } = await supabase
-      .from('leave_accrual_ledger')
-      .select('id')
-      .eq('tenant_id',     tenantId)
-      .eq('employee_id',   employeeId)
-      .eq('leave_type_id', leaveTypeId)
-      .eq('year',          year)
-      .eq('accrual_type',  accrualType)
-      .eq('accrued_on',    accrualDate)
-      .maybeSingle()
-    if (existing) return { skipped: true }
-
-    const { error: upsertErr } = await supabase.from('leave_accrual_ledger').upsert(
-      {
-        tenant_id:     tenantId,
-        employee_id:   employeeId,
-        leave_type_id: leaveTypeId,
-        accrual_type:  accrualType,
-        days,
-        year,
-        accrued_on:    accrualDate,   // correct column name (not run_date)
-        expires_on:    expiresOn,
-        is_expired:    false,
-        notes:         note ?? null,  // correct column name (not note)
-      },
-      {
-        onConflict:       'tenant_id,employee_id,leave_type_id,year,accrual_type,accrued_on',
-        ignoreDuplicates: true,
-      },
-    )
-    if (upsertErr) {
-      // The balance-cache write (creditEmployeeDays / an RPC) is the primary
-      // source of truth and has already committed by the time callers act on
-      // this — don't revert it. But a missing ledger row means a later
-      // reconciliation/carry-forward run rebuilding balances from this ledger
-      // would silently diverge from the cache, so make it discoverable.
-      console.warn(
-        `[leave-entitlement-service] leave_accrual_ledger upsert failed for employee=${employeeId} leaveType=${leaveTypeId} accrualType=${accrualType} year=${year} days=${days}:`,
-        upsertErr.message,
-      )
-    }
-    return { skipped: false }
-  } catch {
-    // swallow — ledger write is supplemental; balance update is primary
-    return { skipped: false }
-  }
-}
-
-/**
  * Compute quarterly accrual days for an engine policy rule.
  * Each quarter = accrual_days_per_year / 4, rounded to 1 dp.
  */
@@ -838,15 +780,36 @@ function computeEngineQuarterlyAmount(rule: EnginePolicyRule): number {
 /**
  * runEngineMonthlyAccrual — engine-aware version of runMonthlyAccrual.
  *
- * Processes employees that have an active named policy assignment.
+ * Processes every active employee against the FULL scope-resolution chain
+ * — employee > department > work_location > site > default — not just
+ * employees with a personal (employee-scope) override.
+ *
+ * SYSTEM_AUDIT_2026-10-14 checkpoint 14 — this used to query ONLY
+ * scope_type='employee' leave_policy_assignments. Department/work_location/
+ * site/default-scoped assignments are a real, fully-supported configuration
+ * surface (masters/leave-policy-assignments.ts's own scope_type check
+ * constraint and SCOPE_PRIORITY map) — the most common real-world shape,
+ * since most employees are covered by a broader scope rather than a named
+ * individual override. Every such employee received ZERO accrual from this
+ * function, confirmed via scripts/db/verify-accrual-scope-gap.mjs. Fixed by
+ * resolving the same priority order in memory for every employee × every
+ * leave type with an active monthly/quarterly rule anywhere in the tenant
+ * — resolveScopeCandidates()/resolveApplicableRule() below mirror
+ * resolve_engine_policy_rule() (migration 470), the canonical SQL resolver
+ * also used as the authoritative conflict check inside
+ * credit_engine_accrual_atomic and credit_monthly_accrual_batch. Both are
+ * tested to agree (scripts/db/verify-scoped-policy-accrual.mjs).
+ *
  * Supports monthly AND quarterly accrual types from leave_policy_rules.
  * For quarterly types, credits only on the first month of each quarter
  * (months 1, 4, 7, 10 for calendar year; 4, 7, 10, 1 for financial year).
  *
  * Writes ledger entries in addition to updating employee_leave_balance.
- *
- * Employees WITHOUT a named policy assignment are handled by the legacy
- * runMonthlyAccrual — this function does NOT overlap with them.
+ * Employees ALSO covered by an active leave_accrual_rules (System A) row
+ * for the same leave type are not credited here — credit_engine_accrual_
+ * atomic detects that overlap inside its own transaction and records it
+ * in leave_accrual_conflicts instead (SYSTEM_AUDIT_2026-10-14 checkpoint
+ * 14's second confirmed defect — see migration 470's header).
  *
  * @param year   leave year
  * @param month  1-indexed month (1 = January)
@@ -865,47 +828,48 @@ export async function runEngineMonthlyAccrual(
     skipped:               0,
     errors:                [],
     processed_employee_ids: [],
+    conflicted:             0,
   }
 
   const effectiveAsOf = asOf ?? `${year}-${String(month).padStart(2, '0')}-01`
   const runDate       = effectiveAsOf
+  const runPeriod     = `${year}-${String(month).padStart(2, '0')}`
 
-  // ── Step 2: Fetch only assignments active on the accrual date ─────────
-  // DB-level filters push the effective-date window to PostgREST:
-  //   effective_from IS NULL  OR  effective_from <= asOf
-  //   effective_to   IS NULL  OR  effective_to   >= asOf
-  const { data: assignments, error: aErr } = await supabase
-    .from('leave_policy_assignments')
-    .select('employee_id: scope_id, policy_id, scope_type, effective_from, effective_to')
-    .eq('tenant_id',  tenantId)
-    .eq('scope_type', 'employee')
-    .or(`effective_from.is.null,effective_from.lte.${effectiveAsOf}`)
-    .or(`effective_to.is.null,effective_to.gte.${effectiveAsOf}`)
-
-  if (aErr) {
-    result.errors.push(`Failed to fetch assignments: ${aErr.message}`)
+  // ── Fetch ALL active assignments (every scope type) active on the
+  // accrual date. scope_type='employee' can scale with employee count;
+  // the others are naturally small (bounded by # departments/work
+  // locations/sites + at most one 'default' row) — fetchAllRows handles
+  // both without a CLAUDE.md-class truncation risk either way.
+  let assignments: Array<{ scope_type: string; scope_id: string | null; policy_id: string }>
+  try {
+    assignments = await fetchAllRows((from, to) =>
+      supabase
+        .from('leave_policy_assignments')
+        .select('scope_type, scope_id, policy_id')
+        .eq('tenant_id', tenantId)
+        .or(`effective_from.is.null,effective_from.lte.${effectiveAsOf}`)
+        .or(`effective_to.is.null,effective_to.gte.${effectiveAsOf}`)
+        .range(from, to),
+    )
+  } catch (err) {
+    result.errors.push(`Failed to fetch assignments: ${(err as Error).message}`)
     return result
   }
 
-  // ── Step 3: One-policy-per-employee guard ─────────────────────────────────
-  // If the same employee has more than one active assignment (misconfiguration),
-  // keep only the first encountered.  Because we only fetch scope_type='employee'
-  // assignments, the first entry in the DB result is treated as the canonical
-  // one (insertion order).  This prevents double-accrual from duplicate rows.
-  const seenEmployees     = new Set<string>()
-  const deduplicatedRaw   = (assignments ?? []) as Array<{
-    employee_id: string; policy_id: string
-  }>
-  const activeAssignments = deduplicatedRaw.filter(a => {
-    if (seenEmployees.has(a.employee_id)) return false
-    seenEmployees.add(a.employee_id)
-    return true
-  })
+  if (!assignments.length) return result
 
-  if (!activeAssignments.length) return result
+  // Index: scope_type -> scope_id (or '' for default) -> policy_id. The
+  // DB-level UNIQUE (tenant_id, scope_type, scope_id) guarantees at most
+  // one row per key, so this index can never collide.
+  const assignmentIndex = new Map<string, Map<string, string>>()
+  for (const a of assignments) {
+    const byScopeId = assignmentIndex.get(a.scope_type) ?? new Map<string, string>()
+    byScopeId.set(a.scope_id ?? '', a.policy_id)
+    assignmentIndex.set(a.scope_type, byScopeId)
+  }
 
-  // ── Load unique policy masters + rules ─────────────────────────────────
-  const policyIds = [...new Set(activeAssignments.map(a => a.policy_id))]
+  // ── Load policy masters + rules for every referenced policy ────────────
+  const policyIds = [...new Set(assignments.map(a => a.policy_id))]
 
   const [{ data: masters }, { data: rules }] = await Promise.all([
     supabase
@@ -931,62 +895,83 @@ export async function runEngineMonthlyAccrual(
     ((masters ?? []) as EnginePolicy[]).map(m => [m.id, m]),
   )
 
-  // Group rules by policy_id, filtering inactive rules
-  const rulesByPolicy = new Map<string, EnginePolicyRule[]>()
+  // rulesByPolicyAndType[policy_id][leave_type_id] = rule (effective-dated)
+  const rulesByPolicyAndType = new Map<string, Map<string, EnginePolicyRule>>()
+  const allLeaveTypeIds = new Set<string>()
   for (const rule of (rules ?? []) as EnginePolicyRule[]) {
     if (rule.effective_from && effectiveAsOf < rule.effective_from) continue
     if (rule.effective_to   && effectiveAsOf > rule.effective_to)   continue
-    const existing = rulesByPolicy.get(rule.policy_id) ?? []
-    existing.push(rule)
-    rulesByPolicy.set(rule.policy_id, existing)
+    const byType = rulesByPolicyAndType.get(rule.policy_id) ?? new Map<string, EnginePolicyRule>()
+    byType.set(rule.leave_type_id, rule)
+    rulesByPolicyAndType.set(rule.policy_id, byType)
+    allLeaveTypeIds.add(rule.leave_type_id)
+  }
+  if (!allLeaveTypeIds.size) return result
+
+  // ── Canonical scope-priority resolver (mirrors resolve_engine_policy_
+  // rule() in migration 470, the SQL ground truth used for the execution-
+  // time conflict check — kept in sync and tested to agree, see
+  // scripts/db/verify-scoped-policy-accrual.mjs).
+  const SCOPE_PRIORITY = ['employee', 'department', 'work_location', 'site', 'default'] as const
+  function resolveApplicableRule(
+    emp: { id: string; department_id: string | null; work_location_id: string | null; site_id: string | null },
+    leaveTypeId: string,
+  ): EnginePolicyRule | null {
+    for (const scopeType of SCOPE_PRIORITY) {
+      const scopeId =
+        scopeType === 'employee'      ? emp.id :
+        scopeType === 'department'    ? emp.department_id :
+        scopeType === 'work_location' ? emp.work_location_id :
+        scopeType === 'site'          ? emp.site_id :
+        /* default */                   null
+      if (scopeType !== 'default' && !scopeId) continue
+      const policyId = assignmentIndex.get(scopeType)?.get(scopeId ?? '')
+      if (!policyId) continue
+      const rule = rulesByPolicyAndType.get(policyId)?.get(leaveTypeId)
+      if (rule) return rule
+    }
+    return null
   }
 
-  // ── Fetch all active employees in this tenant ──────────────────────────
-  let employees: Array<{ id: string; joining_date: string | null }>
-  let eErr: unknown = null
+  // ── Fetch all active employees in this tenant, with the scope columns
+  // the resolver needs. employees.department_id/work_location_id/site_id
+  // are kept in sync with job_history's current row by
+  // trg_sync_employee_job_fields (migration 470's header), so no join is
+  // needed — the same "current, not historical-as-of" semantics the
+  // existing lifecycle/duration resolvers already use.
+  let employees: Array<{
+    id: string; joining_date: string | null
+    department_id: string | null; work_location_id: string | null; site_id: string | null
+  }>
   try {
     employees = await fetchAllRows((from, to) =>
       supabase
         .from('employees')
-        .select('id, joining_date')
+        .select('id, joining_date, department_id, work_location_id, site_id')
         .eq('tenant_id', tenantId)
         .eq('status',    'active')
         .order('id')
         .range(from, to),
     )
   } catch (err) {
-    employees = []
-    eErr = err
-  }
-
-  if (eErr) {
-    result.errors.push(`Failed to fetch employees: ${(eErr as Error).message}`)
+    result.errors.push(`Failed to fetch employees: ${(err as Error).message}`)
     return result
   }
 
-  const empMap = new Map<string, { joining_date: string | null }>(
-    employees.map(e => [e.id, { joining_date: e.joining_date }]),
-  )
-
   const asOfDate = new Date(`${effectiveAsOf}T12:00:00.000Z`)
 
-  // ── Process each assignment ────────────────────────────────────────────
-  for (const assignment of activeAssignments) {
-    const emp    = empMap.get(assignment.employee_id)
-    if (!emp?.joining_date) { result.skipped++; continue }
+  // ── Process every employee × every leave type with an active rule ──────
+  for (const emp of employees) {
+    if (!emp.joining_date) { result.skipped++; continue }
 
-    const master = masterMap.get(assignment.policy_id)
-    if (!master) { result.skipped++; continue }
+    for (const leaveTypeId of allLeaveTypeIds) {
+      const rule = resolveApplicableRule(emp, leaveTypeId)
+      if (!rule) continue   // not covered by any scope for this leave type
 
-    const policyRules = rulesByPolicy.get(assignment.policy_id) ?? []
-    if (!policyRules.length) { result.skipped++; continue }
+      const master = masterMap.get(rule.policy_id)
+      if (!master) { result.skipped++; continue }
+      const yearType = master.year_type as 'calendar' | 'financial'
 
-    const yearType = master.year_type as 'calendar' | 'financial'
-
-    for (const rule of policyRules) {
-      const leaveTypeId = rule.leave_type_id
-
-      // Build a synthetic LeavePolicy for eligibility check
       const syntheticPolicy: LeavePolicy = {
         id:                     rule.id,
         tenant_id:              tenantId,
@@ -1005,49 +990,56 @@ export async function runEngineMonthlyAccrual(
       const elig = checkEligibility(emp.joining_date, syntheticPolicy, asOfDate)
       if (!elig.eligible) { result.skipped++; continue }
 
-      // Determine credit amount
       let accrualAmount = 0
-
       if (rule.accrual_type === 'monthly') {
         accrualAmount = round1(Number(rule.accrual_days_per_year) / 12)
       } else if (rule.accrual_type === 'quarterly') {
-        // Step 3: quarterly accrual fires only in the four calendar quarter-start
-        // months — Jan(1), Apr(4), Jul(7), Oct(10) — regardless of year_type.
-        // Both calendar and financial year quarters start in these same months
-        // (FY just labels them Q4/Q1/Q2/Q3 instead of Q1/Q2/Q3/Q4).
         const QUARTER_START_MONTHS = [1, 4, 7, 10] as const
         if (!(QUARTER_START_MONTHS as readonly number[]).includes(month)) {
           result.skipped++; continue
         }
         accrualAmount = computeEngineQuarterlyAmount(rule)
       }
-
       if (accrualAmount <= 0) { result.skipped++; continue }
 
       try {
-        // Ledger-first, then gate the non-idempotent cache credit on insertion so
-        // re-running the engine accrual for the same period can't double-credit.
-        const { skipped: alreadyCredited } = await writeLedgerEntry(
-          supabase, tenantId, assignment.employee_id, leaveTypeId,
-          rule.accrual_type, accrualAmount, year, runDate, null,
-          `Engine ${rule.accrual_type} accrual — policy ${assignment.policy_id}`,
-        )
-        if (alreadyCredited) { result.skipped++; continue }
-
-        await creditEmployeeDays(
-          supabase, tenantId, assignment.employee_id, leaveTypeId,
-          accrualAmount, year, rule.max_accrual_balance,
-        )
+        // credit_engine_accrual_atomic (migrations 469 + 470) does the
+        // ledger insert + balance credit in one transaction, AND — as of
+        // migration 470 — checks inside that SAME transaction whether
+        // leave_accrual_rules (System A) also has an active rule for this
+        // leave type as of this date. If so it skips crediting and records
+        // the conflict in leave_accrual_conflicts instead of double-
+        // crediting; `creditResult.conflict` distinguishes that from a
+        // plain idempotent replay (`creditResult.skipped` with
+        // `conflict: false`).
+        const { data: creditResult, error: creditErr } = await supabase.rpc('credit_engine_accrual_atomic', {
+          p_tenant_id:     tenantId,
+          p_employee_id:   emp.id,
+          p_leave_type_id: leaveTypeId,
+          p_accrual_type:  rule.accrual_type,
+          p_days:          accrualAmount,
+          p_year:          year,
+          p_accrued_on:    runDate,
+          p_notes:         `Engine ${rule.accrual_type} accrual — policy ${rule.policy_id}`,
+          p_max_balance:   rule.max_accrual_balance ?? null,
+          p_period:        runPeriod,
+        })
+        if (creditErr) throw new Error(creditErr.message)
+        const typedResult = creditResult as { skipped: boolean; conflict: boolean }
+        if (typedResult.skipped) {
+          if (typedResult.conflict) result.conflicted = (result.conflicted ?? 0) + 1
+          else result.skipped++
+          continue
+        }
 
         result.employees_processed++
         result.total_days_credited = round1(result.total_days_credited + accrualAmount)
-        // Step 1: track which employees were credited so Phase 2 (legacy) can skip them
-        if (!result.processed_employee_ids.includes(assignment.employee_id)) {
-          result.processed_employee_ids.push(assignment.employee_id)
+        if (!result.processed_employee_ids.includes(emp.id)) {
+          result.processed_employee_ids.push(emp.id)
         }
       } catch (err: any) {
         result.errors.push(
-          `emp ${assignment.employee_id} / type ${leaveTypeId}: ${err?.message ?? 'unknown error'}`,
+          `emp ${emp.id} / type ${leaveTypeId}: ${err?.message ?? 'unknown error'}`,
         )
       }
     }
@@ -1077,40 +1069,46 @@ export async function runEngineYearlyCredit(
     skipped:               0,
     errors:                [],
     processed_employee_ids: [],
+    conflicted:             0,
   }
 
   // Default asOf to Jan 1 of the leave year
   const effectiveAsOf = asOf ?? `${leaveYear}-01-01`
   const runDate       = effectiveAsOf
+  const runPeriod     = String(leaveYear)
 
-  // ── Step 2: Fetch only assignments active on the accrual date ─────────
-  const { data: assignments, error: aErr } = await supabase
-    .from('leave_policy_assignments')
-    .select('employee_id: scope_id, policy_id, scope_type, effective_from, effective_to')
-    .eq('tenant_id',  tenantId)
-    .eq('scope_type', 'employee')
-    .or(`effective_from.is.null,effective_from.lte.${effectiveAsOf}`)
-    .or(`effective_to.is.null,effective_to.gte.${effectiveAsOf}`)
-
-  if (aErr) {
-    result.errors.push(`Failed to fetch assignments: ${aErr.message}`)
+  // SYSTEM_AUDIT_2026-10-14 checkpoint 14 — same full scope-chain fix as
+  // runEngineMonthlyAccrual above (see its header comment for the full
+  // writeup): fetch EVERY active assignment (every scope type), not just
+  // scope_type='employee', and resolve per employee × leave type via the
+  // same priority order mirrored from resolve_engine_policy_rule()
+  // (migration 470).
+  let assignments: Array<{ scope_type: string; scope_id: string | null; policy_id: string }>
+  try {
+    assignments = await fetchAllRows((from, to) =>
+      supabase
+        .from('leave_policy_assignments')
+        .select('scope_type, scope_id, policy_id')
+        .eq('tenant_id', tenantId)
+        .or(`effective_from.is.null,effective_from.lte.${effectiveAsOf}`)
+        .or(`effective_to.is.null,effective_to.gte.${effectiveAsOf}`)
+        .range(from, to),
+    )
+  } catch (err) {
+    result.errors.push(`Failed to fetch assignments: ${(err as Error).message}`)
     return result
   }
 
-  // ── Step 3: One-policy-per-employee guard (yearly) ────────────────────────
-  const seenEmployeesY      = new Set<string>()
-  const deduplicatedRawY    = (assignments ?? []) as Array<{
-    employee_id: string; policy_id: string
-  }>
-  const activeAssignments   = deduplicatedRawY.filter(a => {
-    if (seenEmployeesY.has(a.employee_id)) return false
-    seenEmployeesY.add(a.employee_id)
-    return true
-  })
+  if (!assignments.length) return result
 
-  if (!activeAssignments.length) return result
+  const assignmentIndex = new Map<string, Map<string, string>>()
+  for (const a of assignments) {
+    const byScopeId = assignmentIndex.get(a.scope_type) ?? new Map<string, string>()
+    byScopeId.set(a.scope_id ?? '', a.policy_id)
+    assignmentIndex.set(a.scope_type, byScopeId)
+  }
 
-  const policyIds = [...new Set(activeAssignments.map(a => a.policy_id))]
+  const policyIds = [...new Set(assignments.map(a => a.policy_id))]
 
   const [{ data: masters }, { data: rules }] = await Promise.all([
     supabase.from('leave_policy_masters')
@@ -1134,57 +1132,70 @@ export async function runEngineYearlyCredit(
     ((masters ?? []) as EnginePolicy[]).map(m => [m.id, m]),
   )
 
-  const rulesByPolicy = new Map<string, EnginePolicyRule[]>()
+  const rulesByPolicyAndType = new Map<string, Map<string, EnginePolicyRule>>()
+  const allLeaveTypeIds = new Set<string>()
   for (const rule of (rules ?? []) as EnginePolicyRule[]) {
     if (rule.effective_from && effectiveAsOf < rule.effective_from) continue
     if (rule.effective_to   && effectiveAsOf > rule.effective_to)   continue
-    const existing = rulesByPolicy.get(rule.policy_id) ?? []
-    existing.push(rule)
-    rulesByPolicy.set(rule.policy_id, existing)
+    const byType = rulesByPolicyAndType.get(rule.policy_id) ?? new Map<string, EnginePolicyRule>()
+    byType.set(rule.leave_type_id, rule)
+    rulesByPolicyAndType.set(rule.policy_id, byType)
+    allLeaveTypeIds.add(rule.leave_type_id)
+  }
+  if (!allLeaveTypeIds.size) return result
+
+  const SCOPE_PRIORITY = ['employee', 'department', 'work_location', 'site', 'default'] as const
+  function resolveApplicableRule(
+    emp: { id: string; department_id: string | null; work_location_id: string | null; site_id: string | null },
+    leaveTypeId: string,
+  ): EnginePolicyRule | null {
+    for (const scopeType of SCOPE_PRIORITY) {
+      const scopeId =
+        scopeType === 'employee'      ? emp.id :
+        scopeType === 'department'    ? emp.department_id :
+        scopeType === 'work_location' ? emp.work_location_id :
+        scopeType === 'site'          ? emp.site_id :
+        /* default */                   null
+      if (scopeType !== 'default' && !scopeId) continue
+      const policyId = assignmentIndex.get(scopeType)?.get(scopeId ?? '')
+      if (!policyId) continue
+      const rule = rulesByPolicyAndType.get(policyId)?.get(leaveTypeId)
+      if (rule) return rule
+    }
+    return null
   }
 
-  let employees: Array<{ id: string; joining_date: string | null }>
-  let eErr: unknown = null
+  let employees: Array<{
+    id: string; joining_date: string | null
+    department_id: string | null; work_location_id: string | null; site_id: string | null
+  }>
   try {
     employees = await fetchAllRows((from, to) =>
       supabase
         .from('employees')
-        .select('id, joining_date')
+        .select('id, joining_date, department_id, work_location_id, site_id')
         .eq('tenant_id', tenantId)
         .eq('status',    'active')
         .order('id')
         .range(from, to),
     )
   } catch (err) {
-    employees = []
-    eErr = err
-  }
-
-  if (eErr) {
-    result.errors.push(`Failed to fetch employees: ${(eErr as Error).message}`)
+    result.errors.push(`Failed to fetch employees: ${(err as Error).message}`)
     return result
   }
 
-  const empMap = new Map<string, { joining_date: string | null }>(
-    employees.map(e => [e.id, { joining_date: e.joining_date }]),
-  )
-
   const asOfDate = new Date(`${effectiveAsOf}T12:00:00.000Z`)
 
-  for (const assignment of activeAssignments) {
-    const emp    = empMap.get(assignment.employee_id)
-    if (!emp?.joining_date) { result.skipped++; continue }
+  for (const emp of employees) {
+    if (!emp.joining_date) { result.skipped++; continue }
 
-    const master = masterMap.get(assignment.policy_id)
-    if (!master) { result.skipped++; continue }
+    for (const leaveTypeId of allLeaveTypeIds) {
+      const rule = resolveApplicableRule(emp, leaveTypeId)
+      if (!rule) continue
 
-    const policyRules = rulesByPolicy.get(assignment.policy_id) ?? []
-    if (!policyRules.length) { result.skipped++; continue }
-
-    const yearType = master.year_type as 'calendar' | 'financial'
-
-    for (const rule of policyRules) {
-      const leaveTypeId = rule.leave_type_id
+      const master = masterMap.get(rule.policy_id)
+      if (!master) { result.skipped++; continue }
+      const yearType = master.year_type as 'calendar' | 'financial'
 
       const syntheticPolicy: LeavePolicy = {
         id:                     rule.id,
@@ -1204,43 +1215,10 @@ export async function runEngineYearlyCredit(
       const days = computeEntitlement(emp.joining_date, syntheticPolicy, leaveYear)
       if (days <= 0) { result.skipped++; continue }
 
-      // Check eligibility
       const elig = checkEligibility(emp.joining_date, syntheticPolicy, asOfDate)
       if (!elig.eligible) { result.skipped++; continue }
 
       try {
-        // Idempotency: skip if balance row already exists for this year
-        const { data: existing } = await supabase
-          .from('employee_leave_balance')
-          .select('id')
-          .eq('tenant_id',     tenantId)
-          .eq('employee_id',   assignment.employee_id)
-          .eq('leave_type_id', leaveTypeId)
-          .eq('year',          leaveYear)
-          .maybeSingle()
-
-        if (existing) { result.skipped++; continue }
-
-        const { error: balInsErr } = await supabase.from('employee_leave_balance').insert({
-          tenant_id:     tenantId,
-          employee_id:   assignment.employee_id,
-          leave_type_id: leaveTypeId,
-          year:          leaveYear,
-          balance:       days,
-          updated_at:    new Date().toISOString(),
-        })
-        if (balInsErr) {
-          // A missing initial balance row silently manifests to the employee
-          // as "0 entitlement" with no trace of why — make it discoverable.
-          result.errors.push(`emp ${assignment.employee_id} / type ${leaveTypeId}: employee_leave_balance insert failed — ${balInsErr.message}`)
-          console.warn(
-            `[leave-entitlement-service] employee_leave_balance insert failed employee=${assignment.employee_id} leaveType=${leaveTypeId} year=${leaveYear}:`,
-            balInsErr.message,
-          )
-          continue
-        }
-
-        // Write expiring ledger entry if expiry_days is set
         let expiresOn: string | null = null
         if (rule.expiry_days) {
           const exp = new Date(`${effectiveAsOf}T12:00:00.000Z`)
@@ -1248,21 +1226,46 @@ export async function runEngineYearlyCredit(
           expiresOn = exp.toISOString().slice(0, 10)
         }
 
-        await writeLedgerEntry(
-          supabase, tenantId, assignment.employee_id, leaveTypeId,
-          rule.accrual_type, days, leaveYear, runDate, expiresOn,
-          `Engine ${rule.accrual_type} credit — policy ${assignment.policy_id}`,
-        )
+        // SYSTEM_AUDIT_2026-10-14 checkpoint 14 — reuses the SAME atomic
+        // RPC as the monthly path (migrations 469 + 470): the ledger
+        // row's uniqueness on (employee, leave_type, year, accrual_type,
+        // accrued_on) is what actually enforces "grant once per year" —
+        // accrued_on is always this leave year's canonical runDate
+        // (Jan 1 unless overridden), so a repeat call for the same year
+        // always collides on the same key and is skipped, same guarantee
+        // the old separate "does a balance row already exist" pre-check
+        // was reaching for, but now race-safe and atomic with the credit
+        // itself, and conflict-checked against System A
+        // (leave_accrual_rules) the same way the monthly path is.
+        const { data: creditResult, error: creditErr } = await supabase.rpc('credit_engine_accrual_atomic', {
+          p_tenant_id:     tenantId,
+          p_employee_id:   emp.id,
+          p_leave_type_id: leaveTypeId,
+          p_accrual_type:  rule.accrual_type,
+          p_days:          days,
+          p_year:          leaveYear,
+          p_accrued_on:    runDate,
+          p_expires_on:    expiresOn,
+          p_notes:         `Engine ${rule.accrual_type} credit — policy ${rule.policy_id}`,
+          p_max_balance:   rule.max_accrual_balance ?? null,
+          p_period:        runPeriod,
+        })
+        if (creditErr) throw new Error(creditErr.message)
+        const typedResult = creditResult as { skipped: boolean; conflict: boolean }
+        if (typedResult.skipped) {
+          if (typedResult.conflict) result.conflicted = (result.conflicted ?? 0) + 1
+          else result.skipped++
+          continue
+        }
 
         result.employees_processed++
         result.total_days_credited = round1(result.total_days_credited + days)
-        // Step 1: track credited employees to prevent Phase 2 double-accrual
-        if (!result.processed_employee_ids.includes(assignment.employee_id)) {
-          result.processed_employee_ids.push(assignment.employee_id)
+        if (!result.processed_employee_ids.includes(emp.id)) {
+          result.processed_employee_ids.push(emp.id)
         }
       } catch (err: any) {
         result.errors.push(
-          `emp ${assignment.employee_id} / type ${leaveTypeId}: ${err?.message ?? 'unknown error'}`,
+          `emp ${emp.id} / type ${leaveTypeId}: ${err?.message ?? 'unknown error'}`,
         )
       }
     }

@@ -27,10 +27,54 @@ import {
   resolveEffectivePolicyRule,
 } from '../../lib/leave-policy-service.js'
 import { fetchTenantTz, utcToLocalDate } from '../../lib/attendance-engine.js'
-import { MANAGER_ROLES } from '../../lib/rbac.js'
+import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { getDirectReportIds } from '../../lib/manager-scope.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+
+/**
+ * SYSTEM_AUDIT_2026-10-14 checkpoint 10+1 — `!MANAGER_ROLES.includes(role)`
+ * skipped this ownership check for EVERY manager-tier role, not just HR —
+ * so a plain `manager` with zero reporting relationship to `employeeId`
+ * could resolve any tenant employee's leave policy (accrual rate,
+ * eligibility days, minimum service) plus name/employee_code/joining_date,
+ * tenant-wide. Mirrors the sibling leave-duration.ts's self/HR/
+ * getDirectReportIds pattern. Returns true if the caller may proceed;
+ * false if it has already sent a 403/500 response.
+ */
+async function checkPolicyAccess(
+  fastify:    FastifyInstance,
+  req:        any,
+  reply:      any,
+  employeeId: string,
+): Promise<boolean> {
+  if ((HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)) return true
+
+  const { data: profile, error: profileError } = await fastify.supabase
+    .from('profiles')
+    .select('employee_id')
+    .eq('id', req.userId)
+    .eq('tenant_id', req.tenantId)
+    .maybeSingle()
+
+  // A discarded error here previously collapsed into the 403 below,
+  // masking a genuine backend failure as an authorization denial.
+  if (profileError) {
+    serverError(req, reply, profileError, ErrorCode.QUERY_FAILED, 'Failed to resolve caller identity')
+    return false
+  }
+  const myEmployeeId = (profile as { employee_id: string | null } | null)?.employee_id ?? null
+  if (myEmployeeId === employeeId) return true
+
+  if (myEmployeeId && req.userRole === 'manager') {
+    const reportIds = await getDirectReportIds(fastify.supabase, req.tenantId, myEmployeeId)
+    if (reportIds.includes(employeeId)) return true
+  }
+
+  reply.code(403).send({ error: 'FORBIDDEN', message: 'You can only view your own policy' })
+  return false
+}
 
 export default async function leavePolicyResolveRoute(fastify: FastifyInstance) {
   const auth = { preHandler: [fastify.authenticate] }
@@ -47,27 +91,9 @@ export default async function leavePolicyResolveRoute(fastify: FastifyInstance) 
 
     const includeDebug = (req.query as any).debug === 'true'
 
-    // Non-admins may only resolve their own policy
-    if (!MANAGER_ROLES.includes(req.userRole)) {
-      const { data: profile, error: profileError } = await fastify.supabase
-        .from('profiles')
-        .select('employee_id')
-        .eq('id', req.userId)
-        .eq('tenant_id', req.tenantId)
-        .maybeSingle()
-
-      // A discarded error here previously collapsed into the 403 below,
-      // masking a genuine backend failure as an authorization denial.
-      if (profileError) {
-        return serverError(req, reply, profileError, ErrorCode.QUERY_FAILED, 'Failed to resolve caller identity')
-      }
-      if (profile?.employee_id !== employeeId) {
-        return reply.code(403).send({
-          error:   'FORBIDDEN',
-          message: 'You can only view your own policy',
-        })
-      }
-    }
+    // Non-admins may only resolve their own policy, or (for a manager) a
+    // direct report's.
+    if (!(await checkPolicyAccess(fastify, req, reply, employeeId))) return
 
     // Verify employee belongs to tenant
     const { data: emp } = await fastify.supabase
@@ -122,27 +148,9 @@ export default async function leavePolicyResolveRoute(fastify: FastifyInstance) 
     const asOf: string | undefined =
       rawAsOf && DATE_RE.test(rawAsOf) ? rawAsOf : undefined
 
-    // Non-admins may only resolve their own policy
-    if (!MANAGER_ROLES.includes(req.userRole)) {
-      const { data: profile, error: profileError } = await fastify.supabase
-        .from('profiles')
-        .select('employee_id')
-        .eq('id', req.userId)
-        .eq('tenant_id', req.tenantId)
-        .maybeSingle()
-
-      // A discarded error here previously collapsed into the 403 below,
-      // masking a genuine backend failure as an authorization denial.
-      if (profileError) {
-        return serverError(req, reply, profileError, ErrorCode.QUERY_FAILED, 'Failed to resolve caller identity')
-      }
-      if (profile?.employee_id !== employeeId) {
-        return reply.code(403).send({
-          error:   'FORBIDDEN',
-          message: 'You can only view your own policy',
-        })
-      }
-    }
+    // Non-admins may only resolve their own policy, or (for a manager) a
+    // direct report's.
+    if (!(await checkPolicyAccess(fastify, req, reply, employeeId))) return
 
     // Verify employee + leave type belong to tenant
     const [{ data: emp }, { data: lt }] = await Promise.all([

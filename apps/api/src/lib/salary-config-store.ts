@@ -246,6 +246,7 @@ export async function seedStandardComponents(
 ): Promise<StoreResult> {
   const rows = STANDARD_SALARY_COMPONENTS.map(s => ({ ...s, tenant_id: tenantId, is_active: true }))
   const { data, error } = await supabase
+    // lint-tenant-ok: `rows` (built above) already stamps tenant_id: tenantId on every row — not visible to the scanner through the variable indirection
     .from('salary_components')
     .upsert(rows, { onConflict: 'tenant_id,code', ignoreDuplicates: true })
     .select('id')

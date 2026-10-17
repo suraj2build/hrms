@@ -193,6 +193,7 @@ async function processSingleSource(supabase: SupabaseClient, source: any): Promi
       last_fetch_count:  ingested,
       last_fetched_at:   new Date().toISOString(),
     })
+    .eq('tenant_id', source.tenant_id)
     .eq('id', source.id)
   // Same stuck-at-'running' risk as the error-status write above.
   if (successErr) console.warn(`[att-api-scheduler] source ${source.id} failed to record fetch success:`, successErr.message)

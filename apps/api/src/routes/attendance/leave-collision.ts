@@ -15,9 +15,10 @@ import {
   computeCollision,
   resolveCollisionPolicy,
 } from '../../lib/collision-engine.js'
-import { resolveEmployeeOrgContext, getLocalDate } from '../../lib/org-context.js'
+import { resolveEmployeeOrgContext, getLocalDate, withHolidayGroupIds } from '../../lib/org-context.js'
 import { fetchTenantTz } from '../../lib/attendance-engine.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { getDirectReportIds } from '../../lib/manager-scope.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
@@ -50,6 +51,33 @@ export default async function leaveCollisionRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
       .maybeSingle()
     if (!emp) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Employee not found' })
+
+    // SYSTEM_AUDIT_2026-10-14 checkpoint 10+1 — ownership check, mirroring
+    // the sibling leave-duration.ts's POST /leave/duration/preview. Tenant
+    // scoping alone isn't enough: any authenticated employee could
+    // otherwise preview a co-worker's holiday/weekly-off collision analysis
+    // (and, indirectly, their site/roster assignment) by passing their
+    // employee_id — LeaveApply.tsx calls this endpoint with the identical
+    // employee_id as the already-guarded /leave/duration/preview call.
+    const isHrAdmin = (HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)
+    if (!isHrAdmin) {
+      const { data: callerProfile } = await fastify.supabase
+        .from('profiles')
+        .select('employee_id')
+        .eq('id', req.userId)
+        .eq('tenant_id', req.tenantId)
+        .maybeSingle()
+      const myEmployeeId = (callerProfile as { employee_id: string | null } | null)?.employee_id
+      const isSelf = !!myEmployeeId && myEmployeeId === employee_id
+      let isManagerOfTarget = false
+      if (!isSelf && req.userRole === 'manager' && myEmployeeId) {
+        const reportIds = await getDirectReportIds(fastify.supabase, req.tenantId, myEmployeeId)
+        isManagerOfTarget = reportIds.includes(employee_id)
+      }
+      if (!isSelf && !isManagerOfTarget) {
+        return reply.code(403).send({ error: 'FORBIDDEN', message: 'You can only preview your own leave collision' })
+      }
+    }
 
     // Resolve collision policy
     const policy = await resolveCollisionPolicy(fastify.supabase, req.tenantId, leave_type_id)
@@ -242,9 +270,9 @@ export default async function leaveCollisionRoutes(fastify: FastifyInstance) {
       ? await resolveEmployeeOrgContext(fastify.supabase, req.tenantId, employeeId, `${year}-06-01`)
       : { site_id: null, work_location_id: null, site_holiday_group_id: null }
 
-    const { data: rows, error } = await fastify.supabase
+    const { data: rawRows, error } = await fastify.supabase
       .from('holiday_calendar')
-      .select('id, date, name, holiday_type, is_optional, site_id, location_id, holiday_group_id')
+      .select('id, date, name, holiday_type, is_optional, site_id, location_id, holiday_group_assignments(group_id)')
       .eq('tenant_id', req.tenantId)
       .eq('is_optional', false)
       .gte('date', yStart)
@@ -253,20 +281,26 @@ export default async function leaveCollisionRoutes(fastify: FastifyInstance) {
 
     if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch holidays')
 
+    // SYSTEM_AUDIT_2026-10-14 checkpoint 28: a holiday can be assigned to
+    // MULTIPLE groups (holiday_group_assignments) — comparing against the
+    // legacy single holiday_group_id column silently missed every group but
+    // the first one a holiday was saved to.
+    const rows = (rawRows ?? []).map(withHolidayGroupIds)
+
     // Applicability + per-date priority (location > site > group > global).
     const rank = (h: any) =>
-      h.location_id      ? 4
-      : h.site_id         ? 3
-      : h.holiday_group_id ? 2
+      h.location_id             ? 4
+      : h.site_id                ? 3
+      : h.holiday_group_ids.length ? 2
       : 1
     const applies = (h: any) =>
-      (!h.site_id && !h.location_id && !h.holiday_group_id) ||
+      (!h.site_id && !h.location_id && h.holiday_group_ids.length === 0) ||
       (ctx.site_id && h.site_id === ctx.site_id) ||
       (ctx.work_location_id && h.location_id === ctx.work_location_id) ||
-      (ctx.site_holiday_group_id && h.holiday_group_id === ctx.site_holiday_group_id)
+      (ctx.site_holiday_group_id && h.holiday_group_ids.includes(ctx.site_holiday_group_id))
 
     const byDate = new Map<string, any>()
-    for (const h of (rows ?? [])) {
+    for (const h of rows) {
       if (!applies(h)) continue
       const cur = byDate.get(h.date)
       if (!cur || rank(h) > rank(cur)) byDate.set(h.date, h)

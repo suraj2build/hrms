@@ -5,9 +5,12 @@
  * Stops polling once status is completed, failed, partial_failed, or cancelled.
  */
 
+import { useState }    from 'react'
 import { useQuery }    from '@tanstack/react-query'
+import { toast }       from 'sonner'
 import { Badge }       from '@/components/ui/badge'
 import { Button }      from '@/components/ui/button'
+import { api }         from '@/lib/api/client'
 import { importsApi, ImportJob } from '@/lib/api/imports'
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -50,6 +53,35 @@ interface Props {
 }
 
 export function ImportJobCard({ jobId, onRetry, onCancel, initialJob }: Props) {
+  const [isDownloading, setIsDownloading] = useState(false)
+
+  // Fresh audit finding: see ImportJobErrors.tsx — this was a plain
+  // `<a href={...} download>` pointing at the protected errors/export
+  // endpoint, which this Bearer-token-authenticated app can never satisfy
+  // via a native anchor navigation (and which resolves against the wrong
+  // origin in production, where the API is a separate domain).
+  async function handleDownloadCsv(jobId: string) {
+    setIsDownloading(true)
+    try {
+      const response = await api.getRaw(importsApi.exportErrorsCsvUrl(jobId))
+      const blob = await response.blob()
+      const url  = URL.createObjectURL(blob)
+      const a    = document.createElement('a')
+      a.href     = url
+      a.download = `import_job_${jobId}_errors.csv`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      toast.error('Failed to download error CSV', {
+        description: err instanceof Error ? err.message : undefined,
+      })
+    } finally {
+      setIsDownloading(false)
+    }
+  }
+
   const { data, isLoading } = useQuery({
     queryKey:       ['import-job', jobId],
     queryFn:        () => importsApi.get(jobId).then(r => r.job),
@@ -150,19 +182,17 @@ export function ImportJobCard({ jobId, onRetry, onCancel, initialJob }: Props) {
               Retry
             </Button>
           )}
-          {job.status !== 'completed' && job.status !== 'cancelled' && onCancel && (
-            <Button size="sm" variant="ghost" onClick={onCancel}>
-              Cancel
-            </Button>
-          )}
+          {/* Fresh audit finding: this rendered a "Cancel" button for every
+              terminal status except 'completed'/'cancelled' — i.e. also for
+              'failed' and 'partial_failed', which are already-finished jobs.
+              The backend's CANCELLABLE set (routes/imports/index.ts) never
+              includes those statuses, so clicking it always 409s; cancel is
+              only ever meaningful for an in-flight job, already covered by
+              the `!done && onCancel` branch below. */}
           {hasErr && (
-            <a
-              href={importsApi.exportErrorsCsvUrl(job.id)}
-              download
-              className="inline-flex items-center gap-1 rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-muted transition-colors"
-            >
-              Download errors CSV
-            </a>
+            <Button size="sm" variant="outline" disabled={isDownloading} onClick={() => handleDownloadCsv(job.id)}>
+              {isDownloading ? 'Downloading…' : 'Download errors CSV'}
+            </Button>
           )}
         </div>
       )}

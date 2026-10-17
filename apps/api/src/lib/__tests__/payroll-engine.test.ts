@@ -28,10 +28,14 @@
 import { describe, it, expect, vi } from 'vitest'
 import {
   fetchAttendanceSummary,
+  fetchActiveCompensation,
   computePayrollSlip,
   applyAdvanceLoanRecovery,
+  applyEncashmentPayout,
+  computeCleanGrossPay,
   finalizeDeductionsAndNet,
   type PayrollSlipInput,
+  type EncashmentPayout,
 } from '../payroll-engine.js'
 
 // ── Supabase stub ──────────────────────────────────────────────────────────────
@@ -282,6 +286,181 @@ describe('computePayrollSlip — lop_amount and net_pay', () => {
   })
 })
 
+// ── Section 2b: applyEncashmentPayout — G12 leave-encashment payout ─────────
+//
+// Context: encashment payouts are computed FRESH by this pure function on every
+// payroll generation pass (never stored on, or mutated into, a persisted
+// payroll_slips row) — this is what makes the payout survive an arbitrary
+// re-run/regeneration of a draft month. These tests exercise the function in
+// isolation; the "survives regeneration" property follows directly from
+// determinism (same base slip + same payout in → same result out, every time).
+//
+// Ordering note baked into these fixtures: applyEncashmentPayout must run AFTER
+// applyTdsForRun's annual-projection step (not tested here — that's a route-layer
+// concern) specifically so a one-time lump sum never gets multiplied into the
+// recurring-salary annual TDS projection. These tests treat the TDS amount as
+// already-computed input (a flat marginal-rate withholding on the lump sum
+// itself), not something this function derives.
+
+describe('applyEncashmentPayout — G12 leave-encashment payout', () => {
+  function payout(gross: number, tds: number, ids = ['enc-1']): EncashmentPayout {
+    return { request_ids: ids, gross, tds }
+  }
+
+  it('adds gross to gross_pay and tds to total_deductions, net_pay reflects both', () => {
+    const base = computePayrollSlip(slipInput(0, 22, 60_000, 22))
+    const result = applyEncashmentPayout(base, payout(20_000, 2_000))
+
+    expect(result.gross_pay).toBe(base.gross_pay + 20_000)
+    expect(result.total_deductions).toBe(base.total_deductions + 2_000)
+    expect(result.net_pay).toBe(result.gross_pay - result.total_deductions)
+    expect(result.net_pay).toBe(base.net_pay + 20_000 - 2_000)
+  })
+
+  it('tds = 0: no TDS component added, total_deductions unchanged, net_pay = gross_pay delta only', () => {
+    const base = computePayrollSlip(slipInput(0, 22, 60_000, 22))
+    const result = applyEncashmentPayout(base, payout(15_000, 0))
+
+    expect(result.gross_pay).toBe(base.gross_pay + 15_000)
+    expect(result.total_deductions).toBe(base.total_deductions)
+    expect(result.net_pay).toBe(base.net_pay + 15_000)
+    const tdsComponents = result.component_breakdown.filter(c => c.code === 'TDS')
+    expect(tdsComponents).toHaveLength(0)
+  })
+
+  it('no-op when payout is null', () => {
+    const base = computePayrollSlip(slipInput(0, 22, 60_000, 22))
+    const result = applyEncashmentPayout(base, null)
+    expect(result).toBe(base)
+  })
+
+  it('no-op when payout is undefined', () => {
+    const base = computePayrollSlip(slipInput(0, 22, 60_000, 22))
+    const result = applyEncashmentPayout(base, undefined)
+    expect(result).toBe(base)
+  })
+
+  it('no-op when payout.gross is 0', () => {
+    const base = computePayrollSlip(slipInput(0, 22, 60_000, 22))
+    const result = applyEncashmentPayout(base, payout(0, 0))
+    expect(result).toBe(base)
+  })
+
+  it('no-op when payout.gross is negative (defensive guard)', () => {
+    const base = computePayrollSlip(slipInput(0, 22, 60_000, 22))
+    const result = applyEncashmentPayout(base, payout(-500, 0))
+    expect(result).toBe(base)
+  })
+
+  it('component_breakdown gets a LEAVE_ENCASHMENT earning and a TDS deduction with correct shapes', () => {
+    const base = computePayrollSlip(slipInput(0, 22, 60_000, 22))
+    const result = applyEncashmentPayout(base, payout(18_500, 1_850))
+
+    const earning = result.component_breakdown.find(c => c.code === 'LEAVE_ENCASHMENT')
+    expect(earning).toBeDefined()
+    expect(earning?.component_type).toBe('earning')
+    expect(earning?.monthly_amount).toBe(18_500)
+
+    const tds = result.component_breakdown.find(c => c.code === 'TDS')
+    expect(tds).toBeDefined()
+    expect(tds?.component_type).toBe('deduction')
+    expect(tds?.monthly_amount).toBe(1_850)
+
+    // Original components are preserved, not replaced
+    expect(result.component_breakdown.length).toBe(base.component_breakdown.length + 2)
+  })
+
+  it('deductions capped at gross_pay: encashment TDS cannot push net_pay negative', () => {
+    // Base slip has a tiny gross_pay; a large TDS on the encashment alone would
+    // otherwise exceed it — finalizeDeductionsAndNet's cap must still hold.
+    const base = computePayrollSlip(slipInput(0, 22, 1_000, 22))
+    const result = applyEncashmentPayout(base, payout(500, 2_000))
+
+    expect(result.net_pay).toBeGreaterThanOrEqual(0)
+    expect(result.total_deductions).toBeLessThanOrEqual(result.gross_pay)
+  })
+
+  it('is deterministic: identical base slip + identical payout produce identical output every call', () => {
+    const base = computePayrollSlip(slipInput(0, 22, 60_000, 22))
+    const p = payout(12_345.67, 1_234.56)
+
+    const first  = applyEncashmentPayout(base, p)
+    const second = applyEncashmentPayout(base, p)
+
+    expect(second).toEqual(first)
+  })
+
+  it('composes correctly on top of applyAdvanceLoanRecovery (both additions reflected in net_pay)', () => {
+    const base = computePayrollSlip(slipInput(0, 22, 60_000, 22))
+    const withRecovery = applyAdvanceLoanRecovery(base, [
+      { type: 'loan_emi', schedule_id: 'l-1', amount: 5_000, label: 'EMI' },
+    ])
+    const result = applyEncashmentPayout(withRecovery, payout(10_000, 1_000))
+
+    expect(result.gross_pay).toBe(base.gross_pay + 10_000)
+    expect(result.total_deductions).toBe(withRecovery.total_deductions + 1_000)
+    expect(result.net_pay).toBe(result.gross_pay - result.total_deductions)
+  })
+})
+
+// ── Section 2c: computeCleanGrossPay — excludes one-time payouts from a ─────
+// basis reused as "normal recurring salary" (fnf-settlement-engine.ts's
+// gratuity/notice/leave-encashment-rate basis; accrual-engine.ts's own
+// standalone leave-encashment rate_per_day) so a PRIOR one-time payout
+// folded into a slip's gross_pay never compounds into a LATER computation
+// that treats that slip as "what this employee normally earns."
+
+describe('computeCleanGrossPay — excludes one-time earning components', () => {
+  it('no one-time components: returns gross_pay unchanged', () => {
+    const components = [
+      { code: 'BASIC', monthly_amount: 30_000 },
+      { code: 'HRA', monthly_amount: 15_000 },
+    ]
+    expect(computeCleanGrossPay(45_000, components)).toBe(45_000)
+  })
+
+  it('a LEAVE_ENCASHMENT line is subtracted out — the exact compounding risk this fixes', () => {
+    // A slip whose gross_pay (70,000) is a normal 50,000 recurring salary
+    // PLUS a one-time 20,000 encashment payout folded in by
+    // applyEncashmentPayout. A later computation using this slip as its
+    // "normal salary" basis must see 50,000, not 70,000.
+    const components = [
+      { code: 'BASIC', monthly_amount: 30_000 },
+      { code: 'HRA', monthly_amount: 20_000 },
+      { code: 'LEAVE_ENCASHMENT', monthly_amount: 20_000 },
+    ]
+    expect(computeCleanGrossPay(70_000, components)).toBe(50_000)
+  })
+
+  it('is case-insensitive on the component code', () => {
+    const components = [{ code: 'leave_encashment', monthly_amount: 10_000 }]
+    expect(computeCleanGrossPay(60_000, components)).toBe(50_000)
+  })
+
+  it('multiple one-time lines in the same slip are all excluded', () => {
+    const components = [
+      { code: 'LEAVE_ENCASHMENT', monthly_amount: 10_000 },
+      { code: 'LEAVE_ENCASHMENT', monthly_amount: 5_000 },
+    ]
+    expect(computeCleanGrossPay(65_000, components)).toBe(50_000)
+  })
+
+  it('an empty or missing component_breakdown does not throw and returns gross_pay unchanged', () => {
+    expect(computeCleanGrossPay(50_000, [])).toBe(50_000)
+    expect(computeCleanGrossPay(50_000, undefined as any)).toBe(50_000)
+  })
+
+  it('a TDS deduction line (not an earning) is left alone — only earnings are excluded', () => {
+    const components = [
+      { code: 'TDS', monthly_amount: 2_000 },
+      { code: 'LEAVE_ENCASHMENT', monthly_amount: 10_000 },
+    ]
+    // Only the 10,000 earning is excluded; the TDS deduction line doesn't
+    // affect gross_pay in the first place (deductions reduce net, not gross).
+    expect(computeCleanGrossPay(60_000, components)).toBe(50_000)
+  })
+})
+
 // ── Section 3: ISSUE-143 — gross_pay - total_deductions = net_pay invariant ──
 
 describe('finalizeDeductionsAndNet — deduction cap invariant (ISSUE-143)', () => {
@@ -322,5 +501,179 @@ describe('computePayrollSlip — LOP exceeding gross pay caps total_deductions (
     // The invariant: gross_pay - total_deductions = net_pay, always.
     expect(result.gross_pay - result.total_deductions).toBe(result.net_pay)
     expect(result.warning ?? '').toMatch(/exceed gross pay/i)
+  })
+})
+
+// ── Section 4: G13 sweep — NUMERIC-as-string coercion regressions ────────────
+//
+// attendance_daily.day_fraction is DECIMAL(3,1); PostgREST/Supabase serialize
+// NUMERIC/DECIMAL columns as JSON strings, not numbers. These tests exercise
+// fetchAttendanceSummary and fetchActiveCompensation with string-shaped rows
+// (as the real DB layer actually returns them) instead of the numeric-literal
+// rows Section 1 above uses, to guard the Number()-coercion fix.
+
+describe('fetchAttendanceSummary — DB-string day_fraction (G13 sweep)', () => {
+  it('2+ rows with string day_fraction sum correctly instead of string-concatenating', async () => {
+    // Before the fix: 0 + "1.0" + "1.0" -> "01.01.0" -> round2() -> NaN.
+    const rows = [
+      { status: 'present', is_payable: true, day_fraction: '1.0', overtime_minutes: 0 },
+      { status: 'present', is_payable: true, day_fraction: '1.0', overtime_minutes: 0 },
+      { status: 'half_day', is_payable: true, day_fraction: '0.5', overtime_minutes: 0 },
+    ]
+    const result = await fetchAttendanceSummary(mockSupabase(rows as any), TENANT, EMP, MONTH)
+
+    expect(result.payable_days).toBe(2.5)
+    expect(result.lop_days).toBe(0.5)
+    expect(Number.isNaN(result.payable_days)).toBe(false)
+    expect(Number.isNaN(result.lop_days)).toBe(false)
+  })
+
+  it('string "0.0" day_fraction (a genuine full LOP day) is NOT treated as missing/null', async () => {
+    // Regression guard: the fix must use `Number(x ?? 1.0)`, not `Number(x) || 1.0`,
+    // or a real 0 gets wrongly replaced with a full present day.
+    const rows = [
+      { status: 'absent', is_payable: false, day_fraction: '0.0', overtime_minutes: 0 },
+      { status: 'present', is_payable: true, day_fraction: '1.0', overtime_minutes: 0 },
+    ]
+    const result = await fetchAttendanceSummary(mockSupabase(rows as any), TENANT, EMP, MONTH)
+
+    expect(result.payable_days).toBe(1)   // not 2 — the "0.0" day must stay 0, not become 1.0
+    expect(result.lop_days).toBe(1)
+  })
+
+  it('fractional string day_fraction (e.g. "0.25") sums correctly', async () => {
+    const rows = [
+      { status: 'half_day', is_payable: true, day_fraction: '0.25', overtime_minutes: 0 },
+      { status: 'half_day', is_payable: true, day_fraction: '0.75', overtime_minutes: 0 },
+    ]
+    const result = await fetchAttendanceSummary(mockSupabase(rows as any), TENANT, EMP, MONTH)
+
+    expect(result.payable_days).toBe(1)
+    expect(result.lop_days).toBe(1)
+  })
+
+  it('null day_fraction among string rows still defaults to full present (1.0)', async () => {
+    const rows = [
+      { status: 'present', is_payable: true, day_fraction: null, overtime_minutes: 0 },
+      { status: 'present', is_payable: true, day_fraction: '1.0', overtime_minutes: 0 },
+    ]
+    const result = await fetchAttendanceSummary(mockSupabase(rows as any), TENANT, EMP, MONTH)
+
+    expect(result.payable_days).toBe(2)
+    expect(result.lop_days).toBe(0)
+  })
+})
+
+describe('fetchActiveCompensation — DB-string computed_monthly/computed_annual (G13 sweep)', () => {
+  /** Mock matching fetchActiveCompensation's two-query shape:
+   *  employee_compensations (.select().eq().eq().eq().lte().order().limit().maybeSingle())
+   *  employee_compensation_components (.select().eq().order() — thenable, no maybeSingle) */
+  function mockCompSupabase(
+    comp: { id: string; ctc_annual: string | number; ctc_monthly: string | number; effective_from: string } | null,
+    components: Array<{
+      salary_component_id: string
+      sequence: number
+      computed_monthly: string | number | null
+      computed_annual:  string | number | null
+      calculation_type: string
+      value: string | number
+      salary_components: { id: string; name: string; code: string; component_type: string }
+    }>,
+  ) {
+    return {
+      from(table: string) {
+        if (table === 'employee_compensations') {
+          const chain: any = {
+            select: () => chain,
+            eq:     () => chain,
+            lte:    () => chain,
+            order:  () => chain,
+            limit:  () => chain,
+            maybeSingle: () => Promise.resolve({ data: comp, error: null }),
+          }
+          return chain
+        }
+        // employee_compensation_components — resolved via await on the chain itself (thenable)
+        const chain: any = {
+          select: () => chain,
+          eq:     () => chain,
+          order:  () => Promise.resolve({ data: components, error: null }),
+        }
+        return chain
+      },
+    } as any
+  }
+
+  it('2+ components with string computed_monthly sum correctly (not string-concatenated)', async () => {
+    // Before the fix: monthly_amount stayed the raw string, and computePayrollSlip's
+    // `earnings.reduce((s, c) => s + c.monthly_amount, 0)` string-concatenated once
+    // there were 2+ earning components — i.e. virtually every real employee.
+    const result = await fetchActiveCompensation(
+      mockCompSupabase(
+        { id: 'comp-1', ctc_annual: '600000.00', ctc_monthly: '50000.00', effective_from: '2026-01-01' },
+        [
+          { salary_component_id: 'sc-1', sequence: 1, computed_monthly: '30000.00', computed_annual: '360000.00', calculation_type: 'fixed', value: '30000.0000', salary_components: { id: 'x', name: 'Basic', code: 'BASIC', component_type: 'earning' } },
+          { salary_component_id: 'sc-2', sequence: 2, computed_monthly: '20000.00', computed_annual: '240000.00', calculation_type: 'fixed', value: '20000.0000', salary_components: { id: 'y', name: 'HRA', code: 'HRA', component_type: 'earning' } },
+        ],
+      ),
+      TENANT, EMP,
+    )
+
+    expect(result).not.toBeNull()
+    expect(result!.ctc_monthly).toBe(50000)
+    expect(result!.ctc_annual).toBe(600000)
+    expect(result!.components[0].monthly_amount).toBe(30000)
+    expect(result!.components[1].monthly_amount).toBe(20000)
+    const grossPay = result!.components.reduce((s, c) => s + c.monthly_amount, 0)
+    expect(grossPay).toBe(50000)
+    expect(Number.isNaN(grossPay)).toBe(false)
+  })
+
+  it('string "0.00" computed_monthly is a real zero, not dropped or NaN', async () => {
+    const result = await fetchActiveCompensation(
+      mockCompSupabase(
+        { id: 'comp-2', ctc_annual: '360000.00', ctc_monthly: '30000.00', effective_from: '2026-01-01' },
+        [
+          { salary_component_id: 'sc-1', sequence: 1, computed_monthly: '30000.00', computed_annual: '360000.00', calculation_type: 'fixed', value: '30000.0000', salary_components: { id: 'x', name: 'Basic', code: 'BASIC', component_type: 'earning' } },
+          { salary_component_id: 'sc-2', sequence: 2, computed_monthly: '0.00', computed_annual: '0.00', calculation_type: 'fixed', value: '0.0000', salary_components: { id: 'z', name: 'Bonus', code: 'BONUS', component_type: 'earning' } },
+        ],
+      ),
+      TENANT, EMP,
+    )
+
+    expect(result!.components[1].monthly_amount).toBe(0)
+    const grossPay = result!.components.reduce((s, c) => s + c.monthly_amount, 0)
+    expect(grossPay).toBe(30000)
+  })
+
+  it('null computed_monthly/computed_annual default to 0, not null/NaN', async () => {
+    const result = await fetchActiveCompensation(
+      mockCompSupabase(
+        { id: 'comp-3', ctc_annual: '120000.00', ctc_monthly: '10000.00', effective_from: '2026-01-01' },
+        [
+          { salary_component_id: 'sc-1', sequence: 1, computed_monthly: null, computed_annual: null, calculation_type: 'fixed', value: '0', salary_components: { id: 'x', name: 'Allowance', code: 'ALLOW', component_type: 'earning' } },
+        ],
+      ),
+      TENANT, EMP,
+    )
+
+    expect(result!.components[0].monthly_amount).toBe(0)
+    expect(result!.components[0].annual_amount).toBe(0)
+    expect(Number.isNaN(result!.components[0].monthly_amount)).toBe(false)
+  })
+
+  it('fractional string computed_monthly (e.g. "1234.56") converts exactly', async () => {
+    const result = await fetchActiveCompensation(
+      mockCompSupabase(
+        { id: 'comp-4', ctc_annual: '14814.72', ctc_monthly: '1234.56', effective_from: '2026-01-01' },
+        [
+          { salary_component_id: 'sc-1', sequence: 1, computed_monthly: '1234.56', computed_annual: '14814.72', calculation_type: 'fixed', value: '1234.5600', salary_components: { id: 'x', name: 'Basic', code: 'BASIC', component_type: 'earning' } },
+        ],
+      ),
+      TENANT, EMP,
+    )
+
+    expect(result!.components[0].monthly_amount).toBe(1234.56)
+    expect(result!.ctc_monthly).toBe(1234.56)
   })
 })
