@@ -477,6 +477,22 @@ export default async function workSessionRoutes(fastify: FastifyInstance) {
     if (fetchError) return serverError(req, reply, fetchError, ErrorCode.QUERY_FAILED, 'Failed to fetch session')
     if (!existing) return notFound(reply, 'SESSION_NOT_FOUND', 'Session not found')
 
+    // payroll_run_id is caller-supplied and was written straight into the
+    // update with no tenant check — a cross-tenant UUID would be accepted
+    // and stored as a dangling/wrong-tenant reference on this work_sessions
+    // row. Verify it belongs to this tenant first, same as every other
+    // caller-supplied FK in this namespace.
+    if (payroll_run_id !== undefined) {
+      const { data: run, error: runError } = await supabase
+        .from('payroll_runs')
+        .select('id')
+        .eq('id', payroll_run_id)
+        .eq('tenant_id', tenantId)
+        .maybeSingle()
+      if (runError) return serverError(req, reply, runError, ErrorCode.QUERY_FAILED, 'Failed to verify payroll run')
+      if (!run) return notFound(reply, 'PAYROLL_RUN_NOT_FOUND', 'Payroll run not found')
+    }
+
     const updatePayload: Record<string, unknown> = {
       payroll_locked:    true,
       payroll_locked_at: new Date().toISOString(),

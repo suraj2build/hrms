@@ -22,6 +22,7 @@ import {
 } from '../../lib/leave-duration-engine.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { getDirectReportIds } from '../../lib/manager-scope.js'
+import { resolveEmployeeOrgContext, getWeeklyOffDays, getLocalDayOfWeek } from '../../lib/org-context.js'
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
 
@@ -131,6 +132,13 @@ async function resolveEffectiveDurationPolicy(
 
 /**
  * Fetch holidays from holiday_calendar for the given date range (tenant-scoped).
+ *
+ * Excludes optional/restricted holidays (is_optional = true) — mirrors
+ * leave-request-service.ts's own fetch (the authoritative submission path).
+ * Without this filter, this preview/explain endpoint would mark an optional
+ * holiday as a non-working day while actual submission does not, so the
+ * previewed day count would silently diverge from what gets deducted on
+ * submit (preview under-charges by one day per optional holiday in range).
  */
 async function fetchHolidays(
   supabase:   any,
@@ -142,6 +150,7 @@ async function fetchHolidays(
     .from('holiday_calendar')
     .select('date, name')
     .eq('tenant_id', tenantId)
+    .eq('is_optional', false)
     .gte('date', startDate)
     .lte('date', endDate)
 
@@ -156,20 +165,37 @@ async function fetchHolidays(
  * Build DayContext[] for every date in [startDate, endDate], marking
  * is_holiday and is_weekly_off.
  *
- * Week-off days: Saturday (6) + Sunday (0) by default.
- * A future enhancement may read tenant.week_off_days config — for now
- * we default to [0, 6] which is the most common configuration.
+ * Week-off days: resolved from the employee's roster (emp_roster_weekly_off,
+ * falling back to the site's default roster), exactly as
+ * leave-request-service.ts's computeWorkingLeaveDays does — only falling
+ * back to the Sat/Sun default when no roster weekly-off is configured at
+ * all. Previously this always hard-coded Sat/Sun regardless of roster,
+ * which over/under-charges leave duration for any tenant whose weekly off
+ * isn't Sat/Sun (retail, manufacturing, Gulf Fri-Sat rosters) and diverges
+ * from what the actual submission path (and payroll/attendance) compute —
+ * the previewed "you are taking X days" could silently differ from what
+ * gets deducted on submit.
  */
-function buildDayContexts(
-  startDate: string,
-  endDate:   string,
-  holidays:  Map<string, string>,
-): DayContext[] {
+async function buildDayContexts(
+  supabase:   any,
+  tenantId:   string,
+  employeeId: string,
+  startDate:  string,
+  endDate:    string,
+  holidays:   Map<string, string>,
+): Promise<DayContext[]> {
+  const orgCtx        = await resolveEmployeeOrgContext(supabase, tenantId, employeeId, startDate)
+  const weeklyOffDays = getWeeklyOffDays([], orgCtx.emp_roster_weekly_off, orgCtx.site_default_roster_weekly_off)
+  const isWeeklyOff   = (date: string): boolean =>
+    weeklyOffDays.length > 0
+      ? weeklyOffDays.includes(getLocalDayOfWeek(date, orgCtx.site_timezone))
+      : isDefaultWeekoff(date)
+
   const dates = buildDateRange(startDate, endDate)
   return dates.map(date => ({
     date,
     is_holiday:    holidays.has(date),
-    is_weekly_off: isDefaultWeekoff(date),
+    is_weekly_off: isWeeklyOff(date),
     holiday_name:  holidays.get(date),
   }))
 }
@@ -279,7 +305,7 @@ export default async function leaveDurationRoutes(fastify: FastifyInstance) {
       fetchHolidays(fastify.supabase, req.tenantId, start_date, end_date),
     ])
 
-    const dayInfo = buildDayContexts(start_date, end_date, holidays)
+    const dayInfo = await buildDayContexts(fastify.supabase, req.tenantId, employee_id, start_date, end_date, holidays)
 
     // Compute duration — engine is pure, no I/O
     const result = computeLeaveDuration(span, dayInfo, policy)
@@ -363,7 +389,7 @@ export default async function leaveDurationRoutes(fastify: FastifyInstance) {
       fetchHolidays(fastify.supabase, req.tenantId, lr.from_date, lr.to_date),
     ])
 
-    const dayInfo = buildDayContexts(lr.from_date, lr.to_date, holidays)
+    const dayInfo = await buildDayContexts(fastify.supabase, req.tenantId, lr.employee_id, lr.from_date, lr.to_date, holidays)
 
     // Recompute to get fresh explain steps (engine is deterministic / pure)
     const recomputed = computeLeaveDuration(span, dayInfo, policy)
