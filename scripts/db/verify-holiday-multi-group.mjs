@@ -125,10 +125,10 @@ async function main() {
     [sourceId, tenantId],
   )
 
-  // Seed one raw punch session per employee on the holiday date so
+  // Seed one raw punch session per employee on a given date so
   // computeDay() has something to classify.
-  async function seedPunch(empId, empCode) {
-    const ts = `${holidayDate}T04:00:00.000Z` // ~9:30am IST
+  async function seedPunch(empId, empCode, date = holidayDate) {
+    const ts = `${date}T04:00:00.000Z` // ~9:30am IST
     await pool.query(
       `INSERT INTO attendance_raw_logs (tenant_id, employee_code, "timestamp", direction, processed, source_id)
        VALUES ($1,$2,$3,'in',false,$4)`,
@@ -170,6 +170,111 @@ async function main() {
     statusByEmp[empAId] === 'holiday', { statusByEmp, empAId, empBId })
   check('[attendance] Group B employee (group_ids[0]) is classified as holiday',
     statusByEmp[empBId] === 'holiday', { statusByEmp, empAId, empBId })
+
+  // ── PART 3: overlapping group coverage must NOT double-apply (no duplicate
+  // attendance/leave/benefit effect) ──────────────────────────────────────
+  // Real-schema finding: a second, SEPARATE holiday_calendar row on the SAME
+  // DATE for the same tenant is not just undesirable, it is IMPOSSIBLE —
+  // `uq_holiday_calendar_tenant_date` is a real UNIQUE(tenant_id, date)
+  // constraint. Confirm that directly (not assumed) by attempting exactly
+  // that insert and catching the real Postgres rejection.
+  let overlapInsertRejected = false
+  try {
+    await pool.query(
+      `INSERT INTO holiday_calendar (id, tenant_id, date, name, is_optional) VALUES ($1,$2,$3,'Overlapping Second Holiday',false)`,
+      [uuid(), tenantId, holidayDate],
+    )
+  } catch (e) {
+    overlapInsertRejected = e?.code === '23505' && e?.constraint === 'uq_holiday_calendar_tenant_date'
+  }
+  check('[overlap] DB rejects a second holiday_calendar row for the same (tenant,date) — duplicate-holiday-record overlap is structurally impossible, not just avoided',
+    overlapInsertRejected)
+
+  // The remaining overlap surface is per-employee group matching: since
+  // employee eligibility resolves through exactly one group id (their site's
+  // single holiday_group_id — see org-context.ts), one employee can only
+  // ever match a holiday via one group, even when that holiday is assigned
+  // to several groups (Part 1 above already proved multi-group assignment
+  // works for every assigned group's employees, not just group_ids[0]).
+  // Re-run attendance processing again over the already-processed date to
+  // confirm idempotent re-processing (a holiday applying "for every matched
+  // group" in isHolidayForEmployee's OR-across-groups logic) still yields
+  // exactly one attendance_daily row per employee, not a duplicate/updated-
+  // twice row — backed by attendance_daily's own UNIQUE(tenant_id,
+  // employee_id, date) constraint plus the single-upsert-per-employee
+  // pattern in every consumer.
+  await fetch(`${API_BASE}/attendance/process`, {
+    method: 'POST', headers: { authorization: `Bearer ${hrToken}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ date: holidayDate, force: true }),
+  })
+  await new Promise(r => setTimeout(r, 2000))
+  const { rows: overlapRows } = await pool.query(
+    `SELECT id, status, work_hours FROM attendance_daily WHERE tenant_id=$1 AND employee_id=$2 AND date=$3`,
+    [tenantId, empAId, holidayDate],
+  )
+  check('[overlap] exactly ONE attendance_daily row exists for employee A after re-processing the multi-group holiday date (no duplicate row)',
+    overlapRows.length === 1, overlapRows)
+  check('[overlap] that row is still a plain holiday (status/work_hours not stacked or corrupted by re-processing)',
+    overlapRows[0]?.status === 'holiday' && Number(overlapRows[0]?.work_hours) === 0, overlapRows[0])
+
+  // ── PART 4: legacy single-group and global (no-group) behavior preserved ──
+  // A holiday with ZERO group assignments must still behave as GLOBAL
+  // (applies to every employee, any group or none) — the exact meaning the
+  // old `holiday_group_id IS NULL` case had. A holiday assigned to exactly
+  // ONE group must still correctly EXCLUDE employees outside that group —
+  // not just include members (proven already above) but actually scope out
+  // non-members, matching the old single-FK column's behavior exactly.
+  const globalDate = '2025-11-20'
+  const globalHolidayId = uuid()
+  await pool.query(
+    `INSERT INTO holiday_calendar (id, tenant_id, date, name, is_optional) VALUES ($1,$2,$3,'Global No-Group Holiday',false)`,
+    [globalHolidayId, tenantId, globalDate],
+  )
+  // Deliberately left with ZERO group assignments (no POST to group-assignments at all).
+  await seedPunch(empAId, 'HMG-A', globalDate)
+  await seedPunch(empBId, 'HMG-B', globalDate)
+  await fetch(`${API_BASE}/attendance/process`, {
+    method: 'POST', headers: { authorization: `Bearer ${hrToken}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ date: globalDate, force: true }),
+  })
+  await new Promise(r => setTimeout(r, 2000))
+  const { rows: globalRows } = await pool.query(
+    `SELECT employee_id, status FROM attendance_daily WHERE tenant_id=$1 AND date=$2 AND employee_id IN ($3,$4)`,
+    [tenantId, globalDate, empAId, empBId],
+  )
+  const globalByEmp = Object.fromEntries(globalRows.map(r => [r.employee_id, r.status]))
+  check('[global] a zero-group holiday still applies globally to Group A employee',
+    globalByEmp[empAId] === 'holiday', globalByEmp)
+  check('[global] a zero-group holiday still applies globally to Group B employee',
+    globalByEmp[empBId] === 'holiday', globalByEmp)
+
+  const singleGroupDate = '2025-11-21'
+  const singleGroupHolidayId = uuid()
+  await pool.query(
+    `INSERT INTO holiday_calendar (id, tenant_id, date, name, is_optional) VALUES ($1,$2,$3,'Single-Group Holiday (Group B only)',false)`,
+    [singleGroupHolidayId, tenantId, singleGroupDate],
+  )
+  const singleAssignRes = await fetch(`${API_BASE}/masters/holidays/group-assignments`, {
+    method: 'POST', headers: { authorization: `Bearer ${hrToken}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ holiday_id: singleGroupHolidayId, group_ids: [groupBId] }),
+  })
+  check('[single-group] single-group assignment succeeds', singleAssignRes.status === 200, await singleAssignRes.json().catch(() => ({})))
+  await seedPunch(empAId, 'HMG-A', singleGroupDate)
+  await seedPunch(empBId, 'HMG-B', singleGroupDate)
+  await fetch(`${API_BASE}/attendance/process`, {
+    method: 'POST', headers: { authorization: `Bearer ${hrToken}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ date: singleGroupDate, force: true }),
+  })
+  await new Promise(r => setTimeout(r, 2000))
+  const { rows: singleRows } = await pool.query(
+    `SELECT employee_id, status FROM attendance_daily WHERE tenant_id=$1 AND date=$2 AND employee_id IN ($3,$4)`,
+    [tenantId, singleGroupDate, empAId, empBId],
+  )
+  const singleByEmp = Object.fromEntries(singleRows.map(r => [r.employee_id, r.status]))
+  check('[single-group] Group B employee (the assigned group) IS classified as holiday',
+    singleByEmp[empBId] === 'holiday', singleByEmp)
+  check('[single-group] Group A employee (NOT the assigned group) is correctly EXCLUDED (not holiday) — single-group scoping still works',
+    singleByEmp[empAId] !== 'holiday', singleByEmp)
 
   console.log(allOk ? '\n✅ All checks passed.' : '\n❌ Some checks failed — see above.')
   await pool.end()
