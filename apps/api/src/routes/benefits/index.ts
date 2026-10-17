@@ -65,6 +65,7 @@ export default async function benefitsRoutes(fastify: FastifyInstance) {
         .from('employees')
         .select('designation_band, gross_salary')
         .eq('id', employeeId)
+        .eq('tenant_id', req.tenantId)
         .maybeSingle()
       empBand      = (emp as any)?.designation_band ?? null
       empSalary    = (emp as any)?.gross_salary ?? null

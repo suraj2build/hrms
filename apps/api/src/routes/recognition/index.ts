@@ -603,6 +603,19 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
     const { awardId } = req.params as { awardId: string }
     const parsed = CreateRoundSchema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
+
+    // Fresh audit finding (cross-tenant IDOR): awardId was accepted with no
+    // tenant check, then written straight into award_rounds.award_id — a
+    // crafted request could create a round linked to another tenant's
+    // formal_awards row. That foreign award's name/type would then leak back
+    // through this same round's own GET listing and declare-winner's
+    // formal_awards!award_rounds_award_id_fkey(...) embed, which join on the
+    // FK with no tenant filter of their own. Same class of bug already fixed
+    // elsewhere in this file for nominee_id / winner_employee_id / to_employee_id.
+    const { data: award } = await fastify.supabase
+      .from('formal_awards').select('id').eq('id', awardId).eq('tenant_id', req.tenantId).maybeSingle()
+    if (!award) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Award program not found in your organisation' })
+
     const { period_label, period_start, period_end } = parsed.data
     const { data, error } = await fastify.supabase.from('award_rounds')
       .insert({ tenant_id: req.tenantId, award_id: awardId, period_label: period_label.trim(), period_start: period_start || null, period_end: period_end || null, status: 'open', created_by: req.userId })
@@ -700,6 +713,21 @@ export default async function recognitionRoutes(fastify: FastifyInstance) {
     const parsed = NominateSchema.safeParse(req.body)
     if (!parsed.success) return reply.code(400).send({ error: 'VALIDATION_ERROR', message: parsed.error.issues[0]?.message ?? 'Invalid request body' })
     const { nominee_id, justification } = parsed.data
+
+    // Fresh audit finding (cross-tenant IDOR + missing precondition): roundId
+    // was never checked at all before this insert — neither that it exists,
+    // that it belongs to this tenant, nor that it's still open. A crafted
+    // request could attach a nomination (tenant_id = caller's own tenant) to
+    // another tenant's round, or nominate into an already-closed round after
+    // declare-winner has run. The bare round_id FK only proves the row
+    // exists somewhere, not that it's this tenant's or still accepting
+    // nominations — same class of gap already fixed elsewhere in this file.
+    const { data: round } = await fastify.supabase
+      .from('award_rounds').select('id, status').eq('id', roundId).eq('tenant_id', req.tenantId).maybeSingle()
+    if (!round) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Award round not found in your organisation' })
+    if ((round as any).status !== 'open') {
+      return reply.code(409).send({ error: 'ROUND_CLOSED', message: 'This round is no longer accepting nominations' })
+    }
 
     // Fresh audit finding (cross-tenant IDOR): nominee_id was inserted with
     // no tenant check, then echoed back unfiltered via the nominations list
