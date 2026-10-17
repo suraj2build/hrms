@@ -27,6 +27,7 @@ import { z }                   from 'zod'
 import { HR_ADMIN_ROLES }      from '../../lib/rbac.js'
 import { fetchAllRows }        from '../../lib/supabase-paginate.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
+import { getDirectReportIds }  from '../../lib/manager-scope.js'
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type MetricType = 'absent' | 'late' | 'ot' | 'pressure' | 'reliability' | 'leave'
@@ -120,7 +121,23 @@ export default async function workforceDrillRoutes(fastify: FastifyInstance) {
 
     // ── Step 1: Resolve employee set (with names + departments) ──────────────
     // We always join through employees → job_history to get department + code.
-    // manager scope: only employees in their team (manager_id = req.employeeId)
+    // manager scope: this is pure read-only/historical team visibility (not
+    // an approval-queue action), so per manager-scope.ts it must use the full
+    // subordinate tree (getDirectReportIds), not just immediate reports —
+    // `.eq('job_history.manager_id', req.employeeId)` only matched one level
+    // down, so a manager-of-managers silently lost every grandchild's data
+    // from this drill-down with no error, understating every metric below.
+    let managerScopeIds: string[] | null = null
+    if (isManager) {
+      try {
+        managerScopeIds = req.employeeId
+          ? await getDirectReportIds(fastify.supabase, req.tenantId, req.employeeId)
+          : []
+      } catch (err) {
+        return serverError(req, reply, err, ErrorCode.QUERY_FAILED, 'Failed to resolve manager team scope')
+      }
+    }
+
     // Paginated — an unbounded .select() truncates at PostgREST's 1,000-row
     // ceiling for a large tenant, silently dropping employees from every
     // drill-down metric below.
@@ -145,7 +162,9 @@ export default async function workforceDrillRoutes(fastify: FastifyInstance) {
           .eq('status', 'active')
           .eq('job_history.is_current', true)
 
-        if (isManager) q = q.eq('job_history.manager_id', req.employeeId)
+        if (managerScopeIds) {
+          q = q.in('id', managerScopeIds.length > 0 ? managerScopeIds : ['00000000-0000-0000-0000-000000000000'])
+        }
 
         return q.range(from, to)
       })
@@ -158,8 +177,8 @@ export default async function workforceDrillRoutes(fastify: FastifyInstance) {
     }
 
     // Build employee lookup map — id → { code, name, department }. When
-    // isManager, the query above already scoped job_history.manager_id, so
-    // empMeta only contains this manager's team — every metric loop below
+    // isManager, the query above already scoped to managerScopeIds (the full
+    // subordinate tree), so empMeta only contains this manager's team — every metric loop below
     // must skip any employee_id NOT present here, otherwise a manager could
     // see tenant-wide metric values (OT hours, reliability scores, etc.) for
     // employees outside their team even though display fields degrade to

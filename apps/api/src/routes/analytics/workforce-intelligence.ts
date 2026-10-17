@@ -19,6 +19,7 @@ import { fetchAllRows }        from '../../lib/supabase-paginate.js'
 import { serverError, ErrorCode } from '../../lib/api-errors.js'
 import { fetchTenantTz }       from '../../lib/attendance-engine.js'
 import { getLocalDate }        from '../../lib/org-context.js'
+import { resolveCallerEmployeeId, getDirectReportIds } from '../../lib/manager-scope.js'
 // ── Date helpers ──────────────────────────────────────────────────────────────
 
 const dateRe = /^\d{4}-\d{2}-\d{2}$/
@@ -347,16 +348,34 @@ export default async function workforceIntelligenceRoutes(fastify: FastifyInstan
       ? { from: parsed.data.from, to: parsed.data.to }
       : defaultRange(today, 8)
 
-    const rows = await fetchAllRows((from, to) =>
-      fastify.supabase
+    // Manager scope: this is pure read-only/historical team visibility (not
+    // an approval-queue action), so per manager-scope.ts it deliberately
+    // stays on the full subordinate tree, not just immediate reports. Without
+    // this, any authenticated manager could pull tenant-wide reliability
+    // scores for every employee — the comment above claimed "manager gets
+    // their team only" but no scoping was actually applied.
+    let allowedEmployeeIds: Set<string> | null = null
+    if (!isAdminRole) {
+      const myEmployeeId = await resolveCallerEmployeeId(fastify.supabase, req.userId, req.tenantId)
+      const reportIds = myEmployeeId
+        ? await getDirectReportIds(fastify.supabase, req.tenantId, myEmployeeId)
+        : []
+      allowedEmployeeIds = new Set(reportIds)
+    }
+
+    const rows = await fetchAllRows((from, to) => {
+      let q = fastify.supabase
         .from('attendance_daily')
         .select('employee_id, status, work_hours')
         .eq('tenant_id', req.tenantId)
         .gte('date', range.from)
         .lte('date', range.to)
         .in('status', ['present', 'absent', 'late', 'half_day', 'leave'])
-        .range(from, to),
-    )
+      if (allowedEmployeeIds) {
+        q = q.in('employee_id', allowedEmployeeIds.size > 0 ? [...allowedEmployeeIds] : ['00000000-0000-0000-0000-000000000000'])
+      }
+      return q.range(from, to)
+    })
 
     // Aggregate per employee
     const empMap = new Map<string, { present: number; absent: number; late: number; total: number }>()
