@@ -78,7 +78,19 @@ export default async function orchestrationRoutes(fastify: FastifyInstance) {
 
   // ── POST /system/orchestration/workers/heartbeat ──────────────────────────
   // No tenant restriction — shared infrastructure endpoint used by workers.
+  // Writes to worker_registry are restricted to super_admin at the DB level
+  // (088_orchestration.sql's "wr_system_write" RLS policy), matching the
+  // sibling PUT .../status route below — but this route had no role check
+  // at all, only fastify.authenticate. Any authenticated user of any role,
+  // in any tenant, could upsert (onConflict: 'worker_id') an arbitrary row
+  // into this shared, cross-tenant table — hijacking a real worker_id's
+  // heartbeat (masking a crashed worker as 'active') or spamming new rows
+  // into a platform-wide observability table. Tightened to super_admin.
   fastify.post('/system/orchestration/workers/heartbeat', auth, async (req: any, reply) => {
+    if (!SUPER_ADMIN.includes(req.userRole)) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Super admin access required' })
+    }
+
     const schema = z.object({
       worker_id:      z.string().min(1).max(200),
       worker_type:    z.string().min(1).max(100),
