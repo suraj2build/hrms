@@ -3902,8 +3902,53 @@ API on `corrections.ts`/`period-locks.ts`'s source changes):
   Postgres.
 - Both new scripts committed for re-use.
 
+## Checkpoint 31 escalations — user decisions (2026-10-17)
+
+All 9 escalations from checkpoint 31 were put to the user; answers below.
+Items needing a new migration or a substantial build are queued as a
+follow-up wave (not started yet, to avoid colliding with wave 2's
+migration-numbering coordination while it's still in flight):
+
+1. **Absconding termination second sign-off** — add a real `chro` role
+   (migration: extend `profiles_role_check` to include `'chro'`; narrow
+   `absconding/index.ts`'s `chroAuth` to `super_admin`/`chro` only).
+   Queued, not yet built.
+2. **Requisition salary-band visibility** — **done, checkpoint 32a**:
+   `GET /recruitment/requisitions` and `/:id` now strip `salary_min`/
+   `salary_max` for any caller who isn't a manager or HR admin; the
+   routes stay open to any employee otherwise (unchanged, deliberate).
+3. **360° feedback** — build it to completion now, as its own feature
+   distinct from the still-deferred broader PMS scope decision (goals/
+   reviews/ratings/cycles stay untouched/deferred). Needs: real
+   `survey_assignments` creation on nomination approval, and a report-
+   viewing UI. Queued, not yet built.
+4. **Community reported-post queue** — give it a UI. Queued, not yet
+   built.
+5. **WhatsApp free text → AI assistant** — delegated to the integration
+   owner's judgment ("Ur Call"). **Decision: do not wire it up.** The
+   security reasoning in checkpoint 31's escalation stands on its own
+   merits (phone-number-only identity, confirmed collision-prone across
+   tenants with a recycled number; the assistant's tool loop can take
+   write actions on the caller's behalf) — current behavior (mood/ack/
+   note-only, already correctly documented by checkpoint 31e's fix) is
+   correct as-is. **No code change needed or made.**
+6. **Attendance queue "Escalate to Manager" distinct state** — yes,
+   build it properly (new `escalated`/`escalated_by`/`escalated_at`
+   columns on `attendance_anomalies`, or a generic queue-escalation
+   table). Needs a migration. Queued, not yet built.
+7. **ESS payroll-preview LOP/day-rate** — build it properly: reconcile
+   with the real payroll engine's `total_working_days`-based formula
+   instead of the current flat ÷26. Queued, not yet built.
+8. **`notifications/templates.ts`'s `POST /send`** — wire up real
+   delivery for queued `notification_log` rows (no worker currently
+   reads that table). Queued, not yet built.
+9. **`notifications/inbox.ts`'s escalation-rules CRUD** — wire up a real
+   auto-escalation engine that actually reads `escalation_rules`/
+   `escalation_levels` and acts on them (currently zero readers
+   anywhere). Queued, not yet built.
+
 ## Explicitly still blocked / out of scope (unchanged from the prior round)
 
 - Hosted Supabase/RLS/storage behavior — still blocked, no Supabase project access in this session. Nothing above claims to prove RLS; the local gateway described in prior rounds is a sandbox-only PostgREST-like shim.
-- PMS and Travel Desk — on hold per explicit user instruction, untouched.
+- PMS and Travel Desk — on hold per explicit user instruction, untouched; the newly-approved 360° feedback build (item 3 above) is explicitly carved out of that hold as its own standalone feature, not a reopening of the full PMS scope decision.
 - `main` branch — untouched. PR #30 — unmerged.
