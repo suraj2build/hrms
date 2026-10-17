@@ -22,7 +22,8 @@
  *   POST   /letters/issued/:letterId/approve
  *   POST   /letters/issued/:letterId/reject
  *   DELETE /letters/issued/:letterId       delete draft letter
- *   GET    /letters/issued/:letterId/pdf   stream/redirect to PDF
+ *   (no server-side PDF export route — ESS/admin render the sanitized HTML
+ *   body in a dialog and use the browser's native print-to-PDF)
  *
  * ESS — employee self-service
  *   GET    /letters/ess/templates          list requestable templates
@@ -224,9 +225,19 @@ function renderTemplate(
 
 // ── Request validation schemas ────────────────────────────────────────────────
 
+// approver_role is restricted to roles that can actually reach
+// POST /letters/issued/:letterId/{approve,reject} at all — both are gated
+// by hrAdminAuth (requireRole(HR_ADMIN_ROLES) = hr_admin/super_admin) before
+// their own in-handler chainStep.approver_role check ever runs. Accepting
+// any free-form string here (as before) let HR save a chain level — e.g.
+// 'manager', the migration's own documented example value — that no caller
+// could ever satisfy: a real manager gets 403 from hrAdminAuth before
+// reaching the handler, and an hr_admin's role will never equal 'manager',
+// so that level, and the whole letter waiting on it, is permanently stuck
+// (super_admin excepted, via that check's own 'OR super_admin' escape).
 const approvalChainItemSchema = z.object({
   level:         z.number().int().min(1).max(3),
-  approver_role: z.string().min(1),
+  approver_role: z.enum(['hr_admin', 'super_admin']),
   label:         z.string().optional(),
 })
 

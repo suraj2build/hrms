@@ -235,15 +235,29 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
     // (migration 351) are denormalized fields the intelligence scanner's
     // onboarding-score-degradation query reads directly — without populating
     // them here, that scanner's queries always return zero rows and can
-    // never detect a real Day-30 → Day-60 score drop.
+    // never detect a real Day-30 → Day-60 score drop. That scanner only
+    // ever filters onboarding_d30/onboarding_d60 responses by employee_id
+    // (intelligence-scanner.ts's scanOnboardingDegradation), and those two
+    // survey types are always created with is_anonymous: false — so nulling
+    // employee_id below for an is_anonymous survey cannot break it.
     const [{ data: surveyRow, error: surveyErr }, { data: qRows, error: qErr }] = await Promise.all([
-      supabase.from('surveys').select('survey_type').eq('id', id).maybeSingle(),
+      supabase.from('surveys').select('survey_type, is_anonymous').eq('id', id).maybeSingle(),
       supabase.from('survey_questions').select('id, question_type').in('id', responses.map(r => r.question_id)),
     ])
     if (surveyErr) return serverError(req, reply, surveyErr, ErrorCode.QUERY_FAILED, 'Failed to fetch survey')
     if (qErr) return serverError(req, reply, qErr, ErrorCode.QUERY_FAILED, 'Failed to fetch survey questions')
 
-    const surveyType = (surveyRow as any)?.survey_type ?? null
+    const surveyType   = (surveyRow as any)?.survey_type ?? null
+    // Fresh audit finding: this handler unconditionally stored the
+    // responding employee's id on every survey_responses row, even for a
+    // survey created with is_anonymous: true (e.g. intelligence-scanner.ts's
+    // auto-created exit_intent survey, explicitly meant to let a flight-risk
+    // employee give honest feedback without it being attributable to them).
+    // The employee's identity was fully recoverable from the "anonymous"
+    // response row itself — completion tracking already lives independently
+    // on survey_assignments (which does carry employee_id), so the response
+    // row itself does not need it.
+    const isAnonymous  = (surveyRow as any)?.is_anonymous === true
     const questionTypeMap = new Map(((qRows ?? []) as any[]).map(q => [q.id, q.question_type]))
 
     const rows = responses.map(r => ({
@@ -251,7 +265,7 @@ export default async function surveyRoutes(fastify: FastifyInstance) {
       question_id:    r.question_id,
       tenant_id:      assignment.tenant_id,
       response:       r.response,
-      employee_id:    empId,
+      employee_id:    isAnonymous ? null : empId,
       response_type:  questionTypeMap.get(r.question_id) ?? 'text',
       response_value: r.response == null ? null : (typeof r.response === 'string' ? r.response : JSON.stringify(r.response)),
       survey_type:    surveyType,
