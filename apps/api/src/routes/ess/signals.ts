@@ -18,7 +18,7 @@
  */
 
 import type { FastifyInstance } from 'fastify'
-import { getDirectReportIds } from '../../lib/manager-scope.js'
+import { getImmediateReportIds } from '../../lib/manager-scope.js'
 import { MANAGER_ROLES } from '../../lib/rbac.js'
 import { fetchTenantTz } from '../../lib/attendance-engine.js'
 import { getLocalDate } from '../../lib/org-context.js'
@@ -121,11 +121,18 @@ export default async function essSignalsRoutes(fastify: FastifyInstance) {
         // F21: `rows` is capped at 6 for the card preview, so the "N more waiting"
         // signal below must come from a separate exact-count query, not rows.length
         // (which can never exceed 6 and previously undercounted any pending queue > 11).
+        // SYSTEM_AUDIT_2026-10-14: scoped via getImmediateReportIds, not the full
+        // getDirectReportIds subordinate tree — the actual approve/reject action
+        // these "Review" cards link to (FlowDesk → validateApprover) authorizes
+        // only the employee's IMMEDIATE manager, so the deep tree previously
+        // surfaced a grandchild's pending leave with a clickable Review button
+        // that always 403'd (same defect class already fixed for
+        // /approvals/pending-count and the overtime/comp-off queues).
         isManager && employeeId
           ? (async () => {
               let ids: string[] | null = null
               if (!isAdmin) {
-                ids = await getDirectReportIds(fastify.supabase, tenantId, employeeId)
+                ids = await getImmediateReportIds(fastify.supabase, tenantId, employeeId)
                 if (!ids.length) return { rows: [] as any[], total: 0 }
               }
               // Fresh audit finding: same uppercase-only status fix as above.
@@ -140,10 +147,29 @@ export default async function essSignalsRoutes(fastify: FastifyInstance) {
               return { rows: (data ?? []) as any[], total: count ?? (data ?? []).length }
             })().catch(() => ({ rows: [] as any[], total: 0 }))
           : Promise.resolve({ rows: [] as any[], total: 0 }),
+        // SYSTEM_AUDIT_2026-10-14: this was an unconditional tenant-wide pending
+        // count for ANY isManager (even a plain line manager, not just
+        // hr_admin/super_admin) — it never scoped to the manager's own reports
+        // at all, so a manager saw the WHOLE tenant's pending-correction volume
+        // as a "needs_you" signal, none of which they could actually act on in
+        // FlowDesk (attendance/regularisation.ts's approve/reject is
+        // getImmediateReportIds-scoped). Admins keep the tenant-wide count;
+        // plain managers now scope to their immediate reports, matching real authority.
         isManager
-          ? safe(fastify.supabase.from('attendance_regularisation').select('id', { count: 'exact', head: true })
-              .eq('tenant_id', tenantId).eq('status', 'pending')
-              .then(r => r.count ?? 0), 0)
+          ? (isAdmin
+              ? safe(fastify.supabase.from('attendance_regularisation').select('id', { count: 'exact', head: true })
+                  .eq('tenant_id', tenantId).eq('status', 'pending')
+                  .then(r => r.count ?? 0), 0)
+              : (employeeId
+                  ? (async () => {
+                      const ids = await getImmediateReportIds(fastify.supabase, tenantId, employeeId)
+                      if (!ids.length) return 0
+                      const { count } = await fastify.supabase.from('attendance_regularisation')
+                        .select('id', { count: 'exact', head: true })
+                        .eq('tenant_id', tenantId).eq('status', 'pending').in('employee_id', ids)
+                      return count ?? 0
+                    })().catch(() => 0)
+                  : Promise.resolve(0)))
           : Promise.resolve(0),
       ])
 

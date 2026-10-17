@@ -471,7 +471,7 @@ export function EssDocuments() {
                   <label className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">File (max 5 MB)</label>
                   <input
                     type="file"
-                    accept=".pdf,.jpg,.jpeg,.png,.webp"
+                    accept=".pdf,.jpg,.jpeg,.png"
                     onChange={e => { const f = e.target.files?.[0] ?? null; setUpFile(f); if (f && !upName) setUpName(f.name) }}
                     className="block w-full text-xs file:mr-2 file:rounded-md file:border-0 file:bg-primary/10 file:px-2.5 file:py-1.5 file:text-xs file:font-medium file:text-primary"
                   />
