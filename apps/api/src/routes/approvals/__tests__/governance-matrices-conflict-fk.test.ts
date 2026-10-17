@@ -71,6 +71,11 @@ function buildApp(opts: {
         }
         return chain
       }
+      // logAction()'s own audit_logs write, now called on every successful
+      // matrix mutation (see this file's own fresh audit-logging finding).
+      if (table === 'audit_logs') {
+        return { insert: () => Promise.resolve({ error: null }) }
+      }
       throw new Error(`unexpected table ${table}`)
     },
   }

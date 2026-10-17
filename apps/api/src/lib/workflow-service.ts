@@ -43,6 +43,13 @@ export interface WorkflowInstance {
   current_level: number
   final_approved: boolean | null
   created_at:    string
+  // Present only on rows returned by getPendingWorkflowInstances() — see its
+  // own fresh-audit-finding comment. Absent (undefined) on the plain
+  // instance rows createWorkflowInstance()/getWorkflowInstance() return.
+  status?:         'pending'
+  workflow_type?:  WorkflowType
+  reference_id?:   string
+  requester_name?: string | null
 }
 
 export interface ActionResult {
@@ -269,7 +276,10 @@ export async function getPendingWorkflowInstances(
 ): Promise<{ data: WorkflowInstance[]; total: number }> {
   const { data, count, error } = await supabase
     .from('approval_instances')
-    .select('id, entity_type, entity_id, total_levels, current_level, final_approved, created_at, submitted_by', { count: 'exact' })
+    .select(
+      'id, entity_type, entity_id, total_levels, current_level, final_approved, created_at, submitted_by, requester:profiles!submitted_by(full_name)',
+      { count: 'exact' },
+    )
     .eq('tenant_id', tenantId)
     .is('final_approved', null)
     .order('created_at', { ascending: false })
@@ -281,7 +291,37 @@ export async function getPendingWorkflowInstances(
   // it to serverError() instead of silently telling an HR admin the queue
   // is empty when the query actually failed.
   if (error) throw new Error(`getPendingWorkflowInstances: ${error.message}`)
-  return { data: (data ?? []) as WorkflowInstance[], total: count ?? 0 }
+
+  // Fresh audit finding: the route's only real caller, ApprovalWorkflows.tsx,
+  // renders `inst.status.replace(...)` and `inst.workflow_type.replace(...)`
+  // unconditionally for every row — fields this query never returned. The
+  // moment any instance was open, that threw a TypeError and crashed the
+  // whole "Open Workflow Instances" panel; it also meant the approve/
+  // reject/escalate buttons (gated on `inst.status === 'pending'`) never
+  // rendered at all, since status was always undefined. Every row this
+  // query returns is, by construction (`.is('final_approved', null)`),
+  // still open, so status is always 'pending' here; workflow_type is
+  // derived from entity_type via the canonical map; requester_name comes
+  // from the joined submitter profile.
+  const rows = (data ?? []) as Array<WorkflowInstance & { submitted_by: string; requester: { full_name: string | null } | { full_name: string | null }[] | null }>
+  const mapped: WorkflowInstance[] = rows.map((r) => {
+    const requester = Array.isArray(r.requester) ? r.requester[0] : r.requester
+    return {
+      id:             r.id,
+      entity_type:    r.entity_type,
+      entity_id:      r.entity_id,
+      total_levels:   r.total_levels,
+      current_level:  r.current_level,
+      final_approved: r.final_approved,
+      created_at:     r.created_at,
+      status:         'pending',
+      workflow_type:  ENTITY_WORKFLOW_MAP[r.entity_type],
+      reference_id:   r.entity_id,
+      requester_name: requester?.full_name ?? null,
+    }
+  })
+
+  return { data: mapped, total: count ?? 0 }
 }
 
 // ── getWorkflowConfig ──────────────────────────────────────────────────────────

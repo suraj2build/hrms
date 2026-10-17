@@ -30,6 +30,7 @@ import { z }                    from 'zod'
 import { HR_ADMIN_ROLES }       from '../../lib/rbac.js'
 import { serverError, conflictError, ErrorCode } from '../../lib/api-errors.js'
 import { fetchAllRows } from '../../lib/supabase-paginate.js'
+import { logAction } from '../../lib/audit-service.js'
 const SUPER_ADMIN = ['super_admin']             as const
 
 // Fresh audit finding: entity_type/override_type were previously
@@ -191,6 +192,16 @@ export default async function governanceEvolutionRoutes(fastify: FastifyInstance
       return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create approval matrix')
     }
 
+    // Fresh audit finding: none of this file's governance-configuration
+    // mutations (matrices/delegations/overrides) wrote to audit_logs —
+    // exactly the kind of sensitive admin change (who approves what, who
+    // can stand in, who was granted a bypass) that CLAUDE.md's audit-history
+    // rule requires. Non-blocking: the write already succeeded.
+    await logAction(fastify.supabase, {
+      tenantId: req.tenantId, tableName: 'approval_matrices', recordId: data.id,
+      action: 'INSERT', performedBy: req.userId, newData: data,
+    })
+
     return reply.code(201).send({ data })
   })
 
@@ -267,6 +278,11 @@ export default async function governanceEvolutionRoutes(fastify: FastifyInstance
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Approval matrix not found' })
     }
 
+    await logAction(fastify.supabase, {
+      tenantId: req.tenantId, tableName: 'approval_matrices', recordId: id,
+      action: 'UPDATE', performedBy: req.userId, newData: updatePayload,
+    })
+
     return reply.send({ data })
   })
 
@@ -288,6 +304,11 @@ export default async function governanceEvolutionRoutes(fastify: FastifyInstance
     if (!data) {
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Approval matrix not found' })
     }
+
+    await logAction(fastify.supabase, {
+      tenantId: req.tenantId, tableName: 'approval_matrices', recordId: id,
+      action: 'UPDATE', performedBy: req.userId, newData: { is_active: false },
+    })
 
     return reply.send({ data })
   })
@@ -369,6 +390,11 @@ export default async function governanceEvolutionRoutes(fastify: FastifyInstance
 
     if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to create delegation')
 
+    await logAction(fastify.supabase, {
+      tenantId: req.tenantId, tableName: 'approval_delegations', recordId: data.id,
+      action: 'INSERT', performedBy: req.userId, newData: data,
+    })
+
     return reply.code(201).send({ data })
   })
 
@@ -408,6 +434,11 @@ export default async function governanceEvolutionRoutes(fastify: FastifyInstance
 
     if (error) return serverError(req, reply, error, ErrorCode.UPDATE_FAILED, 'Failed to revoke delegation')
     if (!data) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Delegation not found' })
+
+    await logAction(fastify.supabase, {
+      tenantId: req.tenantId, tableName: 'approval_delegations', recordId: id,
+      action: 'UPDATE', performedBy: req.userId, newData: { is_active: false },
+    })
 
     return reply.send({ data })
   })
@@ -492,6 +523,11 @@ export default async function governanceEvolutionRoutes(fastify: FastifyInstance
 
     if (error) return serverError(req, reply, error, ErrorCode.INSERT_FAILED, 'Failed to grant override')
 
+    await logAction(fastify.supabase, {
+      tenantId: req.tenantId, tableName: 'operational_overrides', recordId: data.id,
+      action: 'INSERT', performedBy: req.userId, newData: data,
+    })
+
     return reply.code(201).send({ data })
   })
 
@@ -526,6 +562,11 @@ export default async function governanceEvolutionRoutes(fastify: FastifyInstance
     if (!data) {
       return reply.code(404).send({ error: 'NOT_FOUND', message: 'Override not found' })
     }
+
+    await logAction(fastify.supabase, {
+      tenantId: req.tenantId, tableName: 'operational_overrides', recordId: id,
+      action: 'UPDATE', performedBy: req.userId, newData: data,
+    })
 
     return reply.send({ data })
   })

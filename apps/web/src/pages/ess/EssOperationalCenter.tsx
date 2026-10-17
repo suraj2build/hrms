@@ -34,11 +34,13 @@ type NotificationType =
 type LopRiskLevel = 'low' | 'medium' | 'high'
 
 interface WorkforceNotification {
-  id:          string
+  // The backend (GET /ess/workforce-notifications) never sends an `id` —
+  // these are computed on the fly each request, not DB rows.
   type:        NotificationType
   title:       string
   message:     string
   action_hint: string | null
+  date?:       string
 }
 
 interface LeaveBalance {
@@ -53,9 +55,18 @@ interface OperationalSummary {
   lop_days:             number
   total_ot_hours:       number
   leave_balance_by_type: LeaveBalance[]
-  lop_amount:           number
-  ot_amount:            number
-  estimated_net_payable: number
+  // Fresh audit finding: the backend (GET /ess/operational-summary) nests
+  // these three under `payroll_preview`, not at the top level — this
+  // interface and the Payroll Preview card below read `summary.lop_amount`
+  // etc. directly, which was always undefined, so the card silently showed
+  // "0" for LOP deduction / OT addition / net payable regardless of the
+  // actual computed amounts (while the Warnings list right below it could
+  // still say "You have N LOP day(s)...").
+  payroll_preview: {
+    lop_amount:            number
+    ot_amount:             number
+    estimated_net_payable: number
+  }
   warnings:             string[]
 }
 
@@ -264,8 +275,21 @@ export function EssOperationalCenter() {
 
   // ── Queries ──────────────────────────────────────────────────────────────────
 
+  // Fresh audit finding: all five of this page's queries below expected a
+  // `{ data: ... }` envelope (and notifications a `{ data: [...] }` one),
+  // but none of the backend endpoints they call (ess-operational.ts) wrap
+  // their response that way — /workforce-notifications returns
+  // `{ notifications }`, and the other four return the object directly with
+  // no wrapper at all. `api.get()` returns the parsed body as-is (no
+  // unwrapping), so every one of `notifications`/`summary`/`workload`/
+  // `fairness`/`payrollImpact` below was reading a nonexistent `.data`
+  // property — permanently `undefined`/`[]`, which (via the `summary ?`/
+  // `workload &&` render guards further down) made the whole Operational
+  // Center page's three-column summary, schedule-fairness and payroll-
+  // impact cards permanently blank, and the Workforce Notifications list
+  // permanently empty, for every employee, regardless of real data.
   const { data: notificationsData, isLoading: notificationsLoading } =
-    useQuery<{ data: WorkforceNotification[] }>({
+    useQuery<{ notifications: WorkforceNotification[] }>({
       queryKey: ['ess-workforce-notifications'],
       queryFn:  () => api.get('/ess/workforce-notifications'),
       staleTime: 60_000,
@@ -273,7 +297,7 @@ export function EssOperationalCenter() {
     })
 
   const { data: summaryData, isLoading: summaryLoading } =
-    useQuery<{ data: OperationalSummary }>({
+    useQuery<OperationalSummary>({
       queryKey: ['ess-operational-summary'],
       queryFn:  () => api.get('/ess/operational-summary'),
       staleTime: 60_000,
@@ -281,7 +305,7 @@ export function EssOperationalCenter() {
     })
 
   const { data: workloadData, isLoading: workloadLoading } =
-    useQuery<{ data: WorkloadBalance }>({
+    useQuery<WorkloadBalance>({
       queryKey: ['ess-workload-balance'],
       queryFn:  () => api.get('/ess/workload-balance'),
       staleTime: 60_000,
@@ -289,7 +313,7 @@ export function EssOperationalCenter() {
     })
 
   const { data: fairnessData, isLoading: fairnessLoading } =
-    useQuery<{ data: ScheduleFairness }>({
+    useQuery<ScheduleFairness>({
       queryKey: ['ess-schedule-fairness'],
       queryFn:  () => api.get('/ess/schedule-fairness'),
       staleTime: 60_000,
@@ -297,7 +321,7 @@ export function EssOperationalCenter() {
     })
 
   const { data: payrollImpactData, isLoading: payrollImpactLoading } =
-    useQuery<{ data: UpcomingPayrollImpact }>({
+    useQuery<UpcomingPayrollImpact>({
       queryKey: ['ess-upcoming-payroll-impact'],
       queryFn:  () => api.get('/ess/upcoming-payroll-impact'),
       staleTime: 60_000,
@@ -316,11 +340,11 @@ export function EssOperationalCenter() {
 
   // ── Derived ──────────────────────────────────────────────────────────────────
 
-  const notifications  = notificationsData?.data  ?? []
-  const summary        = summaryData?.data
-  const workload       = workloadData?.data
-  const fairness       = fairnessData?.data
-  const payrollImpact  = payrollImpactData?.data
+  const notifications  = notificationsData?.notifications ?? []
+  const summary        = summaryData
+  const workload       = workloadData
+  const fairness       = fairnessData
+  const payrollImpact  = payrollImpactData
   const anomalies      = anomaliesData?.data ?? []
   const openAnomalies  = anomalies.filter(a => !a.resolved)
 
@@ -371,11 +395,15 @@ export function EssOperationalCenter() {
           </div>
         ) : (
           <div className="space-y-2">
-            {notifications.map(n => {
+            {notifications.map((n, i) => {
               const Icon = NOTIFICATION_ICON[n.type]
               return (
                 <div
-                  key={n.id}
+                  // Fresh audit finding: the backend's computed notification
+                  // objects (ess-operational.ts) have no `id` field at all —
+                  // `n.id` was always undefined, collapsing every row onto
+                  // the same React key.
+                  key={`${n.type}-${n.date ?? ''}-${i}`}
                   className={cn(
                     'rounded-md border bg-card border-l-4 px-4 py-3 flex items-start gap-3',
                     NOTIFICATION_BORDER[n.type],
@@ -510,17 +538,17 @@ export function EssOperationalCenter() {
           >
             <StatRow
               label="LOP Deduction"
-              value={(summary.lop_amount ?? 0).toLocaleString()}
-              valueCls={summary.lop_amount > 0 ? 'text-destructive' : undefined}
+              value={(summary.payroll_preview?.lop_amount ?? 0).toLocaleString()}
+              valueCls={(summary.payroll_preview?.lop_amount ?? 0) > 0 ? 'text-destructive' : undefined}
             />
             <StatRow
               label="OT Addition"
-              value={(summary.ot_amount ?? 0).toLocaleString()}
-              valueCls={summary.ot_amount > 0 ? 'text-success' : undefined}
+              value={(summary.payroll_preview?.ot_amount ?? 0).toLocaleString()}
+              valueCls={(summary.payroll_preview?.ot_amount ?? 0) > 0 ? 'text-success' : undefined}
             />
             <StatRow
               label="Est. Net Payable"
-              value={(summary.estimated_net_payable ?? 0).toLocaleString()}
+              value={(summary.payroll_preview?.estimated_net_payable ?? 0).toLocaleString()}
               valueCls="text-foreground font-bold"
             />
             {summary.warnings.length > 0 && (
