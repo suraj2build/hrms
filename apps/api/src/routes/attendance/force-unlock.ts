@@ -25,6 +25,7 @@
 import type { FastifyInstance } from 'fastify'
 import type { SupabaseClient }  from '@supabase/supabase-js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
+import { logBulkAction }  from '../../lib/audit-service.js'
 
 async function resetTableLock(supabase: SupabaseClient, tenantId: string): Promise<boolean> {
   const { data, error } = await supabase
@@ -83,6 +84,25 @@ export default async function forceUnlockRoute(fastify: FastifyInstance) {
         { tenantId, userId, tableReset, advisoryReleased, module: 'attendance', route: 'force-unlock' },
         'force-unlock completed',
       )
+
+      // Durable audit trail — this is an override of a safety mechanism
+      // (the processing lock), and the only record of it until now was the
+      // ephemeral server log above, which an HR admin can't query after the
+      // fact. logBulkAction fits here (no single row id — the lock table is
+      // one row per tenant) the same way it's used for other tenant-scoped
+      // operations with no per-record id to hang an audit row off.
+      await logBulkAction(fastify.supabase, {
+        tenantId,
+        tableName:   'attendance_processing_lock',
+        action:      'UPDATE',
+        performedBy: userId,
+        summary: {
+          event:             'attendance.process.force_unlock',
+          table_lock_reset:  tableReset,
+          advisory_released: advisoryReleased,
+          previous_lock:     lockBefore ?? null,
+        },
+      })
 
       return reply.send({
         success:           tableReset,

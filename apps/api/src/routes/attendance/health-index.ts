@@ -315,6 +315,23 @@ export default async function attendanceHealthIndexRoute(fastify: FastifyInstanc
           return serverError(req, reply, empErr, ErrorCode.QUERY_FAILED, 'Failed to fetch active employees')
         }
         targetIds = activeEmps.map((e) => e.id)
+      } else {
+        // FK cross-tenant check — employee_ids is caller-supplied and only
+        // referenced via `.eq('tenant_id', ...)` filters on OTHER tables
+        // below, never verified against this tenant's own employees.
+        // attendance_health_scores.scope_id has no FK at all (it's a bare
+        // text/uuid column whose meaning depends on `scope`), so an
+        // unverified foreign employee_id would upsert a tenant_id=<this
+        // tenant>, scope_id=<foreign employee> row with every rate zeroed
+        // out — a tenant-isolation leak into this tenant's own health-index
+        // data, same bug class as risk.ts's /risk/compute.
+        const { data: ownedEmps, error: ownedErr } = await fastify.supabase
+          .from('employees')
+          .select('id')
+          .eq('tenant_id', req.tenantId)
+          .in('id', targetIds)
+        if (ownedErr) return serverError(req, reply, ownedErr, ErrorCode.QUERY_FAILED, 'Failed to verify employee_ids')
+        targetIds = (ownedEmps ?? []).map((e: { id: string }) => e.id)
       }
 
       if (targetIds.length === 0) {
