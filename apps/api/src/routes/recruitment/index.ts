@@ -307,6 +307,15 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
       status:        z.string().optional(),
       department_id: z.string().uuid().optional(),
       search:        z.string().optional(),
+      // Fresh audit finding: ManagerRequisition.tsx's "My Requisitions" table
+      // called this endpoint with no filter at all — a manager who raises a
+      // requisition saw every OTHER manager's/department's requisitions too
+      // (including salary_min/salary_max via the unfiltered `*` select),
+      // under a heading that promised only their own. There was no server-side
+      // way to scope to the caller even if the frontend had tried. `mine=true`
+      // scopes to `raised_by = req.userId` so that page can actually show
+      // what it claims to.
+      mine:          z.coerce.boolean().optional(),
       limit:         z.coerce.number().int().min(1).max(200).default(50),
       offset:        z.coerce.number().int().min(0).default(0),
     })
@@ -327,6 +336,7 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
     if (parsed.data.status)        q = q.eq('status', parsed.data.status)
     if (parsed.data.department_id) q = q.eq('department_id', parsed.data.department_id)
     if (parsed.data.search)        q = q.ilike('title', `%${parsed.data.search}%`)
+    if (parsed.data.mine)           q = q.eq('raised_by', req.userId)
 
     q = q.range(parsed.data.offset, parsed.data.offset + parsed.data.limit - 1)
 
