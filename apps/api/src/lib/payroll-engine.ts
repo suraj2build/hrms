@@ -31,6 +31,7 @@ import {
   getWeeklyOffDays,
   getHolidayDates,
   getLocalDayOfWeek,
+  withHolidayGroupIds,
 } from './org-context.js'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -904,7 +905,7 @@ export async function countWorkingDaysForEmployee(
 
   const { data: rawHolidays, error: holErr } = await supabase
     .from('holiday_calendar')
-    .select('date, name, is_optional, site_id, location_id, holiday_group_id')
+    .select('date, name, is_optional, site_id, location_id, holiday_group_assignments(group_id)')
     .eq('tenant_id', tenantId)
     .eq('is_optional', false)
     .gte('date', firstDay)
@@ -918,7 +919,11 @@ export async function countWorkingDaysForEmployee(
     )
   }
 
-  const holidaySet = getHolidayDates((rawHolidays ?? []) as any, ctx)
+  // SYSTEM_AUDIT_2026-10-14 checkpoint 28: flatten the multi-group embed —
+  // a holiday can be assigned to more than one group, not just the legacy
+  // single holiday_group_id column (would silently under-count LOP-exempt
+  // working days for every group but the first one a holiday was saved to).
+  const holidaySet = getHolidayDates(((rawHolidays ?? []) as any[]).map(withHolidayGroupIds) as any, ctx)
 
   let weeklyOff = getWeeklyOffDays([], ctx.emp_roster_weekly_off, ctx.site_default_roster_weekly_off)
   if (weeklyOff.length === 0) weeklyOff = [0, 6]   // Sun/Sat default when no roster

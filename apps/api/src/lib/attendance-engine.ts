@@ -51,7 +51,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { writeAuditLogs, writeComputeLogs }  from './attendance-processor.js'
 import { eventService }                      from './event-service.js'
 import { policyService, type AttendancePolicy, DEFAULT_POLICY } from './policy-service.js'
-import { resolveEmployeeOrgContext, getWeeklyOffDays, EmployeeOrgContext } from './org-context.js'
+import { resolveEmployeeOrgContext, getWeeklyOffDays, withHolidayGroupIds, EmployeeOrgContext } from './org-context.js'
 import { resolveIsWeeklyOff }                          from './roster-calendar-engine.js'
 import { resolveViaRotationPolicy }                    from './rotation-engine.js'
 import { resolveShiftWithAttribution, toShiftMeta, type ResolvedShift } from './shift-resolution-engine.js'
@@ -795,7 +795,7 @@ async function fetchHoliday(
   // this filter aligns the attendance engine so day_fraction does not diverge.
   const { data: holidays, error } = await supabase
     .from('holiday_calendar')
-    .select('name, is_optional, site_id, location_id, holiday_group_id')
+    .select('name, is_optional, site_id, location_id, holiday_group_assignments(group_id)')
     .eq('tenant_id', tenantId)
     .eq('date', date)
     .eq('is_optional', false)
@@ -810,9 +810,13 @@ async function fetchHoliday(
   }
   if (!holidays?.length) return null
 
-  const hols = holidays as Array<{
+  // SYSTEM_AUDIT_2026-10-14 checkpoint 28: a holiday can be assigned to
+  // MULTIPLE groups (holiday_group_assignments) — comparing against the
+  // legacy single holiday_group_id column silently missed every group but
+  // the first one a holiday was saved to.
+  const hols = (holidays as any[]).map(withHolidayGroupIds) as Array<{
     name: string; is_optional: boolean
-    site_id: string | null; location_id: string | null; holiday_group_id: string | null
+    site_id: string | null; location_id: string | null; holiday_group_ids: string[]
   }>
 
   // Applicability priority: location > site > holiday-group > global (all-India).
@@ -822,10 +826,10 @@ async function fetchHoliday(
   const site = hols.find((h) => h.site_id && h.site_id === ctx.site_id)
   if (site) return { name: site.name, is_optional: site.is_optional }
 
-  const grp = hols.find((h) => h.holiday_group_id && h.holiday_group_id === ctx.site_holiday_group_id)
+  const grp = hols.find((h) => ctx.site_holiday_group_id && h.holiday_group_ids.includes(ctx.site_holiday_group_id))
   if (grp) return { name: grp.name, is_optional: grp.is_optional }
 
-  const global = hols.find((h) => !h.site_id && !h.location_id && !h.holiday_group_id)
+  const global = hols.find((h) => !h.site_id && !h.location_id && h.holiday_group_ids.length === 0)
   return global ? { name: global.name, is_optional: global.is_optional } : null
 }
 

@@ -1738,7 +1738,7 @@ the repository, not estimated.
 | attendance | 64 | 64 | 0 | 1 open-confirmed (retroactive.ts dedup — low-severity, read-only observability, disclosed not fixed). 14 found-and-FIXED-same-batch (roster-api.ts pagination ×2, roster-calendar.ts rotation-members pagination, leave-reconciliation.ts breakdown-aggregation, writeLedgerEntry idempotency + atomicity, regularisation-policy.ts SLA-breach-reject chain orphaning, scoped-policy accrual gap (migration 470 + `leave-entitlement-service.ts` scope-chain resolver), two-accrual-system double-credit (migration 470 execution-time guard), reconciliation.ts's `/attendance/reconciliation/open` capped-breakdown undercounting, **workforce-optimization.ts missing-authz on 7 routes, health-index.ts department/tenant pagination, 4-file DECIMAL-string-coercion NaN bug, risk.ts `/summary` pagination, risk.ts non-deterministic pagination tie-breaker** — don't count as open) | — |
 | employees | 31 | 31 | 0 | 0 | separation-workflow.ts F&F section (~lines 416-972) relies on prior-round evidence, not re-read this audit |
 | payroll (incl. statutory/) | 52 | 52 | 0 | **0 open-confirmed.** The HIGH SEVERITY arrears/variable-pay/adjustments payroll-integration gap (checkpoint 18) is now FIXED as of checkpoint 22 (migrations 476-480) — see that section below; not left disclosed-only, per explicit instruction not to de-scope it. The loan-EMI finalize non-atomicity (found via injected-failure testing of the checkpoint-17 RPC fix, per explicit instruction to verify it through an actual finalize) is FIXED as of checkpoint 23 (migration 481) — see that section below. The checkpoint-26 sweep of the remaining 24 files (all 14 statutory/ files plus cost/forecast/governance/ops-dashboard/scheduler-monitor/simulate/exports/filing-pack) found and fixed 3 more: lwf.ts's and cost.ts's stale-row/gap-check cleanups had the same unbounded `.not(id,'in',...)` truncation-at-scale bug already fixed in esi.ts/ptax.ts this audit, left unported; tds-plans.ts's submit handler silently discarded one write step's error. 10 found-and-FIXED-same-batch total (runs.ts DELETE TOCTOU race; compensation-revisions.ts silent component-copy swallow → rebuilt fully atomic; advances.ts /recover guaranteed-NOT-NULL-violation + stuck-schedule torn write; loans.ts /record-payment identical guaranteed-NOT-NULL-violation + non-idempotent retry; record_loan_payment_atomic (migration 396) column-ambiguity bug that made the function fail on every call since it was created — silently breaking runs.ts's own automatic loan-balance sweep this whole time; the arrears/variable-pay/adjustments payroll-integration gap itself; runs.ts's loan-EMI finalize sweep's own mark-paid/balance-decrement non-atomicity, checkpoint 23; lwf.ts's and cost.ts's unbounded exclusion filters and tds-plans.ts's unchecked demote-error, checkpoint 26) — don't count as open | approval/finalization/F&F/encashment-adjacent correctness relies on PRIOR rounds (G12 etc.), not re-verified by this audit's own checkpoints; historical `loan_schedules` rows already stuck in the pre-checkpoint-23 shape (`status='paid' AND paid_amount IS NULL`) in real tenant data are not yet reconciled — tracked separately, per instruction not to silently backfill; `lwf.ts`/`cost.ts`'s checkpoint-26 fixes haven't been re-run through the specific 1,200+-employee real-scale proof that originally caught this bug class in esi.ts/ptax.ts, only verified by code-pattern match |
-| masters | 29 | 0 | 29 | — | nav-link fixes only; no file-level authz review this audit |
+| masters | 29 | 29 | 0 | **0 open-confirmed.** 2 found-and-FIXED-same-batch: leave-policy-masters.ts's is_default demote-then-write torn state (migration 482, checkpoint 27); holidays.ts's group_ids[0]-only legacy sync, which silently dropped every holiday group but the first from 9 real consumer engines — fixed by building real multi-group support (migration 483, checkpoint 28, explicit user decision) — don't count as open | rotation-policies.ts has one lower-confidence, unconfirmed pagination note (un-chunked rule-count query); salary-components.ts/salary-structures.ts are thin wrappers over lib/salary-config-store.ts, not separately re-audited |
 | ess | 12 | 0 | 12 | — | distinct from the frozen web ESS Context Rail (CLAUDE.md) — this is the unrelated API namespace |
 | onboarding | 8 | 0 | 8 | — | — |
 | system | 8 | 0 | 8 | — | — |
@@ -1789,7 +1789,7 @@ the repository, not estimated.
 | uploads | 1 | 0 | 1 | — | — |
 | whatsapp | 1 | 0 | 1 | — | — |
 | workforce | 1 | 0 | 1 | — | — |
-| **TOTAL (54 rows, 53 namespaces + setup.ts)** | **289** | **154** | **135** | **1 open-confirmed: retroactive.ts dedup — low-severity, read-only observability. The arrears/variable-pay/adjustments payroll-engine disconnect (checkpoint 18, HIGH SEVERITY) is FIXED as of checkpoint 22 — see that section below; none else currently open; the scoped-policy accrual gap and the two-accrual-system double-credit, both CONFIRMED financial defects as of checkpoint 14, are now FIXED as of checkpoint 15 (migration 470) — see that section below; every other defect found this audit was fixed in the same checkpoint it was found** | **global: hosted Supabase/RLS/storage behavior is never verified anywhere in this tracker — see "Explicitly still blocked" below; PT/TDS/F&F/asset/careers/tenant-licensing rows above rely on evidence from rounds OUTSIDE this specific audit, real but not re-verified here** |
+| **TOTAL (54 rows, 53 namespaces + setup.ts)** | **289** | **183** | **106** | **1 open-confirmed: retroactive.ts dedup — low-severity, read-only observability. The arrears/variable-pay/adjustments payroll-engine disconnect (checkpoint 18, HIGH SEVERITY) is FIXED as of checkpoint 22 — see that section below; the holidays.ts multi-group gap (HIGH SEVERITY) is FIXED as of checkpoint 28 — see that section below; none else currently open; the scoped-policy accrual gap and the two-accrual-system double-credit, both CONFIRMED financial defects as of checkpoint 14, are now FIXED as of checkpoint 15 (migration 470) — see that section below; every other defect found this audit was fixed in the same checkpoint it was found** | **global: hosted Supabase/RLS/storage behavior is never verified anywhere in this tracker — see "Explicitly still blocked" below; PT/TDS/F&F/asset/careers/tenant-licensing rows above rely on evidence from rounds OUTSIDE this specific audit, real but not re-verified here** |
 
 **Checkpoint 14 continuation, second leg**: 4 more files examined —
 `manager-dashboard.ts`, `payroll-summary.ts`, `context.ts` (no defects;
@@ -3184,6 +3184,184 @@ checkpoint).
 (incl. statutory/)" row's own `cost.ts`/`forecast.ts` entries from
 checkpoint 4 era are superseded by this fuller pass. See the updated
 module table below.
+
+## Checkpoint 27 — masters/ sweep (28 files): the demote-then-write torn-state bug class found again, fixed; a local test-infra gap found and fixed along the way
+
+Per the standing instruction to continue past payroll into "all other
+modules" once the payroll sweep closed out. Delegated the read-only
+investigation to an Explore subagent (28 route files in
+`apps/api/src/routes/masters/` read in full against the same defect
+patterns used throughout this audit), then independently verified and
+fixed each real finding myself.
+
+**Confirmed defect — `leave-policy-masters.ts`'s `is_default` demote-
+then-write, the exact torn-state pattern already fixed elsewhere this
+audit (checkpoint 22's arrears/variable-pay, checkpoint 23's loan-EMI).**
+`POST /` and `PUT /:id` both cleared the tenant's current
+`is_default=true` policy with one UPDATE, then separately inserted/
+updated the target row as a second, unguarded call — the route's own
+comment even admitted this was "a transaction-like pattern," not an
+actual one. A failure in that second step (a duplicate-name 23505, or a
+CAS `cas_version` mismatch matching 0 rows) left the demote already
+committed — the tenant ends up with ZERO default leave policies until
+an admin notices. Fixed with migration 482
+(`create_leave_policy_master_atomic` / `update_leave_policy_master_
+atomic`): demote + write fused into one transaction per route, so any
+failure — a raised exception or an explicit `RAISE` on a 0-row CAS
+mismatch — rolls back the demote too.
+
+**A bug in the fix itself, caught by the proof script, not assumed
+correct from reading the SQL**: the first version of
+`update_leave_policy_master_atomic` let a CAS-mismatch PUT silently
+commit its own demote step while returning an empty result (no
+exception raised for the 0-row case). The verification script's own
+concurrent-conflict check caught this before it shipped; fixed to
+explicitly `RAISE` so that case rolls back too.
+
+**A genuine gap in the local Postgres test gateway, found while
+building the proof script, not a production bug**: `scripts/db/local-
+test-gateway.mjs`'s RPC handler always array-wrapped a non-scalar
+function result. Real PostgREST only array-wraps a true `RETURNS
+SETOF`/`TABLE` function — a plain `RETURNS <named composite>` function
+(like this migration's two new functions) is singular, returned as one
+JSON object directly, same as a scalar JSON-returning function. Fixed by
+introspecting `pg_proc.proretset` per function (cached) and branching
+accordingly — verified this doesn't change behavior for any pre-existing
+`RETURNS TABLE` RPC in the codebase (all unaffected, still array-wrapped
+exactly as before).
+
+Proven with `scripts/db/verify-leave-policy-master-default-atomic.mjs`
+against real Postgres + real HTTP: 11 checks covering the duplicate-name
+insert-failure case, the CAS-mismatch update-failure case, and a real
+successful default transfer — all pass.
+
+**No defects found** in the other 27 files: `asset-categories.ts`,
+`attendance-policies.ts`, `clusters.ts`, `cost-centers.ts`, `document-
+types.ts`, `employee-shifts.ts`, `employment-categories.ts`, `grades.ts`,
+`holiday-groups.ts`, `identity-types.ts`, `important-date-types.ts`,
+`index.ts`, `leave-policies.ts`, `leave-policy-assignments.ts`, `leave-
+policy-rules.ts`, `leave-types.ts`, `payroll-groups.ts`, `relationship-
+types.ts`, `rosters.ts`, `rotation-policies.ts` (one lower-confidence
+pagination note — an un-chunked rule-count aggregation query, flagged
+but not confirmed as currently exploitable at realistic rule-per-policy
+counts), `salary-components.ts`, `salary-structures.ts` (both thin HTTP
+wrappers over `lib/salary-config-store.ts`, not separately re-audited
+here), `shifts.ts`, `sites.ts`, `states.ts`, `statutory-groups.ts`,
+`work-locations.ts` — plus `holidays.ts`, examined separately below
+(checkpoint 28) since its own finding opened a much larger investigation.
+
+`apps/api` `tsc --noEmit` clean; full vitest suite: 79 files, 669 tests
+passing.
+
+## Checkpoint 28 — HIGH SEVERITY: a holiday assigned to multiple groups silently applied to only the first; fixed by building real multi-group support across 9 consumer engines (user decision)
+
+The masters/ sweep (checkpoint 27) also surfaced a finding in
+`holidays.ts` that didn't fit the usual "verify and fix" shape — it
+exposed a real, pre-existing product-scope question, which the user was
+explicitly asked and answered before any fix was built (per the standing
+instruction to only interrupt independent work for genuinely undefined
+business choices).
+
+**The finding**: `holiday_group_assignments` is a real many-to-many
+junction table — a holiday CAN be assigned to multiple groups — and
+`POST /masters/holidays/group-assignments` correctly wrote the full set
+there. But it ALSO "synced" the legacy single-FK
+`holiday_calendar.holiday_group_id` column to `group_ids[0]` "for
+backward compat." Grep confirmed `holiday_group_assignments` was read
+ONLY by that one file (the admin group-matrix display and this write
+endpoint) — every REAL consumer that decides whether a holiday applies
+to an employee read the single legacy column directly. A holiday
+assigned to groups `[B, A]` applied correctly to group B's employees
+(index 0) but silently NOT to group A's, even though the admin UI (which
+correctly reads the multi-group table) showed the holiday assigned to
+both. This is attendance/leave/payroll correctness — not cosmetic.
+
+**The decision asked**: restrict holidays to one group (quick, matches
+current actual behavior) vs. build real multi-group support by fixing
+every consumer engine to read the full assignment set. **User chose:
+build real multi-group support.**
+
+**Scope, traced exhaustively, not just the originally-named 5 files**:
+grepping specifically for `holiday_group_id` usage (not just any
+`holiday_calendar` table read) across the whole `apps/api/src` tree
+found **9 real consumers**, not the 5 first identified — 4 more
+(`attendance-engine.ts`, `collision-engine.ts`,
+`routes/attendance/leave-collision.ts`,
+`routes/employees/org-context.ts`) surfaced only by tracing every actual
+caller of `org-context.ts`'s `isHolidayForEmployee`/`getHolidayDates`,
+not by trusting the first pass's file list:
+
+- `attendance-engine.ts` — `fetchHoliday()`, used by `computeDay()`.
+- `attendance-processor.ts` — the legacy bulk processor.
+- `roster-calendar-engine.ts` — `_fetchHoliday()` AND a second, separate
+  inline month-batch query in `buildEmployeeRosterCalendar()` (this
+  engine uses the EMPLOYEE'S ROSTER's own group, `rosters.holiday_
+  group_id` — a different, genuinely single-valued concept from
+  `sites.holiday_group_id` the other engines use; left that resolution
+  unchanged, only fixed the holiday-side multi-group matching).
+- `leave-engine.ts` — `computeWorkingLeaveDays()`.
+- `payroll-engine.ts` — the per-employee working-days counter feeding
+  LOP computation.
+- `collision-engine.ts` — leave-collision preview.
+- `routes/attendance/leave-collision.ts` — the ESS-facing collision
+  calendar endpoint (inline logic, not through the shared engine).
+- `routes/employees/org-context.ts` — the "upcoming holidays" widget.
+
+**The fix**: `org-context.ts`'s `HolidayApplicability` interface changed
+from an optional `holiday_group_id?: string | null` to a required
+`holiday_group_ids: string[]` (empty = global, matching the old
+`null`'s meaning); `isHolidayForEmployee`/`getHolidayDates` now check
+array membership instead of scalar equality. A new shared helper,
+`withHolidayGroupIds()`, flattens a `holiday_group_assignments(group_id)`
+Supabase embed into that shape — every one of the 9 call sites was
+changed to select that embed (instead of the legacy column) and pipe
+through this helper before calling either function.
+
+**A real regression caught before it shipped, not assumed safe**:
+making `holiday_group_ids` a REQUIRED field (not optional) was
+deliberate — TypeScript's `as HolidayRowWithDate[]` casts (used at
+several call sites, pre-existing style) don't do real structural
+checking, so `tsc --noEmit` stayed clean even where a query never
+selected the group column at all (`collision-engine.ts`,
+`routes/employees/org-context.ts`). Those two would have thrown
+`Cannot read properties of undefined (reading 'length')` at runtime on
+the very first holiday check, since the old optional field tolerated
+`undefined` via a falsy check but the new required field's `.length`/
+`.includes()` do not. Found by grepping every actual caller of the two
+pure functions (not just the files that already referenced
+`holiday_group_id` by name) and fixed the same way as the other 7.
+
+**Also removed**: `holidays.ts`'s legacy `holiday_group_id` sync entirely
+(verified via grep across both `apps/api/src` and `apps/web/src` that
+nothing reads it anymore — the web admin page's own local field was
+likewise vestigial, never read back), and fused the handler's
+delete-then-insert into one atomic transaction (migration 483,
+`set_holiday_group_assignments_atomic`) — the same lower-severity
+torn-write pattern as checkpoint 27's finding, flagged alongside the
+`group_ids[0]` bug: a failed insert after a committed delete used to
+leave a holiday with zero group assignments and no indication beyond
+the 500 response.
+
+**Proven end-to-end against real Postgres + real HTTP + the real
+attendance engine**, not just at the type level —
+`scripts/db/verify-holiday-multi-group.mjs`: seeded two sites each
+observing a DIFFERENT holiday group, assigned ONE holiday to BOTH groups
+via the real `POST /masters/holidays/group-assignments` endpoint with
+`group_ids: [B, A]` (B first, deliberately not A — the exact order the
+confirmed bug mishandled), ran the real `POST /attendance/process`
+endpoint, and confirmed via direct `attendance_daily` reads that BOTH
+employees — including group A's, the one the bug would have silently
+dropped — are correctly classified `status='holiday'`. Also confirmed
+the legacy column stays NULL and the junction table holds exactly the 2
+requested rows. All 6 checks pass.
+
+`apps/api` `tsc --noEmit` clean; full vitest suite: 79 files, 669 tests
+passing.
+
+**Payroll route-file total unaffected by this checkpoint** (payroll-
+engine.ts's fix is a correctness fix within an already-examined file,
+not a new file) — masters/ coverage: 29/29 files examined (28 initially
+scoped + `holidays.ts` itself).
 
 ## Checkpoint 14 qualifications — both closed with a real fix, not a restated assumption
 

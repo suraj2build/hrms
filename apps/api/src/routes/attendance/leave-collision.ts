@@ -15,7 +15,7 @@ import {
   computeCollision,
   resolveCollisionPolicy,
 } from '../../lib/collision-engine.js'
-import { resolveEmployeeOrgContext, getLocalDate } from '../../lib/org-context.js'
+import { resolveEmployeeOrgContext, getLocalDate, withHolidayGroupIds } from '../../lib/org-context.js'
 import { fetchTenantTz } from '../../lib/attendance-engine.js'
 import { HR_ADMIN_ROLES } from '../../lib/rbac.js'
 import { getDirectReportIds } from '../../lib/manager-scope.js'
@@ -270,9 +270,9 @@ export default async function leaveCollisionRoutes(fastify: FastifyInstance) {
       ? await resolveEmployeeOrgContext(fastify.supabase, req.tenantId, employeeId, `${year}-06-01`)
       : { site_id: null, work_location_id: null, site_holiday_group_id: null }
 
-    const { data: rows, error } = await fastify.supabase
+    const { data: rawRows, error } = await fastify.supabase
       .from('holiday_calendar')
-      .select('id, date, name, holiday_type, is_optional, site_id, location_id, holiday_group_id')
+      .select('id, date, name, holiday_type, is_optional, site_id, location_id, holiday_group_assignments(group_id)')
       .eq('tenant_id', req.tenantId)
       .eq('is_optional', false)
       .gte('date', yStart)
@@ -281,20 +281,26 @@ export default async function leaveCollisionRoutes(fastify: FastifyInstance) {
 
     if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch holidays')
 
+    // SYSTEM_AUDIT_2026-10-14 checkpoint 28: a holiday can be assigned to
+    // MULTIPLE groups (holiday_group_assignments) — comparing against the
+    // legacy single holiday_group_id column silently missed every group but
+    // the first one a holiday was saved to.
+    const rows = (rawRows ?? []).map(withHolidayGroupIds)
+
     // Applicability + per-date priority (location > site > group > global).
     const rank = (h: any) =>
-      h.location_id      ? 4
-      : h.site_id         ? 3
-      : h.holiday_group_id ? 2
+      h.location_id             ? 4
+      : h.site_id                ? 3
+      : h.holiday_group_ids.length ? 2
       : 1
     const applies = (h: any) =>
-      (!h.site_id && !h.location_id && !h.holiday_group_id) ||
+      (!h.site_id && !h.location_id && h.holiday_group_ids.length === 0) ||
       (ctx.site_id && h.site_id === ctx.site_id) ||
       (ctx.work_location_id && h.location_id === ctx.work_location_id) ||
-      (ctx.site_holiday_group_id && h.holiday_group_id === ctx.site_holiday_group_id)
+      (ctx.site_holiday_group_id && h.holiday_group_ids.includes(ctx.site_holiday_group_id))
 
     const byDate = new Map<string, any>()
-    for (const h of (rows ?? [])) {
+    for (const h of rows) {
       if (!applies(h)) continue
       const cur = byDate.get(h.date)
       if (!cur || rank(h) > rank(cur)) byDate.set(h.date, h)

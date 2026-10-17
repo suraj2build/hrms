@@ -14,6 +14,7 @@ import {
   getWeeklyOffDays,
   getHolidayDates,
   getLocalDayOfWeek,
+  withHolidayGroupIds,
   type HolidayRowWithDate,
 } from './org-context.js'
 
@@ -151,14 +152,17 @@ export async function computeWorkingLeaveDays(
   // so leave-day counting converges with payroll and leave-request-service.
   const { data: rawHolidays } = await supabase
     .from('holiday_calendar')
-    .select('date, name, is_optional, site_id, location_id, holiday_group_id')
+    .select('date, name, is_optional, site_id, location_id, holiday_group_assignments(group_id)')
     .eq('tenant_id', tenantId)
     .gte('date', from)
     .lte('date', to)
     .eq('is_optional', false)
 
+  // SYSTEM_AUDIT_2026-10-14 checkpoint 28: flatten the multi-group embed —
+  // a holiday can be assigned to more than one group, not just the legacy
+  // single holiday_group_id column.
   const holidaySet = getHolidayDates(
-    (rawHolidays ?? []) as HolidayRowWithDate[],
+    ((rawHolidays ?? []) as any[]).map(withHolidayGroupIds) as HolidayRowWithDate[],
     orgCtx,
   )
 

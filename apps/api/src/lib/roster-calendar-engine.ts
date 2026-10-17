@@ -379,17 +379,17 @@ async function _fetchHoliday(
   dateStr:  string,
   groupId:  string | null,
 ): Promise<{ name: string; is_optional: boolean } | null> {
-  let q = supabase
+  // SYSTEM_AUDIT_2026-10-14 checkpoint 28: a holiday can be assigned to
+  // MULTIPLE groups (holiday_group_assignments), so matching against the
+  // legacy single holiday_group_id column via `.or('holiday_group_id.is.
+  // null,holiday_group_id.eq.${groupId}')` silently missed every group but
+  // the first one a holiday was saved to. Fetch the full assignment set per
+  // candidate row and match in memory instead.
+  const { data, error } = await supabase
     .from('holiday_calendar')
-    .select('name, is_optional')
+    .select('name, is_optional, holiday_group_assignments(group_id)')
     .eq('tenant_id', tenantId)
     .eq('date', dateStr)
-
-  q = groupId
-    ? q.or(`holiday_group_id.is.null,holiday_group_id.eq.${groupId}`)
-    : q.is('holiday_group_id', null)
-
-  const { data, error } = await q.limit(1).maybeSingle()
   // Fresh audit finding: previously discarded — a query error silently fell
   // through to "not a holiday", inflating working-day counts and leave-day
   // charges for that date. Throws, matching attendance-engine.ts's
@@ -397,7 +397,11 @@ async function _fetchHoliday(
   if (error) {
     throw new Error(`_fetchHoliday: DB query failed — ${error.message}`)
   }
-  return data ?? null
+  const match = (data ?? []).find((h: any) => {
+    const assignedGroups = (h.holiday_group_assignments ?? []).map((a: any) => a.group_id)
+    return assignedGroups.length === 0 || (groupId != null && assignedGroups.includes(groupId))
+  })
+  return match ? { name: (match as any).name, is_optional: (match as any).is_optional } : null
 }
 
 async function _fetchRotationMembership(
@@ -774,19 +778,18 @@ export async function buildEmployeeRosterCalendar(
   const ctx   = await _fetchEmpRosterCtx(supabase, tenantId, employeeId)
   const rules = ctx.roster_id ? await _fetchWeeklyOffRules(supabase, tenantId, ctx.roster_id, monthStart) : []
 
-  // Pre-fetch all holidays for the month
-  let holidayQ = supabase
+  // Pre-fetch all holidays for the month. SYSTEM_AUDIT_2026-10-14 checkpoint
+  // 28: a holiday can be assigned to MULTIPLE groups (holiday_group_
+  // assignments) — filtering by the legacy single holiday_group_id column
+  // via `.or(...)` silently missed every group but the first one a holiday
+  // was saved to. Fetch every candidate row's full assignment set via embed
+  // and filter in memory instead, same fix as _fetchHoliday above.
+  const { data: rawHolidays, error: holidayErr } = await supabase
     .from('holiday_calendar')
-    .select('date, name, is_optional')
+    .select('date, name, is_optional, holiday_group_assignments(group_id)')
     .eq('tenant_id', tenantId)
     .gte('date', monthStart)
     .lte('date', monthEnd)
-
-  holidayQ = ctx.holiday_group_id
-    ? holidayQ.or(`holiday_group_id.is.null,holiday_group_id.eq.${ctx.holiday_group_id}`)
-    : holidayQ.is('holiday_group_id', null)
-
-  const { data: holidays, error: holidayErr } = await holidayQ
   // Fresh audit finding: same unchecked-error bug as _fetchHoliday above —
   // this pre-fetch feeds countRosterWorkingDays (payroll working-days count)
   // and leave-request-service.ts's working-day exclusion logic, so a
@@ -795,8 +798,12 @@ export async function buildEmployeeRosterCalendar(
   if (holidayErr) {
     throw new Error(`buildEmployeeRosterCalendar: holiday query failed — ${holidayErr.message}`)
   }
+  const holidays = (rawHolidays ?? []).filter((h: any) => {
+    const assignedGroups = (h.holiday_group_assignments ?? []).map((a: any) => a.group_id)
+    return assignedGroups.length === 0 || (ctx.holiday_group_id != null && assignedGroups.includes(ctx.holiday_group_id))
+  })
   const holidayMap = new Map(
-    (holidays ?? []).map(h => [h.date as string, { name: h.name as string, is_optional: h.is_optional as boolean }])
+    holidays.map(h => [h.date as string, { name: h.name as string, is_optional: h.is_optional as boolean }])
   )
 
   // Pre-fetch shift_roster overrides for the month
