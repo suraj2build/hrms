@@ -298,17 +298,17 @@ interface EnterpriseHealth {
 function GovernanceTab({ onDrawerOpen }: { onDrawerOpen: (item: DrawerItem) => void }) {
   const { data: alertsData, isLoading: alertsLoading } = useQuery({
     queryKey: ['enterprise-control-governance', 'alerts'],
-    queryFn:  () => api.get<{ alerts: PlatformEvent[] }>('/governance/compliance/alerts'),
+    queryFn:  () => api.get<{ alerts: PlatformEvent[]; total?: number }>('/governance/compliance/alerts'),
   })
 
   const { data: riskData, isLoading: riskLoading } = useQuery({
     queryKey: ['enterprise-control-governance', 'risk'],
-    queryFn:  () => api.get<{ risks: RiskEntity[] }>('/governance/risk/summary'),
+    queryFn:  () => api.get<{ risks: RiskEntity[]; total?: number }>('/governance/risk/summary'),
   })
 
   const { data: incidentsData, isLoading: incidentsLoading } = useQuery({
     queryKey: ['enterprise-control-governance', 'incidents'],
-    queryFn:  () => api.get<{ incidents: Incident[] }>('/governance/incidents'),
+    queryFn:  () => api.get<{ incidents: Incident[]; total?: number }>('/governance/incidents'),
   })
 
   const { data: eventsData, isLoading: eventsLoading } = useQuery({
@@ -337,9 +337,16 @@ function GovernanceTab({ onDrawerOpen }: { onDrawerOpen: (item: DrawerItem) => v
       <OperationalSummary
         loading={alertsLoading && riskLoading && incidentsLoading}
         items={[
-          { label: 'Active Alerts',  value: alerts.length,    severity: alerts.some(a => a.severity === 'critical') ? 'critical' : alerts.length > 0 ? 'warning' : 'info' },
-          { label: 'Risk Signals',   value: risks.length,     severity: risks.some(r => r.severity === 'critical') ? 'critical' : 'info' },
-          { label: 'Open Incidents', value: incidents.length, severity: incidents.length > 0 ? 'warning' : 'info' },
+          // Fresh audit finding: these KPI tiles read the already-capped
+          // response array's .length instead of the API's own `total` —
+          // each backing endpoint (compliance/alerts, risk/summary,
+          // incidents) caps its array at a fixed page size (50/20/20), so a
+          // tenant with more alerts/risks/incidents than that cap always
+          // showed the cap itself here, never the real count the API
+          // already computes.
+          { label: 'Active Alerts',  value: alertsData?.total    ?? alerts.length,    severity: alerts.some(a => a.severity === 'critical') ? 'critical' : alerts.length > 0 ? 'warning' : 'info' },
+          { label: 'Risk Signals',   value: riskData?.total      ?? risks.length,     severity: risks.some(r => r.severity === 'critical') ? 'critical' : 'info' },
+          { label: 'Open Incidents', value: incidentsData?.total ?? incidents.length, severity: incidents.length > 0 ? 'warning' : 'info' },
         ]}
       />
 

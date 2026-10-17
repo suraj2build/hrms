@@ -174,14 +174,30 @@ export default async function intelligenceRoutes(fastify: FastifyInstance) {
   fastify.get('/incidents', adminAuth, async (req, reply) => {
     const { limit = '20' } = req.query as Record<string, string>
     const tenantId = (req as any).tenantId
-    const { data, error } = await fastify.supabase
-      .from('operational_incidents')
-      .select('id, incident_type, severity, title, status, related_entity_type, created_at, metadata')
-      .eq('tenant_id', tenantId)
-      .eq('status', 'open')
-      .order('created_at', { ascending: false })
-      .limit(Number(limit))
+    // Fresh audit finding: `total` was `data.length`, which can never exceed
+    // the `.limit()` the query itself requested — same fabricated-KPI
+    // pattern already fixed above (compliance/alerts) and in the sibling
+    // /operations/automation/activity route. EnterpriseControlCenter.tsx's
+    // "Open Incidents" KPI card reads this count, so a tenant with more open
+    // incidents than the default limit (20) silently saw it capped with no
+    // truncation signal. Parallel count:'exact',head:true query gives the
+    // real total.
+    const [{ data, error }, { count, error: countError }] = await Promise.all([
+      fastify.supabase
+        .from('operational_incidents')
+        .select('id, incident_type, severity, title, status, related_entity_type, created_at, metadata')
+        .eq('tenant_id', tenantId)
+        .eq('status', 'open')
+        .order('created_at', { ascending: false })
+        .limit(Number(limit)),
+      fastify.supabase
+        .from('operational_incidents')
+        .select('id', { count: 'exact', head: true })
+        .eq('tenant_id', tenantId)
+        .eq('status', 'open'),
+    ])
     if (error) return serverError(req, reply, error, ErrorCode.QUERY_FAILED, 'Failed to fetch open incidents')
-    return { incidents: data ?? [], total: (data ?? []).length }
+    if (countError) return serverError(req, reply, countError, ErrorCode.QUERY_FAILED, 'Failed to count open incidents')
+    return { incidents: data ?? [], total: count ?? (data ?? []).length }
   })
 }

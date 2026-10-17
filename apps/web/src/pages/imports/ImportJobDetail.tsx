@@ -6,6 +6,7 @@
 
 import { useParams, useNavigate } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import { ImportJobCard }   from '@/components/imports/ImportJobCard'
 import { ImportJobErrors } from '@/components/imports/ImportJobErrors'
 import { Button }          from '@/components/ui/button'
@@ -23,6 +24,11 @@ export default function ImportJobDetail() {
       // ImportHistory.tsx reads the job list under this separate key.
       queryClient.invalidateQueries({ queryKey: ['import-jobs'] })
     },
+    // Fresh audit finding: no onError here meant a 409 ("already retried or
+    // status changed" — a real, reachable race per the backend's own
+    // comment on this route) failed completely silently, leaving the user
+    // staring at a button that visibly did nothing.
+    onError: (e: Error) => toast.error('Failed to retry import job', { description: e.message }),
   })
 
   const cancelMutation = useMutation({
@@ -31,6 +37,9 @@ export default function ImportJobDetail() {
       queryClient.setQueryData(['import-job', jobId], res.job)
       queryClient.invalidateQueries({ queryKey: ['import-jobs'] })
     },
+    // Same fix as retryMutation above — a 409 ("already finished or status
+    // changed") must surface, not fail silently.
+    onError: (e: Error) => toast.error('Failed to cancel import job', { description: e.message }),
   })
 
   function handleCancel() {

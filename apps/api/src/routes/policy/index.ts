@@ -384,6 +384,19 @@ export default async function policyRoutes(fastify: FastifyInstance) {
 
     if (error || !data) return reply.status(404).send({ error: 'Policy not found' })
 
+    // Fresh audit finding: this single-policy GET had no status gate, unlike
+    // its sibling list endpoint (GET /, employee view) which only ever
+    // returns status='published' rows. EssPolicies.tsx opens this route from
+    // a user-editable `?policy=<id>` query param (openPolicy/deep-link), so
+    // any authenticated employee who obtained — or simply typed — a draft or
+    // archived policy's UUID into the URL could read its full unpublished
+    // content. HR admins are exempt since they already have the dedicated
+    // admin list/detail surfaces for draft and archived policies.
+    const isHrAdmin = (HR_ADMIN_ROLES as readonly string[]).includes(req.userRole)
+    if (!isHrAdmin && data.status !== 'published') {
+      return reply.status(404).send({ error: 'Policy not found' })
+    }
+
     let ackStatus = 'not_required'
     if (data.requires_acknowledgement) {
       const employeeId = await getEmployeeId(req.userId)
