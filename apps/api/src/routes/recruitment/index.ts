@@ -367,8 +367,15 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
       }
     }
 
+    // SYSTEM_AUDIT_2026-10-14 escalation, decided by the user: this route is
+    // deliberately open to any authenticated role (so any employee can see
+    // what roles are open), but budgeted salary bands are not meant to be
+    // tenant-wide public — strip them for callers who aren't a manager or
+    // HR admin. MANAGER_ROLES already includes HR_ADMIN_ROLES.
+    const isPrivileged = (MANAGER_ROLES as readonly string[]).includes(req.userRole)
     const enriched = (data ?? []).map((r: any) => ({
       ...r,
+      ...(isPrivileged ? {} : { salary_min: null, salary_max: null }),
       applicant_count: appCounts[r.id] ?? 0,
     }))
 
@@ -399,7 +406,16 @@ export default async function recruitmentRoutes(fastify: FastifyInstance) {
       .eq('tenant_id', req.tenantId)
     if (countErr) return serverError(req, reply, countErr, ErrorCode.QUERY_FAILED, 'Failed to fetch applicant count')
 
-    return reply.send({ data: { ...(data as any), applicant_count: appCount ?? 0 } })
+    // Same salary-band stripping as the list endpoint above, for the
+    // same reason (user decision, SYSTEM_AUDIT_2026-10-14).
+    const isPrivileged = (MANAGER_ROLES as readonly string[]).includes(req.userRole)
+    return reply.send({
+      data: {
+        ...(data as any),
+        ...(isPrivileged ? {} : { salary_min: null, salary_max: null }),
+        applicant_count: appCount ?? 0,
+      },
+    })
   })
 
   fastify.post('/requisitions', managerOrHrAuth, async (req: any, reply) => {

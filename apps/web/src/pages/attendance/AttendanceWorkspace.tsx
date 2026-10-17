@@ -720,13 +720,17 @@ function TabAnomalies() {
   })
 
   const resolve = useMutation({
-    mutationFn: (id: string) => api.post(`/work-session-anomalies/${id}/resolve`, {}),
+    // The list above reads from attendance_anomalies (GET /attendance/anomalies),
+    // not work_session_anomalies — resolving must hit the matching
+    // /attendance/anomalies/:id/resolve endpoint, or every resolve 404s
+    // (work_session_anomalies has a disjoint id space).
+    mutationFn: (id: string) => api.post(`/attendance/anomalies/${id}/resolve`, {}),
     onSuccess: () => {
       toast.success('Anomaly resolved.')
       qc.invalidateQueries({ queryKey: ['att-workspace-anomalies'] })
-      // Same underlying work_session_anomalies table backs the global Context
-      // Rail, Operational Inbox, and workflow-recommendations panels — keep
-      // them in sync too rather than leaving them stale for up to a minute.
+      // attendance_anomalies also backs the global Context Rail, Operational
+      // Inbox, and workflow-recommendations panels — keep them in sync too
+      // rather than leaving them stale for up to a minute.
       qc.invalidateQueries({ queryKey: ['attendance', 'anomalies-unresolved'] })
       qc.invalidateQueries({ queryKey: ['operational-inbox'] })
       qc.invalidateQueries({ queryKey: ['workflow-recs'] })
@@ -845,8 +849,11 @@ function TabApprovals() {
 
   const { data: requests, isLoading } = useQuery<RegularisationRequest[]>({
     queryKey:  ['att-workspace-approvals'],
-    queryFn:   () =>
-      api.get<{ data: RegularisationRequest[] }>('/attendance/regularisation?status=pending').then(r => r.data),
+    // GET /attendance/regularisation (bare, no suffix) doesn't exist — only
+    // POST is registered there. The pending-requests list lives at
+    // /attendance/regularisation/pending and returns the array directly
+    // (not wrapped in { data }).
+    queryFn:   () => api.get<RegularisationRequest[]>('/attendance/regularisation/pending'),
     staleTime: 30_000,
   })
 

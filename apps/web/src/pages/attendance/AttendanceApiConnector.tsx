@@ -531,6 +531,11 @@ export function AttendanceApiConnector() {
     try {
       await api.post(`/attendance/api-sources/${id}/test`)
       qc.invalidateQueries({ queryKey: ['attendance-api-sources'] })
+    } catch (e: unknown) {
+      // Previously uncaught — a failed row-level test (bad credentials,
+      // unreachable endpoint, 500) threw an unhandled rejection with zero
+      // user feedback: the button just stopped spinning as if it worked.
+      toast.error('Connection test failed', { description: e instanceof Error ? e.message : undefined })
     } finally {
       setTestingId(null)
     }
