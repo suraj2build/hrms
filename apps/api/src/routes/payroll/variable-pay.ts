@@ -227,7 +227,7 @@ export default async function variablePayRoutes(fastify: FastifyInstance) {
     // sibling arrears batch's /records guard.
     const { data: batch, error: batchErr } = await fastify.supabase
       .from('variable_payout_batches')
-      .select('id, status')
+      .select('id, status, payout_month')
       .eq('id', id).eq('tenant_id', req.tenantId).maybeSingle()
     if (batchErr) return serverError(req, reply, batchErr, ErrorCode.QUERY_FAILED, 'Failed to verify payout batch')
     if (!batch) return reply.code(404).send({ error: 'NOT_FOUND', message: 'Batch not found' })
@@ -259,12 +259,19 @@ export default async function variablePayRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'VALIDATION_ERROR', message: `employee_id ${invalidPayoutEmployeeId} not found in your organisation` })
     }
 
+    // payout_month is NOT NULL on variable_payouts (migration 102) but was
+    // never set here, and variable_payouts has no created_by column at all
+    // (unlike variable_payout_batches, which does) — every call to this
+    // endpoint has always failed with either a NOT NULL violation or
+    // "column does not exist", which is the real reason there was "no way
+    // to populate payout rows": the endpoint itself was broken, not just
+    // unreachable from the UI (SYSTEM_AUDIT_2026-10-14 checkpoint 30).
     const payoutRows = parsed.data.payouts.map(p => ({
       ...p,
       batch_id: id,
       tenant_id: req.tenantId,
+      payout_month: (batch as any).payout_month,
       status: 'pending',
-      created_by: req.userId,
     }))
 
     const { data: insertedPayouts, error: payErr } = await fastify.supabase

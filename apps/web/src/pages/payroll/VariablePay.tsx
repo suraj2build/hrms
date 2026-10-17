@@ -9,7 +9,7 @@ import { useState, useEffect }                     from 'react'
 import { useQuery, useMutation, useQueryClient }   from '@tanstack/react-query'
 import {
   Loader2, RefreshCw, Plus, CheckCircle2,
-  Eye, BadgeCheck,
+  Eye, BadgeCheck, Trash2,
 } from 'lucide-react'
 
 import { PageContainer }  from '@/components/layout/PageContainer'
@@ -20,6 +20,7 @@ import { Button }         from '@/components/ui/button'
 import { Badge }          from '@/components/ui/badge'
 import { Input }          from '@/components/ui/input'
 import { Label }          from '@/components/ui/label'
+import { EmployeeSelector } from '@/components/filters/EmployeeSelector'
 import {
   Dialog,
   DialogContent,
@@ -69,16 +70,23 @@ interface PayrollRunOption {
 }
 
 interface VariablePayout {
-  id:               string
-  batch_id:         string
-  employee_id:      string
-  base_amount:      number
-  performance_score: number | null
-  multiplier:       number
-  final_payout:     number
-  approved:         boolean
-  employee_name?:   string
-  employee_code?:   string
+  id:                 string
+  batch_id:           string
+  employee_id:        string
+  amount:             number
+  is_taxable:         boolean
+  performance_period: string | null
+  performance_notes:  string | null
+  status:             'pending' | 'approved' | 'processed' | 'cancelled'
+  payroll_run_id:     string | null
+  created_at:         string
+  // Embedded by GET /batches/:id/payouts's `select('*, employees(...)')` —
+  // this page previously read flat `employee_name`/`employee_code` fields
+  // the API has never sent, and non-existent `base_amount`/`multiplier`/
+  // `final_payout`/`approved` columns (real table: variable_payouts,
+  // migration 102) — every payout row always showed "—" here, and there was
+  // no form to add a payout in the first place (checkpoint 30, SYSTEM_AUDIT).
+  employees?:         { id: string; first_name: string; last_name: string; employee_code: string } | null
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -187,6 +195,14 @@ function CreateBatchDialog({
 
 // ── Payouts Dialog ─────────────────────────────────────────────────────────────
 
+interface PendingPayoutRow {
+  key: string
+  employee_id: string
+  employee_label: string
+  amount: string
+  performance_period: string
+}
+
 function PayoutsDialog({
   open,
   batch,
@@ -197,11 +213,76 @@ function PayoutsDialog({
   onClose: () => void
 }) {
   const qc = useQueryClient()
+  const [pendingRows, setPendingRows] = useState<PendingPayoutRow[]>([])
+  const [rowEmployee, setRowEmployee] = useState<string>('')
+  const [rowAmount, setRowAmount] = useState('')
+  const [rowPeriod, setRowPeriod] = useState('')
 
   const { data: payouts = [], isLoading } = useQuery<VariablePayout[]>({
     queryKey: ['vp-payouts', batch?.id],
     queryFn:  () => api.get<{ data: VariablePayout[] }>(`/payroll/variable-pay/batches/${batch!.id}/payouts`).then(r => r.data),
     enabled:  open && !!batch,
+  })
+
+  useEffect(() => {
+    if (!open) {
+      setPendingRows([])
+      setRowEmployee('')
+      setRowAmount('')
+      setRowPeriod('')
+    }
+  }, [open])
+
+  const existingEmployeeIds = payouts.map(p => p.employee_id)
+  const pendingEmployeeIds  = pendingRows.map(r => r.employee_id)
+  // variable_payouts has UNIQUE(tenant_id, batch_id, employee_id) — an
+  // employee can have at most one payout line per batch. Exclude both
+  // already-saved and already-queued employees from the picker so the
+  // 23505 can't be hit from this form.
+  const excludeFromPicker = [...existingEmployeeIds, ...pendingEmployeeIds]
+  const canAddPayouts = batch && ['draft', 'in_review'].includes(batch.status)
+
+  async function handleAddRow() {
+    if (!rowEmployee || !rowAmount || Number(rowAmount) <= 0) return
+    let label = rowEmployee
+    try {
+      const res = await api.get<{ data: Array<{ id: string; first_name: string; last_name: string; employee_code?: string }> }>(
+        `/employees/options?ids=${encodeURIComponent(rowEmployee)}`,
+      )
+      const emp = res.data?.[0]
+      if (emp) label = `${emp.employee_code ?? ''} — ${emp.first_name ?? ''} ${emp.last_name ?? ''}`.trim()
+    } catch { /* fall back to raw id if lookup fails */ }
+    setPendingRows(rows => [
+      ...rows,
+      { key: `${rowEmployee}-${Date.now()}`, employee_id: rowEmployee, employee_label: label, amount: rowAmount, performance_period: rowPeriod },
+    ])
+    setRowEmployee('')
+    setRowAmount('')
+    setRowPeriod('')
+  }
+
+  function removeRow(key: string) {
+    setPendingRows(rows => rows.filter(r => r.key !== key))
+  }
+
+  const addPayouts = useMutation({
+    mutationFn: () =>
+      api.post(`/payroll/variable-pay/batches/${batch!.id}/payouts`, {
+        payouts: pendingRows.map(r => ({
+          employee_id: r.employee_id,
+          amount: Number(r.amount),
+          performance_period: r.performance_period || undefined,
+        })),
+      }),
+    onSuccess: () => {
+      toast.success(`${pendingRows.length} payout(s) added`)
+      qc.invalidateQueries({ queryKey: ['vp-payouts', batch?.id] })
+      qc.invalidateQueries({ queryKey: ['vp-batches'] })
+      setPendingRows([])
+    },
+    onError: (e: Error) => {
+      toast.error('Failed to add payouts', { description: e.message })
+    },
   })
 
   const submitBatch = useMutation({
@@ -249,30 +330,30 @@ function PayoutsDialog({
                 <thead className="sticky top-0 bg-background">
                   <tr className="border-b border-border text-muted-foreground">
                     <th className="text-left py-3 px-4 font-medium">Employee</th>
-                    <th className="text-right py-3 px-4 font-medium">Base Amount</th>
-                    <th className="text-right py-3 px-4 font-medium">Score</th>
-                    <th className="text-right py-3 px-4 font-medium">Multiplier</th>
-                    <th className="text-right py-3 px-4 font-medium">Final Payout</th>
-                    <th className="text-center py-3 px-4 font-medium">Approved</th>
+                    <th className="text-left py-3 px-4 font-medium">Period</th>
+                    <th className="text-right py-3 px-4 font-medium">Amount</th>
+                    <th className="text-center py-3 px-4 font-medium">Taxable</th>
+                    <th className="text-center py-3 px-4 font-medium">Status</th>
                   </tr>
                 </thead>
                 <tbody>
                   {payouts.map(p => (
                     <tr key={p.id} className="border-b border-border hover:bg-muted/40 transition-colors">
                       <td className="py-3 px-4">
-                        <div className="font-medium text-foreground">{p.employee_name ?? p.employee_code ?? '—'}</div>
-                        {p.employee_code && (
-                          <div className="text-xs text-muted-foreground">{p.employee_code}</div>
+                        <div className="font-medium text-foreground">
+                          {p.employees ? `${p.employees.first_name} ${p.employees.last_name}` : '—'}
+                        </div>
+                        {p.employees?.employee_code && (
+                          <div className="text-xs text-muted-foreground">{p.employees.employee_code}</div>
                         )}
                       </td>
-                      <td className="py-3 px-4 text-right text-foreground">{fmt(p.base_amount)}</td>
-                      <td className="py-3 px-4 text-right text-foreground">
-                        {p.performance_score != null ? p.performance_score : '—'}
-                      </td>
-                      <td className="py-3 px-4 text-right text-foreground">{p.multiplier}×</td>
-                      <td className="py-3 px-4 text-right font-medium text-foreground">{fmt(p.final_payout)}</td>
+                      <td className="py-3 px-4 text-foreground">{p.performance_period || '—'}</td>
+                      <td className="py-3 px-4 text-right font-medium text-foreground">{fmt(p.amount)}</td>
                       <td className="py-3 px-4 text-center">
-                        <input type="checkbox" checked={p.approved} readOnly className="h-4 w-4" />
+                        <input type="checkbox" checked={p.is_taxable} readOnly className="h-4 w-4" />
+                      </td>
+                      <td className="py-3 px-4 text-center">
+                        <Badge variant={p.status === 'cancelled' ? 'secondary' : 'outline'}>{labelify(p.status)}</Badge>
                       </td>
                     </tr>
                   ))}
@@ -280,9 +361,57 @@ function PayoutsDialog({
               </table>
             </div>
           )}
+
+          {canAddPayouts && (
+            <div className="rounded-md border border-border p-3 space-y-3">
+              <p className="text-sm font-medium text-foreground">Add payout</p>
+              <div className="grid grid-cols-1 sm:grid-cols-[2fr_1fr_1fr_auto] gap-2 items-end">
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">Employee</label>
+                  <EmployeeSelector value={rowEmployee} onChange={v => setRowEmployee(v as string)} excludeIds={excludeFromPicker} placeholder="Search by name or code…" />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">Amount</label>
+                  <Input type="number" min="0" step="0.01" value={rowAmount} onChange={e => setRowAmount(e.target.value)} placeholder="0.00" />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">Period (optional)</label>
+                  <Input value={rowPeriod} onChange={e => setRowPeriod(e.target.value)} placeholder="e.g. Q1 2026" />
+                </div>
+                <Button variant="outline" onClick={handleAddRow} disabled={!rowEmployee || !rowAmount || Number(rowAmount) <= 0}>
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </div>
+
+              {pendingRows.length > 0 && (
+                <div className="space-y-2">
+                  <ul className="divide-y divide-border rounded-md border border-border">
+                    {pendingRows.map(r => (
+                      <li key={r.key} className="flex items-center justify-between px-3 py-2 text-sm">
+                        <span className="text-foreground">{r.employee_label}{r.performance_period ? ` · ${r.performance_period}` : ''}</span>
+                        <div className="flex items-center gap-3">
+                          <span className="font-medium text-foreground">{fmt(Number(r.amount))}</span>
+                          <button type="button" onClick={() => removeRow(r.key)} className="text-muted-foreground hover:text-destructive">
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="flex justify-end">
+                    <Button onClick={() => addPayouts.mutate()} disabled={addPayouts.isPending}>
+                      {addPayouts.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                      Save {pendingRows.length} Payout{pendingRows.length > 1 ? 's' : ''}
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {batch && batch.status === 'draft' && (
             <div className="flex justify-end pt-2">
-              <Button onClick={() => submitBatch.mutate()} disabled={submitBatch.isPending}>
+              <Button onClick={() => submitBatch.mutate()} disabled={submitBatch.isPending || batch.employee_count === 0} title={batch.employee_count === 0 ? 'Add at least one payout before submitting' : undefined}>
                 {submitBatch.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 Submit for Review
               </Button>

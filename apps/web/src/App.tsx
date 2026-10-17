@@ -291,6 +291,7 @@ const LoansAndAdvances      = lazy(() => import('@/pages/payroll/LoansAndAdvance
 const Reimbursements        = lazy(() => import('@/pages/payroll/Reimbursements').then(m => ({ default: m.Reimbursements })))
 const VariablePay           = lazy(() => import('@/pages/payroll/VariablePay').then(m => ({ default: m.VariablePay })))
 const ArrearEngine          = lazy(() => import('@/pages/payroll/ArrearEngine').then(m => ({ default: m.ArrearEngine })))
+const AdjustmentsQueue      = lazy(() => import('@/pages/payroll/AdjustmentsQueue').then(m => ({ default: m.AdjustmentsQueue })))
 // Statutory
 const EPFManagement         = lazy(() => import('@/pages/payroll/statutory/EPFManagement').then(m => ({ default: m.EPFManagement })))
 const ESIManagement         = lazy(() => import('@/pages/payroll/statutory/ESIManagement').then(m => ({ default: m.ESIManagement })))
@@ -898,6 +899,7 @@ export default function App() {
                 <Route path="/admin/payroll/fbp"                      element={<FbpReconciliation />} />
                 <Route path="/admin/payroll/variable-pay"             element={<VariablePay />} />
                 <Route path="/admin/payroll/arrears"                  element={<ArrearEngine />} />
+                <Route path="/admin/payroll/adjustments"              element={<AdjustmentsQueue />} />
                 {/* Statutory */}
                 <Route path="/admin/payroll/statutory/epf"            element={<EPFManagement />} />
                 <Route path="/admin/payroll/statutory/esi"            element={<ESIManagement />} />

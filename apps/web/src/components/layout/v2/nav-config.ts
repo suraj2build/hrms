@@ -485,6 +485,7 @@ export const DOMAINS: Domain[] = [
           { id: 'fbp-recon',      label: 'FBP Reconciliation',  route: '/admin/payroll/fbp',            icon: Receipt,    keywords: ['FBP', 'flexible benefit plan', 'flexi benefit', 'FBP declaration', 'flexible pay', 'flexi pay'] },
           { id: 'variable-pay',   label: 'Variable Pay',        route: '/admin/payroll/variable-pay',   icon: TrendingUp, keywords: ['incentive', 'bonus', 'performance pay', 'variable component', 'incentive pay'] },
           { id: 'arrears',        label: 'Arrear Payments',     route: '/admin/payroll/arrears',        icon: RotateCcw,  keywords: ['arrear', 'back pay', 'retroactive pay', 'previous month', 'pending salary'] },
+          { id: 'adjustments',    label: 'Payroll Adjustments', route: '/admin/payroll/adjustments',    icon: ClipboardList, keywords: ['adjustment', 'frozen period', 'locked period', 'retroactive correction', 'LOP correction', 'statutory correction'] },
         ],
       },
       {
