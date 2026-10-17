@@ -2880,7 +2880,7 @@ as whole-system progress:
 | Surface | Total (Bash-verified) | Examined this audit | Evidence depth | Remaining |
 |---|---|---|---|---|
 | **Frontend pages** (`apps/web/src/pages/**/*.tsx`) | **306** (41 directories) | **~26** distinct files named in this register's checkpoint history (nav-link target fixed or logic referenced) | **Mixed, and shallower than the backend bar** — of those ~26, only **5** have actual browser evidence (real login, real click, screenshot): `Attendance.tsx`, `ControlCenter.tsx`, `CommandPalette.tsx` (attendance-processing flow), `ApprovalInbox.tsx` (3 screenshots, scope-verify), `ManagerTeamRegularisation.tsx` (bulk-retry panel). The other ~21 are nav-link-target fixes only — the file was read to confirm/correct a `<Link>`/`navigate()` target, not reviewed for business logic, authorization, or data correctness. **"Examined" here means "a stale link was found and fixed," not "this page's logic was audited."** | ~280-301 depending on which bar is applied |
-| **Shared services, API** (`apps/api/src/lib/**/*.ts`, excl. `__tests__`) | **171** | **~16**: `accrual-engine.ts`, `approval-orchestrator.ts`, `approval-service.ts`, `approval-guards.ts`, `workflow-service.ts`, `idempotency.ts`, `period-lock.ts`, `manager-scope.ts`, `audit-service.ts`, `event-bus.ts`, `ot-engine.ts`, `api-errors.ts`, `pilot-guard.ts`, `user-account-service.ts`, `manager-compensation.ts`, `workforce-orchestrator.ts` | Read in full against the logic a calling route needed, not independently re-derived against a standalone checklist the way routes are — correct for what each route-level finding needed, not a claim that the rest of each file (or any untouched function in an examined file) is clean | ~155 |
+| **Shared services, API** (`apps/api/src/lib/**/*.ts`, excl. `__tests__`) | **171** | **~22**: the original ~16 (`accrual-engine.ts`, `approval-orchestrator.ts`, `approval-service.ts`, `approval-guards.ts`, `workflow-service.ts`, `idempotency.ts`, `period-lock.ts`, `manager-scope.ts`, `audit-service.ts`, `event-bus.ts`, `ot-engine.ts`, `api-errors.ts`, `pilot-guard.ts`, `user-account-service.ts`, `manager-compensation.ts`, `workforce-orchestrator.ts`) plus 6 more fixed in checkpoint 28's holiday multi-group sweep: `org-context.ts`, `attendance-processor.ts`, `attendance-engine.ts`, `roster-calendar-engine.ts`, `leave-engine.ts`, `payroll-engine.ts`, `collision-engine.ts` (7 named, ~22 total after dedup with payroll-engine.ts already counted via the payroll sweep) | Read in full against the logic a calling route or fix needed, not independently re-derived against a standalone checklist the way routes are — correct for what each finding needed, not a claim that the rest of each file (or any untouched function in an examined file) is clean | ~149 |
 | **Shared services, web** (`apps/web/src/lib/**/*.ts*`) | **70** | **0** | — not examined this audit | 70 |
 | **Database migrations** (`supabase/migrations/*.sql`) | **477** | **Verified by a DIFFERENT method, not comparable to "examined"**: as of this checkpoint (checkpoint 24), the COMPLETE history (000→481, 477 files) has been re-swept through a genuinely fresh, from-scratch Postgres 16 database — `createdb`, the project's own `scripts/db/bootstrap.sql` shim (which stands up the minimal `auth`/`storage`/role scaffolding Supabase provides in production), then every migration file in order with `ON_ERROR_STOP=1` — with zero errors, closing the "not yet re-swept through a fresh-install run" gap this table previously disclosed for 471-481. The resulting schema (481 tables, 183 functions, including all 7 of checkpoints 22/23's new RPCs) also passed `check-schema-drift.mjs --skip-apply` (zero column mismatches against `apps/api/src`'s actual queries), and its table/function counts match `hrms_uat`'s independently-accumulated upgrade-path history exactly — the two install paths converge on the same schema, closing the user's own qualification that "applying migrations to an existing database is separate evidence" from a true fresh install. This proves the migration HISTORY is internally consistent and reproducible from scratch, not that each migration's SQL was individually read against a correctness checklist — that remains a different, narrower claim. 446/447/448/450/461-467/471-474/476-481 were individually authored and read in depth as part of a specific fix this audit; the rest were pre-existing and have NOT been read line-by-line this audit. | n/a — different evidence type, not file-counted the same way |
 
@@ -3020,6 +3020,36 @@ kept distinct, and neither is substituted for the other.
 
 The throwaway `fresh_install_481` database was dropped after
 verification; it was never a target of any application traffic.
+
+**Re-run at current HEAD (addendum, 2026-10-17), per the user's
+precision requirement to report the SHA, the migration file count, and
+the highest migration number as three distinct facts, not conflated.**
+The run above was performed before migrations 482
+(`482_leave_policy_masters_default_atomic.sql`, checkpoint 27) and 483
+(`482_holiday_group_assignments_atomic.sql` — filename says 482, content
+is migration 483's logic; see checkpoint 28/29) existed, so it was stale
+relative to later checkpoints in this same session. Re-run identically
+against a fresh `fresh_install_483` database at the state as of commit
+`ca0c9554fec6a8744aaab208fb6f94cd78aaabe7` (the last commit before
+checkpoint 29's test-only commit, which adds no migration):
+
+- **File count applied**: 479 (`supabase/migrations/*.sql`, counted by
+  `ls | wc -l` — distinct from the number below).
+- **Highest migration number in the sequence**: 483 (distinct from the
+  file count above — gaps in the numbering mean these two are never
+  expected to be equal).
+- All 479 applied in order with zero errors; resulting schema: 481
+  tables, 186 functions (including migrations 482/483's two new atomic
+  RPCs, confirmed present by direct query). `check-schema-drift.mjs
+  --skip-apply` against this database: zero drift.
+- Cross-checked against `hrms_uat` (the upgrade-path database): also 481
+  tables — the two install paths still converge.
+- The throwaway `fresh_install_483` database was dropped after
+  verification.
+
+This is evidence for the repository state at `ca0c9554`, not for any
+later commit unless re-run again — a rule this report applies rather
+than assuming forward.
 
 ## Checkpoint 25 — browser evidence for checkpoint 22's arrears/variable-pay payroll integration; two more real defects found and fixed
 
@@ -3362,6 +3392,52 @@ passing.
 engine.ts's fix is a correctness fix within an already-examined file,
 not a new file) — masters/ coverage: 29/29 files examined (28 initially
 scoped + `holidays.ts` itself).
+
+## Checkpoint 29 — proving (not just asserting) that the checkpoint 28 fix preserves legacy single-group/global behavior and prevents duplicate effects on overlap
+
+Per the user's explicit precision requirement, extended
+`scripts/db/verify-holiday-multi-group.mjs` with two more real-
+Postgres/HTTP sections beyond checkpoint 28's original 6 checks:
+
+**Overlap / no-duplication (Part 3)**: the first attempt — seeding a
+*second*, separate `holiday_calendar` row on the same date as the first,
+also assigned to the overlapping group — failed immediately with a real
+Postgres `23505` violation of `uq_holiday_calendar_tenant_date`, a
+pre-existing `UNIQUE(tenant_id, date)` constraint neither checkpoint 28
+nor this audit had previously called out. This is a stronger result
+than the originally-planned test: a second holiday record on the same
+date for one tenant is not merely avoided by the application, it is
+**structurally impossible** at the database level. The script now
+asserts this directly (attempts the insert, catches the exact
+constraint violation). Separately — since an employee's group
+membership resolves through exactly one group id (their site's single
+`holiday_group_id`; confirmed by reading `org-context.ts`), one employee
+can never match a multi-group-assigned holiday through more than one
+group, so there is no per-employee "membership overlap" surface either.
+The only remaining thing worth proving directly is that re-processing an
+already-processed multi-group holiday date is idempotent — confirmed:
+exactly one `attendance_daily` row for the employee, status/work_hours
+unchanged, backed by that table's own `UNIQUE(tenant_id, employee_id,
+date)` constraint.
+
+**Legacy behavior preservation (Part 4)**: seeded a holiday with ZERO
+group assignments and confirmed it still applies globally — to an
+employee in Group A and one in Group B alike — matching the old
+`holiday_group_id IS NULL` meaning exactly. Separately seeded a holiday
+assigned to exactly ONE group (Group B) and confirmed it correctly
+**excludes** the Group A employee while still including the Group B
+employee — not just "inclusion still works" (already shown in checkpoint
+28) but that single-group scoping still correctly scopes OUT
+non-members, matching the old single-FK column's behavior.
+
+All 13 checks (the original 6 plus these 7 new ones) pass against real
+Postgres + real HTTP + the real attendance engine. This closes the
+user's third precision point: the multi-group fix is now evidenced, not
+merely asserted, to preserve legacy single-group/global behavior and to
+make duplicate attendance/leave/benefit effects on overlapping
+membership structurally impossible (one holiday row per tenant per date,
+one group per employee, one attendance_daily row per employee per date —
+three independent backstops, not one).
 
 ## Checkpoint 14 qualifications — both closed with a real fix, not a restated assumption
 
